@@ -1,0 +1,61 @@
+import 'package:flutter/foundation.dart';
+
+@immutable
+class Evento {
+  const Evento({
+    required this.id,
+    required this.titulo,
+    this.descripcion,
+    required this.iniciaEn,
+    this.terminaEn,
+    this.todoElDia = false,
+    this.ubicacion,
+    this.cursoId,
+    this.proyectoId,
+    this.color,
+    this.recordarEn,
+    required this.creadoEn,
+    required this.actualizadoEn,
+  });
+
+  final String id;
+  final String titulo;
+  final String? descripcion;
+  final DateTime iniciaEn;
+  final DateTime? terminaEn;
+  final bool todoElDia;
+  final String? ubicacion;
+  final String? cursoId;
+  final String? proyectoId;
+  final String? color;
+  final DateTime? recordarEn;
+  final DateTime creadoEn;
+  final DateTime actualizadoEn;
+
+  bool ocurreEn(DateTime dia) {
+    final ini = iniciaEn.toLocal();
+    final iniDia = DateTime(ini.year, ini.month, ini.day);
+    final esteDia = DateTime(dia.year, dia.month, dia.day);
+    return iniDia.isAtSameMomentAs(esteDia);
+  }
+
+  factory Evento.fromJson(Map<String, dynamic> json) => Evento(
+        id: json['id'] as String,
+        titulo: json['titulo'] as String,
+        descripcion: json['descripcion'] as String?,
+        iniciaEn: DateTime.parse(json['inicia_en'] as String),
+        terminaEn: json['termina_en'] == null
+            ? null
+            : DateTime.parse(json['termina_en'] as String),
+        todoElDia: json['todo_el_dia'] as bool? ?? false,
+        ubicacion: json['ubicacion'] as String?,
+        cursoId: json['curso_id'] as String?,
+        proyectoId: json['proyecto_id'] as String?,
+        color: json['color'] as String?,
+        recordarEn: json['recordar_en'] == null
+            ? null
+            : DateTime.parse(json['recordar_en'] as String),
+        creadoEn: DateTime.parse(json['creado_en'] as String),
+        actualizadoEn: DateTime.parse(json['actualizado_en'] as String),
+      );
+}

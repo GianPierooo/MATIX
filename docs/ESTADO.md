@@ -1,0 +1,591 @@
+# Estado de Matix
+
+Bitácora viva del proyecto. Si la sesión se reinicia, lee primero
+`CLAUDE.md`, después `docs/Mapa_del_Hub.md`, después
+`docs/Plan_Capa1.md` y por último este archivo para saber dónde
+estamos.
+
+Convención: el paso "en curso" tiene `→`, los terminados `✓`, los
+pendientes `·`.
+
+---
+
+## Capa actual
+
+**Capa 2 — Matix conversacional + voz + capacidad total** ·
+iniciada el 2026-05-26, en validación al cierre del Paso 5.1
+(2026-05-27).
+
+La Capa 1 quedó cerrada en sus features (hub funcional con CRUD
+manual + notificaciones) — su validación visual la fue haciendo
+el usuario en paralelo con la Capa 2.
+
+Pasos completados de Capa 2:
+
+- ✓ Paso 1 — Chat solo texto (cerrado 2026-05-26).
+- ✓ Paso 2 — Tool calling, primera tanda aditiva (cerrado 2026-05-26).
+- ✓ Paso 3 — Voz de entrada con Whisper (cerrado 2026-05-26).
+- ✓ Paso 4 — Modo manos libres con TTS (cerrado 2026-05-26).
+- ✓ Paso 5 — Hub indulgente + capacidad total + medidor (cerrado 2026-05-27).
+- ✓ Paso 5.1 — Correcciones: VAD, en pausa, OpenAI TTS onyx,
+       `consultar_uso`, filtro de alucinaciones, aislamiento de
+       tests, bugs banner/papelera (cerrado 2026-05-27).
+
+---
+
+## Avance por pasos
+
+- ✓ **Paso 1 — Cimientos** (cerrado 2026-05-24)
+  - ✓ Verificación de entorno (Python 3.14.5, uv 0.11.16, Flutter 3.41.9, Android SDK).
+  - ✓ Acceso a Supabase confirmado; proyecto existente vacío.
+  - ✓ `docs/Plan_Capa1.md` y `docs/ESTADO.md` creados.
+  - ✓ `supabase/migrations/0001_initial_schema.sql` con las 10 tablas, triggers y RLS.
+  - ✓ Esqueleto del cerebro (`cerebro/` con `pyproject.toml`, `app/main.py` `/health`, `app/config.py`, `.env.example`).
+  - ✓ Esqueleto de la app Flutter (`app/`).
+  - ✓ `.gitignore` raíz y `README.md` raíz.
+  - ✓ Migración aplicada al proyecto Supabase `matix` vía Management API.
+- ✓ **Paso 2 — Conexión BD ↔ Cerebro** (cerrado 2026-05-24)
+  - ✓ Cliente PostgREST `app/db.py` (httpx, lazy, `service_role`). En vez de `supabase-py` que en Windows arrastra `pyiceberg` con compilación nativa.
+  - ✓ Dependencia `require_api_key` (`app/security.py`) que valida `X-Matix-Key` → 401 si falla.
+  - ✓ Schemas Pydantic v2 (`Create` / `Update` / `Read`) para las 10 entidades: `profile`, `categorias`, `cursos`, `sesiones_clase`, `tareas`, `subtareas`, `evaluaciones`, `eventos`, `cuadernos`, `apuntes`.
+  - ✓ 10 routers CRUD bajo `/api/v1/...` con el mismo patrón (`GET` lista, `GET` por id, `POST` 201, `PATCH`, `DELETE` 204; 404 en inexistentes).
+  - ✓ Tests pytest de integración: 24/24 verde. Cubren el ciclo CRUD de las 10 entidades, auth (401), validación (422) en `tareas`, `profile`, `categorias`, `evaluaciones`, `sesiones_clase`, `apuntes`, y el `ON DELETE CASCADE` de `subtareas`.
+  - ✓ Smoke test con `curl` confirmado contra Supabase real (POST/PATCH/DELETE + UTF-8).
+- ✓ **Paso 3 — App: navegación y tema** (cerrado 2026-05-24, pendiente verificación visual del usuario)
+  - ✓ Design tokens extraídos y aprobados: colores (`bg #0B0F1A`, `card #161B2E`, `cardHi #1B2138`, `accent #2D7FF9`, semánticos), tipografía Inter + JetBrains Mono vía `google_fonts`, escala de radios (8/10/12/14/18/pill), 6 sombras nombradas, escala de espaciado de 2px.
+  - ✓ `app/lib/theme/`: `matix_colors.dart`, `matix_typography.dart`, `matix_radii.dart`, `matix_shadows.dart`, `matix_spacing.dart`, `matix_semantic_colors.dart` (ThemeExtension), `matix_theme.dart` (ThemeData M3 dark).
+  - ✓ Bottom nav (NavigationBar M3) con las 5 secciones + `IndexedStack` que preserva estado al cambiar de pestaña.
+  - ✓ Stubs por sección: `InicioScreen`, `TareasScreen`, `CalendarioScreen`, `UniversidadScreen`, `ApuntesScreen` con badge "Próximamente".
+  - ✓ Cliente HTTP `app/lib/api/matix_client.dart` (paquete `http`). Métodos `health/getList/getOne/post/patch/delete`. Inyecta header `X-Matix-Key`.
+  - ✓ Configuración por `--dart-define` (`app/lib/config.dart`): `MATIX_API_URL`, `MATIX_API_KEY`, `MATIX_ENV`. Default URL = `http://10.0.2.2:8000` (emulador Android).
+  - ✓ Ping al cerebro al arrancar (HomeShell `initState`): si falla, SnackBar con botón "Reintentar".
+  - ✓ Widget genérico `AsyncView<T>` para el patrón estándar cargando / error / vacío / con datos.
+  - ✓ `flutter analyze`: sin issues. `flutter test`: 2/2 verde (smoke + cambio de pestaña). `flutter build apk --debug`: OK.
+- ✓ **Paso 4 — Sección Tareas** *(plantilla)*
+  - ✓ **4.A — Backend de Proyectos** en el cerebro
+    (`/api/v1/proyectos`, tope de 3 activos como 409, coherencia
+    acción siguiente ↔ proyecto con auto-vinculación si la tarea está
+    libre, `inactivo_desde` automático, `ultima_actividad_en`
+    refrescado en cada PATCH). Tests: 18/18 verde, suite completa
+    42/42. Schemas de `tareas/apuntes/eventos` expuestos con
+    `proyecto_id`.
+  - ✓ **4.B — Sección Tareas en la app** con Riverpod.
+    Pubspec con `flutter_riverpod`, `riverpod_annotation`,
+    `riverpod_generator`, `build_runner`, `intl`. `ProviderScope`
+    envuelve el `MatixApp`. Estructura `app/lib/features/tareas/`
+    con `data/`, `domain/`, `providers/`, `presentation/`. Pantalla
+    `TareasListScreen` con 5 vistas (Hoy, Esta semana, Todas,
+    Completadas, Por curso). Bottom sheet de filtros con curso,
+    categoría, proyecto, prioridad, vencimiento. Pantalla
+    `NuevaTareaScreen` para crear y editar (modo edición incluye
+    subtareas inline). Vencidas resaltadas. `flutter analyze` sin
+    issues; APK instalado y corriendo en el Huawei del usuario.
+- ✓ Paso 5 — Sección Calendario (grid mensual + lista del día +
+  crear eventos con recordatorio).
+- ✓ Paso 6 — Sección Universidad MVP (lista cursos + detalle con
+  promedio + crear curso/evaluación).
+- ✓ Paso 7 — Sección Apuntes MVP (lista + editor con etiquetas).
+- ✓ Paso 8 — Sección Inicio (panel del día real).
+- ✓ Paso 9 — Sección Proyectos UI (lista + detalle + nuevo con
+  bloqueo del tope + cambio de estado).
+- ⏳ Paso 10 — Transversales (Ajustes hecho; FAB captura rápida
+  cubierto vía botón "Nueva tarea" en Tareas; búsqueda global
+  pendiente).
+- ✓ Paso 11 — Recordatorios y notificaciones locales (tareas,
+  eventos y evaluaciones). Pendientes finos: pedir permiso runtime
+  proactivo, probar e2e en teléfono real.
+- → Paso 12 — Cierre de Capa 1: APK debug + APK release listos en
+  `app/build/app/outputs/flutter-apk/`. Doc completa
+  `docs/Como_correr_Matix_desde_cero.md` con requisitos, setup,
+  arranque y troubleshooting. **Pendiente**: validación visual del
+  usuario en su Huawei + firma con keystore propio si quiere
+  publicar fuera de Play Console.
+
+---
+
+## Decisiones tomadas
+
+- 2026-05-26 — **Proveedor LLM para Capa 2: OpenAI**, no Claude. El
+  usuario ya tiene su `OPENAI_API_KEY` y prefiere un solo proveedor.
+  Decisión asociada: **la llamada al modelo vive en un único módulo
+  `cerebro/app/matix/llm.py`** que es el ÚNICO punto del cerebro que
+  importa `openai`. Esto permite que un futuro cambio de proveedor
+  (Claude, Gemini, modelo local) sea reescribir ese archivo y nada
+  más. El resto del cerebro recibe `dict`/`str` simples, no tipos del
+  SDK. Plan_Capa2.md actualizado con esa arquitectura.
+- 2026-05-23 — Proyecto Supabase nuevo creado: nombre `matix`,
+  `ref=jtxlkwhgqeubvgfwmwcd`, región `us-east-1`, organización
+  `MATIX`. El proyecto antiguo (`xapqlnyzblhnhnnvttyy`) se deja como
+  está; el usuario decide después si lo borra.
+- 2026-05-23 — RLS activada en las 10 tablas sin políticas; el
+  cerebro accede con `service_role`. La app nunca habla con
+  Supabase directamente.
+- 2026-05-23 — Recordatorios viven como columna inline
+  `recordar_en` en `tareas`, `evaluaciones` y `eventos` — no
+  hay tabla separada. Etiquetas de apuntes son `TEXT[]`.
+- 2026-05-24 — En `evaluaciones`, la columna de texto libre se llama
+  `descripcion` (no `nota`), para evitar confusión con
+  `nota_obtenida` / `nota_maxima`.
+- 2026-05-24 — Migración 0001 aplicada vía Management API
+  (`POST /v1/projects/{ref}/database/query`) con el access token —
+  `supabase db push` falló por la DB password y se cambió de canal.
+- 2026-05-24 — Capa 1 NO usa `supabase-py`: arrastra `pyiceberg`
+  con extensión Cython que necesita MSVC en Windows. El cerebro habla
+  directo con PostgREST vía `httpx` con el `service_role` key. Si más
+  adelante se necesita Storage o Realtime, se reintroduce el SDK
+  detrás de un wrapper limpio.
+- 2026-05-24 — Los tests del cerebro son de **integración real**
+  contra el proyecto Supabase `matix`, no contra mocks. Cada test
+  limpia las filas que crea (try/finally). Justificación: validar
+  el esquema, los triggers y el comportamiento de PostgREST sin
+  ilusiones de mock.
+- 2026-05-24 — Mockup `Curso Detalle.html` + `curso-detalle.jsx`
+  (23-may) descartado y movido a `mockups/_old/`. La versión
+  canónica del detalle de curso es `Detalle Curso.html` +
+  `detalle-curso.jsx` (24-may), que además alinea el nombre con el
+  patrón `Detalle X` / `Nueva X` del resto.
+- 2026-05-24 — Agregado al `Mapa_del_Hub.md` el bottom sheet de
+  filtros sobre Tareas (curso, categoría, prioridad, vencimiento).
+  No es funcionalidad nueva: viene en `mockups/Filtros.html` y se
+  documenta para que no quede como "asumido" al construir Tareas.
+- 2026-05-24 — En Capa 1 cada `profile` se trata como entidad CRUD
+  normal (la BD admite múltiples filas). La regla "una sola fila"
+  vive en la app móvil: la crea una vez al primer arranque. Si más
+  adelante hace falta, se agrega un endpoint `GET /profile/me` o
+  un constraint en la BD.
+- 2026-05-24 — Tokens visuales aprobados; sólo dark theme en Capa 1.
+  El outlier `cardHi #1F2542` de `modal-borrar.jsx` se normalizó al
+  estándar `#1B2138` para tener una sola fuente de verdad. Si hace
+  falta una variante explícita para modales sobre scrim, se agrega
+  como token aparte.
+- 2026-05-24 — Fuentes Inter y JetBrains Mono se cargan vía paquete
+  `google_fonts` (descarga + caché en disco), no como TTFs
+  embebidos. Pro: cero archivos en el repo; contra: la primera
+  carga necesita red. Si más adelante molesta el flash inicial, se
+  cambia a TTFs en `assets/fonts/`.
+- 2026-05-24 — Capa 1 no usa librería de estado todavía
+  (`provider` / `riverpod` / `bloc`). Las pantallas son
+  `StatefulWidget` + `FutureBuilder` vía `AsyncView<T>`. Si al
+  llegar al Paso 4 (Tareas con filtros/edición) se vuelve
+  incómodo, se introduce el state mgmt antes de los siguientes
+  pasos.
+- 2026-05-25 — **State management**: Riverpod entra desde el inicio
+  del Paso 4.B (no se empieza con `StatefulWidget+FutureBuilder` para
+  migrar después — sería propagar churn). Se usa el patrón **clásico**
+  (`Provider`, `FutureProvider`, `NotifierProvider`) en lugar de
+  codegen con `@riverpod` — mismo Riverpod, sin tener que correr
+  `build_runner` antes de cada `flutter build`. Las deps
+  `riverpod_annotation` y `riverpod_generator` quedan en el `pubspec`
+  por si se decide migrar a anotaciones más adelante.
+- 2026-05-25 — `ultima_actividad_en` de `proyectos` se asigna desde
+  el cerebro (Python `datetime.now()`) tanto en POST como en PATCH,
+  no se delega al `default now()` de Postgres. Razón: el reloj del
+  cerebro y el de Supabase pueden discrepar por segundos y la
+  comparación de strings ISO 8601 puede salir "al revés"; con el
+  cerebro asignándolo en ambos lados, las comparaciones son
+  monotónicas. `creado_en` y `actualizado_en` siguen viniendo del
+  reloj de Postgres como antes — no se comparan con timestamps del
+  cerebro.
+- 2026-05-26 — **Dos fixes críticos para APK release** (descubiertos
+  al instalar la release en el Huawei real):
+  1. **INTERNET permission faltante en release**. Flutter SOLO
+     añade `android.permission.INTERNET` automáticamente en builds
+     debug y profile (vía `android/app/src/debug/AndroidManifest.xml`
+     y `src/profile/AndroidManifest.xml`). El manifest **main** lo
+     necesita explícito o la APK release no puede abrir sockets →
+     `SocketException: Operation not permitted (errno=1)` en cada
+     request. Añadido al manifest principal.
+  2. **Cleartext HTTP a localhost bloqueado**. Android 9+ bloquea
+     cleartext por política de seguridad. Creado
+     `res/xml/network_security_config.xml` que permite cleartext
+     SOLO para `localhost`, `127.0.0.1`, `10.0.2.2` (dominios de
+     desarrollo). El resto sigue exigiendo HTTPS — sin debilitar la
+     app cuando Capa 2 hable con Anthropic/Supabase.
+  Tras los dos fixes la APK release carga datos del seed en
+  Inicio, Proyectos, Tareas, Universidad y Calendario sin errores.
+- 2026-05-26 — **Cierre final de Capa 1**. Tres mejoras grandes
+  cierran la mecánica del Documento Maestro:
+  - **Acción siguiente del proyecto en UI**: `DetalleProyectoScreen`
+    muestra la tarea siguiente como bloque destacado con dos botones
+    (Marcar hecha → abre selector próxima · Cambiar). El selector
+    es un bottom sheet con las tareas pendientes del proyecto.
+  - **Detección de choques de horario**: módulo `domain/choque.dart`
+    con `seSolapan(...)` puro (6 tests). Integrado en
+    `CalendarioScreen` — eventos que pisan otras filas (eventos o
+    clases recurrentes) salen con badge rojo CHOQUE + fondo rojo
+    suave. El caso del Documento Maestro (clase L/Mi 20:15–21:45 vs
+    box 21:00–22:00) se detecta solo.
+  - **Cierres pasados colapsables**: sección al final de
+    `CierreDiaScreen` con histórico (hasta 30) — fecha, items con
+    check verde, nota extra en cursiva. Colapsada por defecto.
+  Doc nueva `docs/Como_correr_Matix_desde_cero.md` con guía
+  completa para levantar Matix desde una PC nueva.
+  Tests: cerebro 46/46, flutter 19/19.
+- 2026-05-26 — **Notificación diaria del cierre del día**. Nuevo
+  método `programarDiaria` en `NotificacionesService` usa
+  `matchDateTimeComponents: DateTimeComponents.time` para que el
+  plugin la repita cada día a las 21:30 sin tener que reprogramarla.
+  Toggle en `AjustesScreen` → sección "Rituales" → Switch
+  "Recordarme el cierre del día". Id estable `1001` para poder
+  cancelarla sin persistir nada (se detecta si está activa
+  preguntando a `pendientes()`). Limpieza colateral:
+  `mockups/_old/` borrado.
+- 2026-05-26 — Mockup `inicio.jsx` repulido con datos reales:
+  header con 5 iconos (lupa, calendario, apuntes, **luna del
+  cierre**, ajustes), MatixCard con alerta de Shadows Games en
+  riesgo, "Para hoy" / "Próximas entregas" / "Tu día" con cursos
+  reales del DM y horario del martes. `Mapa_del_Hub.md` añade
+  sección 8 (Cierre del día) y detalle del acceso a Búsqueda.
+  `CLAUDE.md` §4 sincronizado.
+- 2026-05-25 — **Datos demo cargados + bug crítico cazado**.
+  Script `cerebro/scripts/seed_demo.py` (idempotente por nombre)
+  pre-pobló la BD del proyecto matix con los datos del Documento
+  Maestro: 7 cursos universitarios, 13 sesiones del horario semanal
+  exacto, 3 categorías generales y los 3 proyectos activos +
+  3 aparcados (Matix #1, OnExotic #2, Shadows Games #3 / Peyo,
+  Idiomas, Automatizaciones). De paso destapó que el endpoint del
+  cerebro era `/sesiones-clase` (con guión), no `/sesiones_clase`,
+  y mi `CursosRepository` en Flutter usaba el path equivocado. Sin
+  este fix, las sesiones recurrentes en el Calendario nunca habrían
+  cargado. Arreglado en ambos lados.
+- 2026-05-25 — **Cierre del día (ritual nocturno)** del Documento
+  Maestro sección 7. Migración 0003 con tabla `cierres_dia` (fecha
+  unique, items text[], nota_extra opcional). Endpoint
+  `/api/v1/cierres_dia` con UPSERT: POST a una fecha ya cerrada
+  actualiza el cierre existente, no duplica. Pantalla
+  `CierreDiaScreen` accesible desde el icono de luna en Inicio:
+  campos numerados (mínimo 1, sugerencia 3), botón "Añadir otra",
+  espacio para "Algo que te haya rondado". Tono empático: "No
+  tiene que ser épico. Cualquier paso real cuenta." Test cerebro
+  cubre CRUD + UPSERT (46/46 verde).
+- 2026-05-25 — **Segunda mega-tirada**:
+  - **Búsqueda global** (`features/busqueda/`): pantalla con
+    TextField + resultados agrupados (Proyectos, Tareas, Apuntes,
+    Cursos), filtro en cliente sobre providers cacheados. Acceso
+    desde el icono lupa en Inicio.
+  - **Sesiones de clase recurrentes en Calendario**: las clases del
+    horario semanal aparecen en el calendario sin que el usuario
+    cree eventos. Domain `SesionClase` + repositorio + provider
+    `sesionesDelDiaProvider`. Cards marcadas con badge "SEMANAL".
+  - **Repetición de tareas al completar** (cerebro): al marcar como
+    completada una tarea con `repeticion` (diaria/semanal/mensual/
+    anual), el cerebro crea automáticamente la próxima instancia
+    con `vence_en` y `recordar_en` desplazados. 2 tests nuevos
+    verifican el comportamiento. 45/45 verde en cerebro.
+  - **UX pulidos**: validación `recordar_en < vence_en` en
+    `NuevaTareaScreen`; pedir permiso runtime de notificaciones
+    proactivamente la primera vez que se programa una notif
+    (tareas, eventos y evaluaciones); cuerpo de notif ya legible
+    con vencimiento humano.
+- 2026-05-25 — **Mega-tirada autónoma**: construidos Pasos 5, 6, 7,
+  8, 9 + extensión 11 + apertura 10. Estructura agregada:
+  `features/proyectos/`, `features/eventos/`, `features/cursos/`,
+  `features/evaluaciones/`, `features/universidad/`,
+  `features/apuntes/`. Pantallas nuevas: ProyectosListScreen,
+  DetalleProyectoScreen, NuevoProyectoScreen (con bloqueo del tope),
+  CalendarioScreen (grid mensual + lista del día), NuevoEventoScreen,
+  UniversidadScreen (lista cursos), DetalleCursoScreen (promedio +
+  próximas + historial), NuevoCursoScreen, NuevaEvaluacionScreen,
+  ApuntesListScreen, EditorApunteScreen. InicioScreen reescrita
+  como panel del día real (3 proyectos activos, Para hoy, Próximas
+  entregas, Tu día) con acceso a Calendario/Apuntes/Ajustes desde
+  el AppBar. Notificaciones integradas con tareas, eventos y
+  evaluaciones. Stubs muertos eliminados. 13/13 tests Flutter
+  verde, analyze clean. La app pasa de tener 1 sección real
+  (Tareas) a tener todo el armazón funcional de Capa 1.
+- 2026-05-25 — **Optimización del listado de subtareas**. Antes el
+  endpoint `/api/v1/subtareas` devolvía TODAS las subtareas de la
+  BD y el provider de Flutter filtraba en cliente por `tarea_id`.
+  Ahora el endpoint acepta `?tarea_id=<uuid>` (vía
+  `db.list(filters=...)` que ya existía desde 4.A) y el cliente
+  solo recibe las que necesita. Test nuevo
+  `test_listar_filtrado_por_tarea_id` verifica que no devuelve
+  subtareas de otras tareas. Total: 43/43 verde en cerebro.
+- 2026-05-25 — Pequeño cumplimiento de regla propia: el provider
+  derivado de tareas en `tareas_list_screen.dart` ahora muestra
+  `e.message` cuando el error es `MatixApiException`, y solo cae a
+  `e.toString()` para errores genéricos. La regla la habíamos
+  documentado en `features/tareas/README.md` ("no parsees
+  `e.toString()` para mostrar errores"), tocaba aplicarla.
+- 2026-05-25 — Pulido infraestructura: `MatixClient` con timeout
+  configurable (10 s CRUD, 5 s health) — antes solo `/health`
+  tenía timeout y un cerebro caído colgaba la UI indefinidamente.
+  `.env.example` ampliado con `SUPABASE_ACCESS_TOKEN` y
+  `SUPABASE_PROJECT_REF` para futuras migraciones. `.gitignore`
+  añade `matix_*.png` (screenshots de debug por `adb screencap`) y
+  `hs_err_pid*.log` (JVM crash dumps de Gradle). 9 PNGs basura
+  borrados de la raíz.
+- 2026-05-25 — `Plan_Capa1.md` actualizado: Paso 11 marca como
+  hechos los tres sub-pasos ya implementados; queda pendiente la
+  petición runtime del permiso (Android 13+) y replicar el patrón
+  a `eventos` y `evaluaciones`. Paso 10 marca como adelantado el
+  trabajo de Ajustes.
+- 2026-05-25 — **Integración Notificaciones ↔ Tareas (Paso 11
+  parcial)**. `TareasRepository` ahora recibe el `NotificacionesService`
+  y lleva la sincronización en sus métodos: `crear` programa (si
+  hay `recordar_en` futuro), `actualizar` y `marcarCompletada` hacen
+  cancel+reprogramar (idempotente), `borrar` cancela. El cuerpo de
+  la notificación se calcula a partir de `vence_en` ("Vence hoy a
+  las 14:30", "Vence mañana a las…", "Vence en N días"). El id de
+  notificación se deriva del uuid de la tarea vía
+  `core/notif_id.dart` (primeros 7 hex = 28 bits → cabe en
+  Integer.MAX_VALUE, estable entre runs, colisión <1/268M). Sin
+  cambios en UI. Tests: 13/13 verde (añadidos 4 de `notifIdDe`).
+- 2026-05-25 — Limpieza pubspec: removidos `riverpod_annotation`,
+  `riverpod_generator` y `build_runner`. Quedaron sin usar tras la
+  decisión "Riverpod clásico, sin codegen" (2026-05-25). Se quitaron
+  42 dependencias transitivas.
+- 2026-05-25 — **Bug fix de producción detectado por test**:
+  `DateFormat('...', 'es')` en `TareasListScreen` lanzaba
+  `LocaleDataException` en dispositivos sin locale 'es' pre-cargado
+  (mi Huawei sí lo trae, pero no es garantía). Se añadió
+  `initializeDateFormatting('es', null)` en `main.dart` antes de
+  `runApp`. Lo descubrió el `widget_test.dart` al pumpear `MatixApp`
+  fuera del path `main`.
+- 2026-05-25 — Tests Flutter del lado app: `9/9 verde` (`flutter
+  test`). Cubren la lógica pura de `tareasFiltradasProvider` (vistas
+  hoy / todas / completadas, filtros por prioridad / proyecto, orden
+  vencidas primero, `FiltrosTareasNotifier.limpiar()`) más dos
+  smoke-widget tests que validan el bottom nav y la navegación
+  básica.
+- 2026-05-25 — Plantilla del Paso 4.B documentada en
+  `app/lib/features/tareas/README.md` para que el Paso 5 (Calendario)
+  y siguientes la copien al pie de la letra cuando el usuario apruebe.
+- 2026-05-25 — `MatixClient` ahora decodifica el `detail` JSON de
+  FastAPI antes de lanzar `MatixApiException`. Cuando el cerebro
+  responde 409 con `{"detail": "Ya tienes 3 proyectos activos: aparca
+  o termina uno primero."}`, el `e.message` que ve la UI ya es el
+  texto plano — antes era el JSON crudo. También maneja el formato
+  de lista 422 de Pydantic (une los `msg` con " · ").
+- 2026-05-25 — **Setup parcial del Paso 11 (Notificaciones
+  locales)** sin integrarlo a Tareas (esa integración espera a luz
+  verde de 4.B). Se añadieron al `pubspec` las deps
+  `flutter_local_notifications: ^17.2.4` y `timezone: ^0.9.4`. El
+  `AndroidManifest` declara `POST_NOTIFICATIONS`,
+  `RECEIVE_BOOT_COMPLETED`, `SCHEDULE_EXACT_ALARM` y
+  `USE_EXACT_ALARM`. Servicio aislado en
+  `app/lib/core/notificaciones_service.dart` con `inicializar()`,
+  `pedirPermisos()`, `programar(id, titulo, cuerpo, cuando)`,
+  `cancelar(id)`, `cancelarTodo()`, `pendientes()`. Decisiones del
+  servicio: zona horaria fija `America/Lima` (Capa 4+ se podría leer
+  del perfil); `AndroidScheduleMode.inexactAllowWhileIdle` para
+  evitar pedir el permiso extra de alarmas exactas (se cambia a
+  exact si la imprecisión molesta); la repetición de tareas la
+  maneja el cerebro creando una nueva fila al completar, no el
+  servicio. La integración real desde TareasRepository / Eventos /
+  Evaluaciones se enchufa en el Paso 11 oficial.
+- 2026-05-25 — Mockups del Paso 9 (Proyectos) redactados como
+  borrador para revisión del usuario: `Proyectos.html` (lista con los
+  3 activos del Documento Maestro, aparcados y terminados),
+  `Detalle Proyecto.html` (línea de meta editable, acción siguiente
+  con CTA "marcar hecha", meta-rows estado/bloque protegido/última
+  actividad, footer "Aparcar / Terminar"), `Nuevo Proyecto.html`
+  (vista "tope alcanzado": banner ámbar + lista de los 3 activos con
+  acciones "Aparcar/Terminar" antes de habilitar el form). El
+  placeholder anterior se reemplazó por la pantalla real.
+- 2026-05-25 — Coherencia "acción siguiente ↔ proyecto" en el router:
+  si se acepta una tarea libre como `tarea_siguiente_id`, el cerebro
+  también la **vincula** al proyecto (le pone `proyecto_id`). Sin
+  esto, un proyecto podía apuntar a una acción siguiente que no
+  figuraba entre sus tareas.
+- 2026-05-25 — Rediseño del bottom nav alineándolo con
+  `mockups/matix-nav.jsx`: 5 pestañas con **Matix elevado al
+  centro** (FAB con gradiente azul→púrpura). Disposición:
+  Inicio · Proyectos · Matix(centro) · Tareas · Universidad.
+  Calendario y Apuntes salen de la barra y se accederán desde
+  otras pantallas (Calendario desde Inicio; Apuntes desde
+  Universidad y Proyectos). El FAB lateral de mic se difiere a
+  la Capa 2. Cambios: `home_shell.dart` (bottom nav custom),
+  nuevos stubs `matix_screen.dart` y `proyectos_screen.dart`,
+  `matix-nav.jsx` (añade Proyectos, reordena), `inicio.jsx`
+  (limpia `BottomNav()` muerto), nuevos `Proyectos.html` +
+  `proyectos.jsx` como placeholder.
+
+---
+
+## Pendientes y dudas abiertas
+
+- La pantalla de chat con Matix es de Capa 2; no se diseña ahora.
+- Hay un segundo proyecto Supabase en la organización (el viejo
+  `xapqlnyzblhnhnnvttyy`). El plan free permite 2 proyectos, así
+  que no urge; el usuario puede borrarlo cuando quiera desde el
+  panel.
+- **Rotación de credenciales pendiente** (quedaron expuestas en el
+  chat durante la aplicación de la migración): access token de
+  Supabase `sbp_4fa97…1bf4d5` y DB password del proyecto matix.
+  El usuario rotará más adelante. Cuando lo haga, además debe
+  copiar el `service_role` key al `cerebro/.env`
+  (`SUPABASE_SERVICE_ROLE_KEY=`, ahora vacío).
+
+---
+
+## Cómo retomar
+
+1. Leer `CLAUDE.md` (visión y reglas), `docs/Mapa_del_Hub.md` (qué
+   hay en cada pantalla) y `docs/Plan_Capa1.md` (plan de la capa).
+2. Leer este archivo: ver qué paso tiene `→` y qué casillas faltan
+   en él.
+3. Continuar por el siguiente `·` del paso en curso.
+
+---
+
+## Capa 2 — bitácora detallada
+
+### Paso 1 — Chat solo texto (2026-05-26)
+
+- Decisión: **OpenAI como único proveedor LLM**. La llamada vive
+  aislada en `cerebro/app/matix/llm.py`; ningún otro módulo importa
+  `openai`. Si en el futuro hay que mover a Claude/Gemini/local, se
+  reescribe ese archivo y nada más.
+- `cerebro/app/matix/` con `__init__.py`, `llm.py`, `system_prompt.py`,
+  `contexto.py`, `chat.py`. El system prompt = reglas/tono + el
+  `Documento Maestro` literal. El contexto vivo va aparte por turno
+  con proyectos activos + sus ids, tareas hoy/vencidas, eventos,
+  cursos. Prompt caching automático de OpenAI lo aprovecha (prefijo
+  estable ≥1024 tokens).
+- `POST /api/v1/matix/chat` devuelve `{respuesta, tools_usadas,
+  tablas_cambiadas}`. La app usa los dos últimos para invalidar
+  providers (los chips verdes y refresh del hub).
+- Flutter: `features/matix/` con domain/data/providers/presentation.
+  Pantalla de chat real con burbujas, "Matix está pensando…",
+  reintentar inline, limpiar conversación. Stub `MatixScreen`
+  eliminado.
+
+### Paso 2 — Tool calling, primera tanda (2026-05-26)
+
+- 6 tools aditivas/reversibles: `crear_tarea`, `crear_evento`,
+  `crear_apunte`, `completar_tarea`, `marcar_accion_siguiente_hecha`,
+  `registrar_cierre`. `reabrir_tarea` se sumó casi en el acto como
+  escape hatch (la voz puede malinterpretar y completar por error).
+- `cerebro/app/matix/tools.py`: `TOOL_DEFINITIONS` (schemas JSON
+  Schema) + `ejecutar_tool(db, name, args)` dispatcher. Cada handler
+  valida con Pydantic, atrapa excepciones y devuelve `{ok, ...}` o
+  `{ok: false, tipo, mensaje, sugerencia}` — nunca un error HTTP
+  crudo.
+- `chat.py` reescrito como loop modelo↔tools con tope de 6 vueltas.
+- `system_prompt.py` reescrito: lista de tools, regla "Capa 2 = solo
+  conversación" REEMPLAZADA por la lista de capacidades, y "lo que
+  todavía no podés hacer". Regla nueva: si faltan datos, preguntar,
+  no inventar.
+- Contexto vivo expone ids inline (`id=...`) para que el modelo pueda
+  citarlos en tool calls sin alucinarlos.
+- Flutter: chip de acciones bajo cada turno de Matix ("Tarea
+  creada", "Apunte guardado"…). El `ChatMatixNotifier` invalida los
+  providers de las tablas afectadas tras cada turno.
+
+### Paso 3 — Voz de entrada con Whisper (2026-05-26)
+
+- `POST /api/v1/matix/transcribir` recibe multipart `audio/mp4`,
+  llama a Whisper, devuelve `{texto}`. Validación: 400 si vacío,
+  413 si >24 MB, 503 si no hay OPENAI_API_KEY, 502 si Whisper
+  rechaza.
+- Flutter: `record ^5.2.1` + `permission_handler ^11.3.1` +
+  `path_provider`. AAC mono 16 kHz a 32 kbps (compacto y nítido).
+- Botón mic en el composer del chat; estados visuales `idle ·
+  grabando · transcribiendo · error`. La transcripción cae en el
+  input, NO se manda sola — el usuario revisa y aprieta enviar.
+- Dependency override de `record_linux: 1.3.1` por desfasaje de
+  versiones transitivas con `record_platform_interface 1.6.0` en el
+  build de Android (afecta el bundle aunque no se use Linux).
+
+### Paso 4 — Modo manos libres con TTS (2026-05-26)
+
+- Bucle: escuchar → transcribir → pensar → hablar → repetir, con
+  detección de silencio del lado app para auto-cortar al final de
+  cada turno.
+- Pantalla overlay con indicador de fase + animaciones + cards de
+  los dos últimos mensajes.
+- TTS inicial: `flutter_tts` ^4.2.0. AndroidManifest declara
+  `TTS_SERVICE` intent para Android 11+. Voz `es-ES` por defecto.
+
+### Paso 5 — Hub indulgente + capacidad total + medidor (2026-05-27)
+
+- **Borrado suave**. Migración `0004_papelera.sql` añade
+  `eliminado_en timestamptz` a `tareas`, `eventos`, `apuntes` +
+  índices parciales. Routers reescritos: `GET ?papelera=true`,
+  `DELETE` ahora soft, `POST /{id}/restaurar`, `DELETE /{id}/permanente`
+  (la única destructiva, no expuesta como tool).
+- `contexto_vivo` filtra eliminados — Matix no ve la papelera.
+- **Medidor de uso** (`matix/uso.py`): singleton thread-safe.
+  Captura `usage` de chat (incluye `cached_tokens`), estima
+  segundos de Whisper, cuenta chars de TTS. Costo USD con tarifas
+  como constantes editables. `GET /api/v1/matix/uso` lo expone.
+- **18 tools** (suma 11 nuevas): crear/editar/completar/reabrir/eliminar
+  tareas; crear/editar/eliminar eventos y apuntes; crear/editar +
+  aparcar/terminar/reactivar proyectos (con tope de 3 enforced);
+  `marcar_accion_siguiente_hecha`; `registrar_cierre`.
+- System prompt extendido: ahora Matix puede hacer todo salvo
+  vaciar la papelera, y la regla "si falta info, preguntá — no
+  inventes ni sustituyas" cubre el escape hatch crítico.
+- Flutter: repositorios con `listarPapelera()`, `restaurar(id)`,
+  `borrarPermanente(id)`. Pantalla `PapeleraScreen` en Ajustes →
+  Hub con secciones por entidad y "Vaciar papelera" con doble
+  confirmación. Snackbar "Deshacer" tras completar/borrar (`core/
+  undo_snackbar.dart`). Banner medidor sobre el chat. Chips
+  ampliados a 18 etiquetas.
+
+### Paso 5.1 — Correcciones (2026-05-27)
+
+- **Limpieza BD**. Borrados 3 proyectos `_test_*` huérfanos.
+- **Aislamiento tests**. Conftest reescrito: fixture session-level
+  `_barrer_residuos_test` que barre `_test_*` / `test_*` al cerrar.
+  Audit de cleanups → todos los `delete` de tareas/eventos/apuntes
+  ahora usan `/permanente`. Soporte para `.env.test` que apunta a
+  un proyecto Supabase aparte (cargado antes de importar
+  `app.config`). Sin `.env.test` cae al `.env` real con las redes
+  de seguridad. Documentado en `docs/Plan_Capa2.md` y
+  `cerebro/.env.test.example`.
+- **Bug medidor banner**: la lógica `vacio` lo escondía cuando el
+  contador era cero o cuando el endpoint cargaba lento. Ahora el
+  banner se muestra SIEMPRE con su estado actual (cargando · error
+  · cero · datos). Marco visual estable.
+- **Bug vaciar papelera**: `Future.wait` propagaba la primera
+  excepción y abortaba sin invalidar. Reescrito con try/catch por
+  item + snackbar con `okCount` / `failCount`.
+- **VAD de dos fases** en `grabacion_voz_service.dart`: fase 1
+  espera la primera voz (-30 dB) hasta 6s; si no llega, devuelve
+  `sinVoz` y nada va a Whisper. Fase 2 corta tras 1.3s de
+  silencio sostenido o tope de 60s.
+- **Estado "en pausa"** en manos libres: por silencio sin voz o
+  por botón "Pausar" manual. Mic CERRADO; un completer espera a
+  `reanudar()` para arrancar otra ronda.
+- **Filtro de alucinaciones de Whisper** en `llm.py`:
+  `_es_alucinacion_de_whisper()` descarta "Subtítulos ... Amara.org",
+  "[Música]", "♪", repeticiones de la misma frase, solo signos. El
+  endpoint devuelve `""` y el modo manos libres reanuda sin
+  contaminar a Matix.
+- **Voz onyx (OpenAI TTS)**. Razón: el motor TTS del Huawei solo
+  expone voces femeninas en es-ES que suenan sintéticas. Cambiamos
+  `flutter_tts` por `audioplayers` + `POST /api/v1/matix/voz` (cerebro
+  llama a `tts-1`). Costo despreciable (~$0.003/respuesta). La API
+  key sigue solo en el cerebro. Medidor extendido para trackear
+  TTS chars.
+- **Pantalla manos libres rehecha**: transcript scrolleable (mismo
+  historial que el chat normal, sin recortes con `...`), indicador
+  compacto, botones contextuales "Pausar" / "Hablar" / "Detener" /
+  "Salir".
+- **Tool `consultar_uso`** (solo lectura): Matix puede responder
+  "¿cuánto he gastado?" leyendo el medidor.
+- Cobertura de tests aumentada: `test_matix_tools_extra.py` (7
+  tests), `test_matix_uso_endpoint.py` (2), `test_whisper_alucinaciones.py`
+  (8). Total cerebro: 105 tests verdes.
+
+---
+
+## Decisiones acumuladas de Capa 2
+
+- LLM provider: **OpenAI**. Único, aislado en `matix/llm.py`.
+- Modelo de chat: **gpt-4o-mini**. Costo bajo, calidad suficiente.
+  Cambiar a `gpt-4o` solo si la calidad se queda corta.
+- Modelo de transcripción: **whisper-1** con `language="es"` fijo.
+- Modelo de voz: **tts-1 con voz `onyx`** (masculina grave). `tts-1-hd`
+  cuesta el doble y la diferencia perceptual es menor.
+- Borrado en `tareas`, `eventos`, `apuntes`: **soft delete** via
+  `eliminado_en`. Hard delete solo desde la UI vaciando la papelera.
+- Proyectos: ciclo de vida `activo / aparcado / terminado` — no
+  entran a la papelera. El tope de 3 activos vive en el cerebro
+  (`crear_proyecto` y `reactivar_proyecto` lo enforce-an).
+- Medidor de uso: **en memoria, sin persistir**. Si se reinicia el
+  cerebro vuelve a cero. Es consumo de sesión, no histórico.
+- Detección de silencio del lado app (VAD por amplitud), filtro de
+  alucinaciones de Whisper del lado cerebro. Doble red.

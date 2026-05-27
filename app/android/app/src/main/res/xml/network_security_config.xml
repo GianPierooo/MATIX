@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Política de seguridad de red.
+
+  Android 9+ (API 28+) bloquea cleartext (HTTP plano) por defecto y
+  exige HTTPS. En desarrollo, Matix habla con el cerebro en
+  `http://localhost:8000` (vía adb reverse) o `http://10.0.2.2:8000`
+  (emulador Android Studio). Ambos son tráfico local de máquina del
+  usuario, no van por internet.
+
+  La forma profesional de permitir esto SIN debilitar la seguridad
+  general (cleartextTrafficPermitted="true" en <application>) es
+  habilitarlo SOLO para los hostnames de desarrollo. El resto de
+  dominios sigue exigiendo HTTPS — útil para Capa 2 cuando la app
+  hable con Anthropic / Supabase / otros.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

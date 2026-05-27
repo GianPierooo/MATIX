@@ -1,0 +1,78 @@
+# ----- Secretos -----
+# Cubre .env, .env.test, .env.production, .env.local, etc. — sin
+# bloquear los `.example` que sí van al repo.
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+# Firma del APK: si en el futuro firmamos con un keystore propio,
+# ningún .jks ni properties con la contraseña va al repo.
+*.jks
+app/android/key.properties
+
+# ----- Python / uv / FastAPI -----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.uv-cache/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# ----- Flutter / Dart / Android / iOS -----
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/.packages
+app/.pub-cache/
+app/.pub/
+app/build/
+app/.idea/
+app/*.iml
+app/.gradle/
+app/android/.gradle/
+app/android/local.properties
+app/android/key.properties
+app/android/app/debug/
+app/android/app/profile/
+app/android/app/release/
+app/android/.kotlin/
+app/android/captures/
+app/ios/Pods/
+app/ios/.symlinks/
+app/ios/Flutter/Flutter.framework
+app/ios/Flutter/Flutter.podspec
+app/macos/Pods/
+app/linux/flutter/ephemeral/
+app/windows/flutter/ephemeral/
+app/coverage/
+
+# ----- Supabase CLI (si se usa después) -----
+supabase/.branches/
+supabase/.temp/
+supabase/.env
+
+# ----- Editores / OS -----
+.idea/
+.vscode/
+!.vscode/settings.json.example
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+
+# ----- Screenshots de depuración (adb exec-out screencap) y crash dumps -----
+matix_*.png
+hs_err_pid*.log
+app/android/hs_err_pid*.log

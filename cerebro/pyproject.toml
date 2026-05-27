@@ -1,0 +1,40 @@
+[project]
+name = "matix-cerebro"
+version = "0.1.0"
+description = "Cerebro de Matix — API FastAPI que conecta la app con Supabase"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    # LLM provider (Capa 2). Aislado en cerebro/app/matix/llm.py —
+    # ningún otro módulo importa openai.
+    "openai>=1.50",
+    # Multipart/form-data parser que FastAPI necesita para recibir
+    # archivos en `/matix/transcribir` (Capa 2 Paso 3).
+    "python-multipart>=0.0.18",
+    # Rate limiting básico (Capa 2 Despliegue). Limita por IP.
+    "slowapi>=0.1.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.7",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

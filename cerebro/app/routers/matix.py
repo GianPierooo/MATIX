@@ -1,0 +1,175 @@
+"""Router del chat y la voz con Matix.
+
+Endpoints:
+
+- `POST /matix/chat` — turno de conversación (Capa 2 Paso 1 + 2).
+  El cerebro arma el system prompt, llama a OpenAI con tools, y
+  devuelve la respuesta narrada + metadatos para invalidar la UI.
+
+- `POST /matix/transcribir` — audio → texto vía Whisper (Capa 2
+  Paso 3). Solo entrada por voz: el texto va al campo del composer
+  para que Gian Piero lo revise y mande él. No se ejecuta acción
+  ninguna desde aquí.
+"""
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import Response
+
+from ..db import Postgrest, get_db
+from ..matix import llm
+from ..matix.chat import conversar
+from ..matix.uso import medidor
+from ..schemas.matix import (
+    ChatRequest,
+    ChatResponse,
+    TranscripcionResponse,
+    VozRequest,
+)
+from ..security import require_api_key
+
+router = APIRouter(
+    prefix="/matix",
+    tags=["matix"],
+    dependencies=[Depends(require_api_key)],
+)
+
+# Tope blando de tamaño para audio: 25 MB es el límite de Whisper.
+# Lo recortamos antes para fallar rápido con un mensaje claro en
+# vez de propagar un error opaco de OpenAI.
+_MAX_AUDIO_BYTES = 24 * 1024 * 1024
+
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat(body: ChatRequest, db: Postgrest = Depends(get_db)) -> dict:
+    try:
+        resultado = await conversar(
+            db,
+            historial=[m.model_dump() for m in body.historial],
+            mensaje=body.mensaje,
+        )
+    except RuntimeError as e:
+        # Caso típico: OPENAI_API_KEY no configurada.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error llamando al modelo: {e}",
+        ) from e
+    return resultado
+
+
+@router.post("/transcribir", response_model=TranscripcionResponse)
+async def transcribir(
+    file: UploadFile = File(..., description="Audio del usuario."),
+) -> dict:
+    """Recibe un audio y devuelve la transcripción en español.
+
+    La app sube los bytes vía multipart/form-data en el campo `file`.
+    Aceptamos cualquier formato soportado por Whisper; en la app por
+    defecto grabamos m4a/AAC (compacto y nativo en Android).
+
+    Esta ruta **no** ejecuta acciones sobre el hub ni invoca al
+    modelo de chat — solo devuelve el texto. La razón es de
+    seguridad: queremos que Gian Piero vea lo que Whisper escuchó
+    antes de mandárselo a Matix con todas sus tools detrás.
+    """
+    audio = await file.read()
+    if not audio:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El audio está vacío.",
+        )
+    if len(audio) > _MAX_AUDIO_BYTES:
+        raise HTTPException(
+            status_code=413,  # Content Too Large
+            detail=(
+                "El audio supera el tope de 24 MB. Grabá un fragmento "
+                "más corto."
+            ),
+        )
+
+    nombre = file.filename or "audio.m4a"
+    mime = file.content_type or "audio/mp4"
+
+    try:
+        texto = await llm.transcribir(
+            audio, nombre_archivo=nombre, mime=mime
+        )
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Whisper falló al transcribir: {e}",
+        ) from e
+
+    return {"texto": texto}
+
+
+@router.get("/uso")
+async def uso_acumulado() -> dict:
+    """Devuelve el medidor de uso acumulado de OpenAI desde que se
+    arrancó este proceso del cerebro: tokens (input/output/cached),
+    minutos de Whisper, y costo estimado en USD. La franja del chat
+    en la app lo polea cada N segundos."""
+    return medidor.snapshot()
+
+
+@router.post("/voz")
+async def voz(body: VozRequest) -> Response:
+    """Text-to-speech: recibe `{texto, voz?}` y devuelve audio mp3.
+
+    Decisión Capa 2 Paso 5.1: usamos la TTS de OpenAI con voz `onyx`
+    (masculina grave) en vez de `flutter_tts` del dispositivo. Razones:
+
+    - El motor TTS del teléfono Huawei del usuario solo expone voces
+      femeninas en es-ES y suenan robóticas.
+    - OpenAI `tts-1` con `onyx` da una voz masculina natural,
+      consistente entre dispositivos y con latencia <1s para frases
+      cortas.
+    - Costo: $15 por 1M chars; una respuesta típica de Matix son
+      ~200 chars → $0.003. Despreciable para uso personal.
+    - Ya proxeamos a OpenAI para chat y Whisper; la API key queda
+      en el cerebro como pediste.
+    """
+    texto = body.texto.strip()
+    if not texto:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El texto está vacío.",
+        )
+    if len(texto) > 4000:
+        # tts-1 acepta hasta ~4096 chars de input. Cortamos antes
+        # con un mensaje claro.
+        raise HTTPException(
+            status_code=413,
+            detail="El texto es demasiado largo para una sola lectura.",
+        )
+    try:
+        audio = await llm.hablar(texto, voz=body.voz)
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"TTS de OpenAI falló: {e}",
+        ) from e
+
+    return Response(
+        content=audio,
+        media_type="audio/mpeg",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Length": str(len(audio)),
+        },
+    )

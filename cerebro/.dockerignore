@@ -1,0 +1,16 @@
+# No copies basura al build context — acelera el push a Railway.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+*.log
+.env
+.env.*
+!.env.example
+
+# Tests no se ejecutan en producción y suben los tiempos de build.
+tests/
