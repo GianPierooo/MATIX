@@ -115,14 +115,35 @@ jobs:
             echo "notes=Build manual desde el workflow ($SHA)" >> "$GITHUB_OUTPUT"
           fi
 
+      # Usamos firebase-tools oficial de Google (en vez del plugin
+      # wzieba que tuvo problemas de auth). El JSON del service
+      # account se escribe a un archivo temporal y se apunta vía
+      # GOOGLE_APPLICATION_CREDENTIALS, que es el mecanismo estándar
+      # de Google Cloud — no depende de cómo el plugin parsee el
+      # secret.
+      - name: Setup firebase-tools
+        run: npm install -g firebase-tools@13
+
+      - name: Escribir credencial del service account
+        run: |
+          mkdir -p /tmp/matix
+          printf '%s' "$SA_JSON" > /tmp/matix/sa.json
+          # Sanity: el archivo es JSON parseable y contiene private_key.
+          python3 -c "import json; d=json.load(open('/tmp/matix/sa.json')); assert 'private_key' in d and 'client_email' in d; print('SA email:', d['client_email'])"
+        env:
+          SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
       - name: Subir a Firebase App Distribution
-        uses: wzieba/Firebase-Distribution-Github-Action@v1
-        with:
-          appId: ${{ secrets.FIREBASE_APP_ID }}
-          serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          groups: testers
-          file: app/build/app/outputs/flutter-apk/app-release.apk
-          releaseNotes: ${{ steps.notes.outputs.notes }}
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/matix/sa.json
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+          RELEASE_NOTES: ${{ steps.notes.outputs.notes }}
+        run: |
+          firebase appdistribution:distribute \
+            app/build/app/outputs/flutter-apk/app-release.apk \
+            --app "$FIREBASE_APP_ID" \
+            --groups testers \
+            --release-notes "$RELEASE_NOTES"
 
       - name: Subir APK como artifact (backup)
         uses: actions/upload-artifact@v4
