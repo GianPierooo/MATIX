@@ -1,0 +1,132 @@
+# Build APK release + subir a Firebase App Distribution
+#
+# Se dispara con un push a `main` que toque la app o este workflow,
+# o con un tag `v*`. Cada APK release sube al grupo de testers de
+# App Distribution con las release notes = mensaje del commit.
+#
+# Secrets requeridos (configurados en GitHub → Settings → Secrets):
+#
+#   MATIX_API_KEY               token X-Matix-Key del cerebro en
+#                               Railway. NO la genera CI; el usuario
+#                               la pega tal cual del cerebro/.env.
+#   MATIX_API_URL               URL pública del cerebro en Railway.
+#                               Ej. https://matix-production.up.railway.app
+#   GOOGLE_SERVICES_JSON_B64    contenido de google-services.json,
+#                               codificado en base64. Se decodifica a
+#                               app/android/app/ antes del build.
+#   FIREBASE_APP_ID             el "App ID" Android del proyecto
+#                               Firebase. Formato: 1:1234567890:android:abcd…
+#   FIREBASE_SERVICE_ACCOUNT    JSON entero de la service account de
+#                               Firebase con rol "Firebase App
+#                               Distribution Admin".
+#
+# Cómo conseguir cada uno → docs/SETUP_DISTRIBUCION.md.
+
+name: Release APK · Firebase App Distribution
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - '.github/workflows/release.yml'
+  # Permite disparar manualmente desde la pestaña Actions del repo.
+  # Útil cuando querés rebuildar sin cambiar código (rotar API key,
+  # cambiar la URL de Railway, etc.).
+  workflow_dispatch:
+
+jobs:
+  build-and-distribute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Cache Pub deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            app/.dart_tool
+          key: pub-${{ hashFiles('app/pubspec.lock') }}
+          restore-keys: pub-
+
+      - name: Flutter pub get
+        working-directory: app
+        run: flutter pub get
+
+      # google-services.json viene como secret base64 — lo decodificamos
+      # al lugar que Gradle espera. Sin esto, el plugin
+      # `com.google.gms.google-services` no se aplica y el APK no
+      # queda asociado al proyecto Firebase.
+      - name: Decode google-services.json
+        run: |
+          mkdir -p app/android/app
+          echo "$GOOGLE_SERVICES_JSON_B64" | base64 -d > app/android/app/google-services.json
+          # Sanity check: que sea JSON parseable.
+          python3 -c "import json; json.load(open('app/android/app/google-services.json'))"
+        env:
+          GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
+
+      - name: Build APK release
+        working-directory: app
+        run: |
+          flutter build apk --release \
+            --dart-define=MATIX_API_URL="$MATIX_API_URL" \
+            --dart-define=MATIX_API_KEY="$MATIX_API_KEY" \
+            --dart-define=MATIX_ENV=prod
+        env:
+          MATIX_API_URL: ${{ secrets.MATIX_API_URL }}
+          MATIX_API_KEY: ${{ secrets.MATIX_API_KEY }}
+
+      # Las release notes son el mensaje del commit que disparó el
+      # workflow. Lo pasamos por env var en vez de interpolar
+      # ${{ … }} dentro del script — así commits con backticks,
+      # comillas, líneas con `EOF`, etc., no rompen nada.
+      - name: Preparar release notes
+        id: notes
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ -n "$COMMIT_MSG" ]; then
+            {
+              echo 'notes<<MATIX_EOF_MARKER'
+              echo "$COMMIT_MSG"
+              echo
+              echo "— commit $SHA"
+              echo 'MATIX_EOF_MARKER'
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "notes=Build manual desde el workflow ($SHA)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Subir a Firebase App Distribution
+        uses: wzieba/Firebase-Distribution-Github-Action@v1
+        with:
+          appId: ${{ secrets.FIREBASE_APP_ID }}
+          serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          groups: testers
+          file: app/build/app/outputs/flutter-apk/app-release.apk
+          releaseNotes: ${{ steps.notes.outputs.notes }}
+
+      - name: Subir APK como artifact (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-${{ github.sha }}
+          path: app/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30

@@ -61,6 +61,13 @@ dependencies:
   # el endpoint `/api/v1/matix/voz`.
   audioplayers: ^6.1.0
 
+  # Firebase: base para App Distribution (Capa 2 Infra). Solo
+  # inicializamos el core — sin Analytics/Crashlytics todavía. La
+  # presencia de `firebase_core` + `google-services.json` hace que
+  # los APK release que subimos a App Distribution se asocien al
+  # proyecto Firebase correcto para distribuirlos.
+  firebase_core: ^3.8.0
+
 dependency_overrides:
   # `record 5.2.1` resuelve `record_linux 0.7.2`, que está fuera de
   # sync con el `record_platform_interface 1.6.0` que pide el resto

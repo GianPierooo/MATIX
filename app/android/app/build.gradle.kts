@@ -5,6 +5,16 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// google-services: aplicado SOLO si `google-services.json` está
+// presente. Así un checkout fresco (sin Firebase configurado
+// localmente) sigue compilando — útil para CI local debug y para
+// onboarding del repo. El workflow de release siempre baja el
+// archivo desde un secret antes de buildear, y todos los APK release
+// quedan listos para App Distribution.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "dev.matix.matix"
     compileSdk = flutter.compileSdkVersion

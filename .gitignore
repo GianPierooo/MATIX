@@ -12,6 +12,14 @@
 *.jks
 app/android/key.properties
 
+# Firebase: el `google-services.json` trae el appId del proyecto.
+# No es un secreto crítico (Firebase lo considera "client config"),
+# pero igual lo mantenemos fuera del repo para que cada checkout
+# decida si activar Firebase o no, y para evitar confundir distintos
+# proyectos Firebase. En CI lo bajamos desde un secret base64.
+app/android/app/google-services.json
+app/ios/Runner/GoogleService-Info.plist
+
 # ----- Python / uv / FastAPI -----
 __pycache__/
 *.py[cod]
