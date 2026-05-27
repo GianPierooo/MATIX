@@ -28,6 +28,14 @@ dev = [
     "ruff>=0.7",
 ]
 
+# El cerebro es una aplicación, no un paquete publicable. Decirle a
+# uv que NO trate `app/` como una distribución a buildear evita que
+# falle en `uv sync` por falta de `[build-system]`. Importa para el
+# build de Railway: con `package = true` (el default), uv intenta
+# instalar el local project y necesita un backend de build.
+[tool.uv]
+package = false
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
