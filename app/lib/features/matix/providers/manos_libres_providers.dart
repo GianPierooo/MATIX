@@ -129,9 +129,16 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
     return const EstadoManosLibres();
   }
 
-  Future<void> entrar() async {
+  /// Si no nulo, el primer turno se hace sin abrir el mic: el modo
+  /// arranca como si el usuario hubiera dicho `_seed` y pasa directo
+  /// a pensar → hablar → escuchar. Lo usan los botones de ritual
+  /// (Buenos días / Cierre del día) de la pantalla Inicio.
+  String? _seed;
+
+  Future<void> entrar({String? seedMensaje}) async {
     if (state.fase != FaseManosLibres.inactivo) return;
     _saliendo = false;
+    _seed = seedMensaje?.trim().isEmpty ?? true ? null : seedMensaje!.trim();
     state = state.copyWith(
       fase: FaseManosLibres.iniciando,
       error: null,
@@ -232,6 +239,15 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
       state = state.copyWith(notaPausa: null);
     }
 
+    // Primer turno con seed: saltamos escuchar+transcribir y vamos
+    // directo a pensar+hablar. Lo usan los rituales de Inicio.
+    if (_seed != null) {
+      final texto = _seed!;
+      _seed = null;
+      await _turnoConTexto(texto);
+      return;
+    }
+
     // 1) ESCUCHAR con VAD
     state = state.copyWith(
       fase: FaseManosLibres.escuchando,
@@ -287,8 +303,17 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
     // Si llega vacío, volvemos a escuchar.
     if (texto.trim().isEmpty) return;
 
-    // 3) PENSAR — usamos el chatMatixProvider, que comparte
-    // historial con el chat normal.
+    // 3+4) PENSAR + HABLAR
+    await _turnoConTexto(texto);
+  }
+
+  /// Manda `texto` al chat como si fuera input del usuario, y lee
+  /// la respuesta con TTS. Se usa tanto cuando el texto vino de
+  /// Whisper (flujo normal) como cuando vino como seed de un botón
+  /// de ritual.
+  Future<void> _turnoConTexto(String texto) async {
+    // 3) PENSAR — usamos chatMatixProvider, que comparte historial
+    // con el chat normal.
     state = state.copyWith(fase: FaseManosLibres.pensando);
     await ref.read(chatMatixProvider.notifier).enviar(texto);
     if (_saliendo) throw _AbortoUsuario();
@@ -314,9 +339,7 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
     if (respuesta.isEmpty) return;
 
     // 4) HABLAR
-    state = state.copyWith(
-      fase: FaseManosLibres.hablando,
-    );
+    state = state.copyWith(fase: FaseManosLibres.hablando);
     await _tts.hablar(respuesta);
     if (_saliendo) throw _AbortoUsuario();
 

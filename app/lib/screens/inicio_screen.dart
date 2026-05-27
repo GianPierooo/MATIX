@@ -11,6 +11,7 @@ import '../features/eventos/domain/evento.dart';
 import '../features/eventos/presentation/calendario_screen.dart';
 import '../features/eventos/providers/eventos_providers.dart';
 import '../features/evaluaciones/domain/evaluacion.dart';
+import '../features/matix/presentation/manos_libres_screen.dart';
 import '../features/proyectos/domain/proyecto.dart';
 import '../features/proyectos/presentation/detalle_proyecto_screen.dart';
 import '../features/proyectos/providers/proyectos_providers.dart';
@@ -110,6 +111,7 @@ class InicioScreen extends ConsumerWidget {
             MatixLayout.bottomNavGuard(context),
           ),
           children: const [
+            _BotonesRitual(),
             _BloqueProyectos(),
             _BloqueParaHoy(),
             _BloqueProximasEntregas(),
@@ -124,6 +126,116 @@ class InicioScreen extends ConsumerWidget {
     if (h.hour < 12) return 'Buenos días';
     if (h.hour < 19) return 'Buenas tardes';
     return 'Buenas noches';
+  }
+}
+
+// ─── Botones de ritual: briefing matinal + cierre nocturno ──────
+//
+// Disparan el modo manos libres con un mensaje seed (el equivalente
+// a que el usuario hubiera dicho "buenos días" / "vamos al cierre")
+// para que Matix arranque narrando, no escuchando.
+//
+// Adaptan énfasis visual a la hora del día:
+//   - 5:00 a 11:59 → "Buenos días" prominente (gradiente),
+//                    "Cierre del día" secundario (outline).
+//   - 20:00 a 4:59 → al revés.
+//   - El resto del día, ambos secundarios.
+class _BotonesRitual extends StatelessWidget {
+  const _BotonesRitual();
+
+  @override
+  Widget build(BuildContext context) {
+    final h = DateTime.now().hour;
+    final esMatutino = h >= 5 && h < 12;
+    final esNoche = h >= 20 || h < 5;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: _BotonRitual(
+              icono: Icons.wb_sunny_outlined,
+              etiqueta: 'Buenos días',
+              prominente: esMatutino,
+              seed: 'Buenos días, dame el briefing.',
+              color: MatixColors.amber,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _BotonRitual(
+              icono: Icons.nightlight_round,
+              etiqueta: 'Cierre del día',
+              prominente: esNoche,
+              seed: 'Hagamos el cierre del día.',
+              color: MatixColors.purple,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BotonRitual extends StatelessWidget {
+  const _BotonRitual({
+    required this.icono,
+    required this.etiqueta,
+    required this.prominente,
+    required this.seed,
+    required this.color,
+  });
+
+  final IconData icono;
+  final String etiqueta;
+  final bool prominente;
+  final String seed;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final fondo = prominente
+        ? color.withValues(alpha: 0.18)
+        : Colors.transparent;
+    final borde = prominente
+        ? color.withValues(alpha: 0.55)
+        : MatixColors.hairline;
+    final colorTexto = prominente ? color : MatixColors.text;
+    return Material(
+      color: fondo,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: borde),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ManosLibresScreen(seedMensaje: seed),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icono, color: colorTexto, size: 20),
+              const SizedBox(width: 10),
+              Text(
+                etiqueta,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: colorTexto,
+                  letterSpacing: 0.1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

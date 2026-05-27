@@ -26,7 +26,13 @@ import '../providers/matix_chat_providers.dart';
 /// Toda la lógica vive en `manosLibresProvider`. Esta pantalla solo
 /// pinta y dispara acciones.
 class ManosLibresScreen extends ConsumerStatefulWidget {
-  const ManosLibresScreen({super.key});
+  const ManosLibresScreen({super.key, this.seedMensaje});
+
+  /// Si no nulo, el modo arranca como si el usuario hubiera dicho
+  /// este texto. Lo usan los botones de ritual de Inicio
+  /// ("Buenos días" / "Cierre del día") para entrar al modo con
+  /// la conversación ya disparada por el saludo correspondiente.
+  final String? seedMensaje;
 
   @override
   ConsumerState<ManosLibresScreen> createState() =>
@@ -40,7 +46,9 @@ class _ManosLibresScreenState extends ConsumerState<ManosLibresScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(manosLibresProvider.notifier).entrar();
+      ref
+          .read(manosLibresProvider.notifier)
+          .entrar(seedMensaje: widget.seedMensaje);
     });
   }
 
