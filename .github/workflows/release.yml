@@ -1,28 +1,21 @@
-# Build APK release + subir a Firebase App Distribution
+# Build APK release + publicar en Supabase Storage + registrar versión
 #
-# Se dispara con un push a `main` que toque la app o este workflow,
-# o con un tag `v*`. Cada APK release sube al grupo de testers de
-# App Distribution con las release notes = mensaje del commit.
+# Reemplazó (Capa Infra · Auto-actualización in-app) a Firebase App
+# Distribution. La app se autoactualiza consultando `/api/v1/version`
+# del cerebro, que apunta al APK público en Supabase Storage.
 #
-# Secrets requeridos (configurados en GitHub → Settings → Secrets):
+# Secrets requeridos:
 #
-#   MATIX_API_KEY               token X-Matix-Key del cerebro en
-#                               Railway. NO la genera CI; el usuario
-#                               la pega tal cual del cerebro/.env.
-#   MATIX_API_URL               URL pública del cerebro en Railway.
-#                               Ej. https://matix-production.up.railway.app
-#   GOOGLE_SERVICES_JSON_B64    contenido de google-services.json,
-#                               codificado en base64. Se decodifica a
-#                               app/android/app/ antes del build.
-#   FIREBASE_APP_ID             el "App ID" Android del proyecto
-#                               Firebase. Formato: 1:1234567890:android:abcd…
-#   FIREBASE_SERVICE_ACCOUNT    JSON entero de la service account de
-#                               Firebase con rol "Firebase App
-#                               Distribution Admin".
-#
-# Cómo conseguir cada uno → docs/SETUP_DISTRIBUCION.md.
+#   MATIX_API_URL                 URL pública del cerebro en Railway.
+#   MATIX_API_KEY                 token X-Matix-Key del cerebro.
+#   GOOGLE_SERVICES_JSON_B64      contenido de google-services.json
+#                                 (firebase_core sigue compilando aunque
+#                                 ya no lo usemos para distribución).
+#   SUPABASE_URL                  https://<ref>.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY     service role (bypassa RLS y permite
+#                                 subir a Storage + insertar en BD).
 
-name: Release APK · Firebase App Distribution
+name: Release APK · publica versión
 
 on:
   push:
@@ -30,13 +23,10 @@ on:
     paths:
       - 'app/**'
       - '.github/workflows/release.yml'
-  # Permite disparar manualmente desde la pestaña Actions del repo.
-  # Útil cuando querés rebuildar sin cambiar código (rotar API key,
-  # cambiar la URL de Railway, etc.).
   workflow_dispatch:
 
 jobs:
-  build-and-distribute:
+  build-and-publish:
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -69,34 +59,36 @@ jobs:
         working-directory: app
         run: flutter pub get
 
-      # google-services.json viene como secret base64 — lo decodificamos
-      # al lugar que Gradle espera. Sin esto, el plugin
-      # `com.google.gms.google-services` no se aplica y el APK no
-      # queda asociado al proyecto Firebase.
       - name: Decode google-services.json
         run: |
           mkdir -p app/android/app
           echo "$GOOGLE_SERVICES_JSON_B64" | base64 -d > app/android/app/google-services.json
-          # Sanity check: que sea JSON parseable.
-          python3 -c "import json; json.load(open('app/android/app/google-services.json'))"
         env:
           GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
 
+      # build_number = GITHUB_RUN_NUMBER. Monótono creciente; la app
+      # lo lee local con package_info_plus y lo compara contra el de
+      # /api/v1/version para decidir si hay update.
       - name: Build APK release
         working-directory: app
         run: |
           flutter build apk --release \
+            --build-number=$BUILD_NUMBER \
             --dart-define=MATIX_API_URL="$MATIX_API_URL" \
             --dart-define=MATIX_API_KEY="$MATIX_API_KEY" \
             --dart-define=MATIX_ENV=prod
         env:
           MATIX_API_URL: ${{ secrets.MATIX_API_URL }}
           MATIX_API_KEY: ${{ secrets.MATIX_API_KEY }}
+          BUILD_NUMBER: ${{ github.run_number }}
 
-      # Las release notes son el mensaje del commit que disparó el
-      # workflow. Lo pasamos por env var en vez de interpolar
-      # ${{ … }} dentro del script — así commits con backticks,
-      # comillas, líneas con `EOF`, etc., no rompen nada.
+      - name: Extraer version del pubspec
+        id: pubver
+        run: |
+          # pubspec: `version: 1.0.0+1` → quedamos con "1.0.0".
+          V=$(grep -E '^version:' app/pubspec.yaml | head -1 | awk '{print $2}' | cut -d'+' -f1)
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
       - name: Preparar release notes
         id: notes
         env:
@@ -104,51 +96,87 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           if [ -n "$COMMIT_MSG" ]; then
-            {
-              echo 'notes<<MATIX_EOF_MARKER'
-              echo "$COMMIT_MSG"
-              echo
-              echo "— commit $SHA"
-              echo 'MATIX_EOF_MARKER'
-            } >> "$GITHUB_OUTPUT"
+            # Solo la primera línea (la línea de tema) — la app
+            # muestra esto en el diálogo, no queremos un párrafo largo.
+            FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
+            echo "first_line=$FIRST_LINE" >> "$GITHUB_OUTPUT"
+            echo "full_notes<<MATIX_EOF" >> "$GITHUB_OUTPUT"
+            echo "$COMMIT_MSG" >> "$GITHUB_OUTPUT"
+            echo 'MATIX_EOF' >> "$GITHUB_OUTPUT"
           else
-            echo "notes=Build manual desde el workflow ($SHA)" >> "$GITHUB_OUTPUT"
+            echo "first_line=Build manual" >> "$GITHUB_OUTPUT"
+            echo "full_notes=Build manual ($SHA)" >> "$GITHUB_OUTPUT"
           fi
 
-      # Usamos firebase-tools oficial de Google (en vez del plugin
-      # wzieba que tuvo problemas de auth). El JSON del service
-      # account se escribe a un archivo temporal y se apunta vía
-      # GOOGLE_APPLICATION_CREDENTIALS, que es el mecanismo estándar
-      # de Google Cloud — no depende de cómo el plugin parsee el
-      # secret.
-      - name: Setup firebase-tools
-        run: npm install -g firebase-tools@13
-
-      # El JSON del service account viene como base64 (no como JSON
-      # crudo) para evitar problemas de BOM cuando se carga el
-      # secret desde PowerShell — al transferir un string por stdin,
-      # PowerShell le antepone un BOM UTF-8 que rompe `json.load`.
-      # Base64 es bytes puros, no se ve afectado.
-      - name: Escribir credencial del service account
-        run: |
-          mkdir -p /tmp/matix
-          echo "$SA_JSON_B64" | base64 -d > /tmp/matix/sa.json
-          # Sanity: el archivo es JSON parseable y contiene private_key.
-          python3 -c "import json; d=json.load(open('/tmp/matix/sa.json')); assert 'private_key' in d and 'client_email' in d; print('SA email:', d['client_email'])"
+      # Subimos el APK al bucket público `apks` de Supabase Storage.
+      # Path = matix-<build>-<sha7>.apk → estable por build, único.
+      - name: Subir APK a Supabase Storage
+        id: upload
         env:
-          SA_JSON_B64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}
-
-      - name: Subir a Firebase App Distribution
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: /tmp/matix/sa.json
-          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
-          RELEASE_NOTES: ${{ steps.notes.outputs.notes }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BUILD_NUMBER: ${{ github.run_number }}
+          SHA: ${{ github.sha }}
         run: |
-          firebase appdistribution:distribute \
-            app/build/app/outputs/flutter-apk/app-release.apk \
-            --app "$FIREBASE_APP_ID" \
-            --groups testers \
-            --release-notes "$RELEASE_NOTES"
+          SHA7="${SHA:0:7}"
+          OBJ="matix-${BUILD_NUMBER}-${SHA7}.apk"
+          echo "Subiendo $OBJ ..."
+          HTTP_CODE=$(curl -s -o /tmp/upload.log -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/vnd.android.package-archive" \
+            -H "x-upsert: true" \
+            --data-binary "@app/build/app/outputs/flutter-apk/app-release.apk" \
+            "$SUPABASE_URL/storage/v1/object/apks/$OBJ")
+          echo "HTTP $HTTP_CODE"
+          cat /tmp/upload.log
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Upload falló" >&2
+            exit 1
+          fi
+          APK_URL="$SUPABASE_URL/storage/v1/object/public/apks/$OBJ"
+          echo "apk_url=$APK_URL" >> "$GITHUB_OUTPUT"
+          echo "✓ APK público: $APK_URL"
+
+      # Insertamos la fila en `app_versions`. PostgREST cast-ea el
+      # body JSON directo.
+      - name: Registrar version en BD
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          VERSION: ${{ steps.pubver.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+          APK_URL: ${{ steps.upload.outputs.apk_url }}
+          NOTAS: ${{ steps.notes.outputs.first_line }}
+          SHA: ${{ github.sha }}
+        run: |
+          # Construimos el JSON con Python para que escape comillas y
+          # caracteres especiales del mensaje de commit correctamente.
+          PAYLOAD=$(python3 -c "
+          import json, os
+          print(json.dumps({
+              'version': os.environ['VERSION'],
+              'build_number': int(os.environ['BUILD_NUMBER']),
+              'apk_url': os.environ['APK_URL'],
+              'notas': os.environ['NOTAS'],
+              'sha': os.environ['SHA'],
+          }))
+          ")
+          HTTP_CODE=$(curl -s -o /tmp/insert.log -w "%{http_code}" \
+            -X POST \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            "$SUPABASE_URL/rest/v1/app_versions" \
+            -d "$PAYLOAD")
+          echo "HTTP $HTTP_CODE"
+          cat /tmp/insert.log
+          if [ "$HTTP_CODE" != "201" ]; then
+            echo "INSERT falló" >&2
+            exit 1
+          fi
+          echo "✓ Versión $VERSION build $BUILD_NUMBER registrada"
 
       - name: Subir APK como artifact (backup)
         uses: actions/upload-artifact@v4

@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/matix_client.dart';
 import '../config.dart';
+import '../features/autoupdate/data/update_service.dart';
+import '../features/autoupdate/presentation/update_dialog.dart';
+import '../features/autoupdate/providers/update_providers.dart';
 import '../features/matix/presentation/matix_chat_screen.dart';
 import '../features/proyectos/presentation/proyectos_list_screen.dart';
 import '../features/tareas/presentation/tareas_list_screen.dart';
@@ -24,17 +28,18 @@ import 'universidad_screen.dart';
 ///
 /// Al arrancar, hace un ping al cerebro vía `/health`. Si falla, muestra
 /// un `SnackBar` con el detalle.
-class HomeShell extends StatefulWidget {
+class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key, required this.client});
 
   final MatixClient client;
 
   @override
-  State<HomeShell> createState() => _HomeShellState();
+  ConsumerState<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends ConsumerState<HomeShell> {
   int _index = 0;
+  bool _dialogoUpdateMostrado = false;
 
   static const _screens = <Widget>[
     InicioScreen(),
@@ -68,6 +73,34 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
+    // Escuchamos el resultado del chequeo de update. La primera vez
+    // que llega "hay actualización", mostramos el diálogo. Después
+    // queda un banner discreto persistente hasta que la instale o
+    // cierre la sesión.
+    ref.listen<AsyncValue<UpdateCheckResult>>(updateCheckProvider, (
+      prev,
+      next,
+    ) {
+      next.whenData((result) {
+        if (result is HayActualizacion && !_dialogoUpdateMostrado) {
+          _dialogoUpdateMostrado = true;
+          // Microtarea para evitar mostrar el dialog durante el build.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            mostrarUpdateDialog(
+              context,
+              info: result.info,
+              buildLocal: result.buildLocal,
+            );
+          });
+        }
+      });
+    });
+    // Forzamos el primer read del provider para que dispare el
+    // chequeo. `watch` haría rebuild en cada cambio; con read solo
+    // levantamos el FutureProvider la primera vez.
+    ref.watch(updateCheckProvider);
+
     return Scaffold(
       // Permite que el círculo elevado de Matix "sobresalga" sobre el body
       // sin recortarse.

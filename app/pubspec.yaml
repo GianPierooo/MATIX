@@ -61,12 +61,18 @@ dependencies:
   # el endpoint `/api/v1/matix/voz`.
   audioplayers: ^6.1.0
 
-  # Firebase: base para App Distribution (Capa 2 Infra). Solo
-  # inicializamos el core — sin Analytics/Crashlytics todavía. La
-  # presencia de `firebase_core` + `google-services.json` hace que
-  # los APK release que subimos a App Distribution se asocien al
-  # proyecto Firebase correcto para distribuirlos.
+  # Firebase: queda firebase_core como base por si en el futuro
+  # se necesita (Crashlytics, FCM). La distribución dejó de pasar
+  # por Firebase App Distribution: la app ahora se autoactualiza
+  # consultando /api/v1/version del cerebro.
   firebase_core: ^3.8.0
+
+  # Auto-actualización (Infra · Capa 2 / Capa 3).
+  # - package_info_plus: leer versión + build_number locales.
+  # - ota_update: descargar e instalar el APK con barra de progreso
+  #   y lanzar el instalador del sistema.
+  package_info_plus: ^8.1.2
+  ota_update: ^7.0.0
 
 dependency_overrides:
   # `record 5.2.1` resuelve `record_linux 0.7.2`, que está fuera de

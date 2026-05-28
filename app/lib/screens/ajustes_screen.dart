@@ -5,6 +5,9 @@ import '../api/matix_client.dart';
 import '../config.dart';
 import '../core/notificaciones_service.dart';
 import '../core/providers.dart';
+import '../features/autoupdate/data/update_service.dart';
+import '../features/autoupdate/presentation/update_dialog.dart';
+import '../features/autoupdate/providers/update_providers.dart';
 import '../features/papelera/presentation/papelera_screen.dart';
 import '../theme/matix_colors.dart';
 
@@ -160,6 +163,9 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
               MaterialPageRoute(builder: (_) => const PapeleraScreen()),
             ),
           ),
+
+          const _Seccion('Versión'),
+          _BuscarActualizacionTile(),
 
           const _Seccion('Notificaciones'),
           _Accion(
@@ -383,6 +389,70 @@ class _Accion extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ─── Auto-actualización (Capa Infra · post-Firebase) ────────────────
+
+/// Tile que pide explícitamente al servidor si hay versión nueva.
+/// Muestra el estado (chequeando · al día · disponible · sin red) y,
+/// si hay update, dispara el mismo diálogo que el chequeo automático
+/// del arranque.
+class _BuscarActualizacionTile extends ConsumerWidget {
+  const _BuscarActualizacionTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final estado = ref.watch(updateCheckProvider);
+    return estado.when(
+      loading: () => const _Accion(
+        label: 'Chequeando…',
+        icon: Icons.refresh,
+        onTap: null,
+        subtitle: 'Consultando al cerebro',
+      ),
+      error: (e, _) => _Accion(
+        label: 'Buscar actualizaciones',
+        icon: Icons.refresh,
+        onTap: () => ref.invalidate(updateCheckProvider),
+        subtitle: 'Último chequeo falló — tocá para reintentar',
+        subtitleColor: MatixColors.red,
+      ),
+      data: (result) {
+        if (result is HayActualizacion) {
+          return _Accion(
+            label: 'Descargar versión nueva',
+            icon: Icons.system_update_alt,
+            onTap: () => mostrarUpdateDialog(
+              context,
+              info: result.info,
+              buildLocal: result.buildLocal,
+            ),
+            subtitle:
+                'Build ${result.buildLocal} → ${result.info.buildNumber} (${result.info.version})',
+            subtitleColor: MatixColors.accent,
+          );
+        }
+        if (result is Actualizado) {
+          return _Accion(
+            label: 'Buscar actualizaciones',
+            icon: Icons.refresh,
+            onTap: () => ref.invalidate(updateCheckProvider),
+            subtitle: 'Estás al día (build ${result.buildLocal})',
+          );
+        }
+        if (result is ChequeoFallido) {
+          return _Accion(
+            label: 'Buscar actualizaciones',
+            icon: Icons.refresh,
+            onTap: () => ref.invalidate(updateCheckProvider),
+            subtitle: 'Sin conexión al cerebro — tocá para reintentar',
+            subtitleColor: MatixColors.amber,
+          );
+        }
+        return const SizedBox.shrink();
+      },
     );
   }
 }

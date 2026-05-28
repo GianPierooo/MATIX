@@ -24,6 +24,13 @@
          empezar la grabación. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 
+    <!-- Auto-actualización in-app (ota_update). REQUEST_INSTALL_PACKAGES
+         deja a la app pedirle al sistema que abra el instalador
+         de APKs (Android 8+ requiere además que el usuario habilite
+         "Instalar apps desconocidas" para Matix la primera vez —
+         lo manejamos en el flujo de descarga). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+
     <application
         android:label="matix"
         android:name="${applicationName}"

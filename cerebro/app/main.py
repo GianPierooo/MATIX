@@ -42,6 +42,7 @@ from .routers import (
     sesiones_clase,
     subtareas,
     tareas,
+    version,
 )
 
 # ─── Logging ────────────────────────────────────────────────────────
@@ -164,5 +165,6 @@ for r in (
     proyectos.router,
     cierres_dia.router,
     matix.router,
+    version.router,
 ):
     app.include_router(r, prefix="/api/v1")
