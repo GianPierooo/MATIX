@@ -124,14 +124,19 @@ jobs:
       - name: Setup firebase-tools
         run: npm install -g firebase-tools@13
 
+      # El JSON del service account viene como base64 (no como JSON
+      # crudo) para evitar problemas de BOM cuando se carga el
+      # secret desde PowerShell — al transferir un string por stdin,
+      # PowerShell le antepone un BOM UTF-8 que rompe `json.load`.
+      # Base64 es bytes puros, no se ve afectado.
       - name: Escribir credencial del service account
         run: |
           mkdir -p /tmp/matix
-          printf '%s' "$SA_JSON" > /tmp/matix/sa.json
+          echo "$SA_JSON_B64" | base64 -d > /tmp/matix/sa.json
           # Sanity: el archivo es JSON parseable y contiene private_key.
           python3 -c "import json; d=json.load(open('/tmp/matix/sa.json')); assert 'private_key' in d and 'client_email' in d; print('SA email:', d['client_email'])"
         env:
-          SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          SA_JSON_B64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}
 
       - name: Subir a Firebase App Distribution
         env:

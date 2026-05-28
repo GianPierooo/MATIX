@@ -147,7 +147,7 @@ En el repo de GitHub:
 | `MATIX_API_KEY` | El mismo valor que tenés en `cerebro/.env` local |
 | `GOOGLE_SERVICES_JSON_B64` | El contenido de `google-services.json` codificado en base64 (ver 3.1) |
 | `FIREBASE_APP_ID` | El App ID que copiaste en 2.2 (`1:…:android:…`) |
-| `FIREBASE_SERVICE_ACCOUNT` | El **contenido completo** del JSON de credencial que descargaste en 2.1, pegado tal cual |
+| `FIREBASE_SERVICE_ACCOUNT_B64` | El JSON de credencial descargado en 2.1, codificado en base64 (ver 3.2) |
 
 ### 3.1 Cómo codificar `google-services.json` en base64
 
@@ -165,14 +165,22 @@ Pegá el contenido del portapapeles en el secret `GOOGLE_SERVICES_JSON_B64`.
 > https://www.base64encode.org/ con la opción "Encode each line
 > separately" **desactivada**.
 
-### 3.2 Cómo pegar el JSON de la service account
+### 3.2 Cómo codificar el JSON de la service account en base64
 
-Ese se pega **tal cual**, sin codificar — el workflow lo pasa al
-plugin con `serviceCredentialsFileContent`, que espera JSON puro.
+PowerShell tiene un bug sutil que mete BOM al pasar strings por
+stdin a `gh secret set`. Para evitarlo, el secret va en base64 (bytes
+puros, sin encoding shenanigans). Comando:
 
-Tip: cuando crees el secret en GitHub, copiá TODO el contenido del
-archivo `.json` (incluyendo `{` y `}` iniciales y finales) y pegalo
-en el campo Value. Sin recortes.
+```powershell
+$b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\ruta\a\service-account.json"))
+$b64 | Set-Clipboard
+Write-Host "Base64 ($($b64.Length) chars) en el portapapeles."
+```
+
+Pegá el contenido del portapapeles en el secret `FIREBASE_SERVICE_ACCOUNT_B64`.
+
+El workflow lo decodifica en CI con `base64 -d` y verifica que el
+JSON resultante es parseable antes de usarlo.
 
 ---
 
