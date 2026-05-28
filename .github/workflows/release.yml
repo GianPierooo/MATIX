@@ -69,14 +69,23 @@ jobs:
       # build_number = GITHUB_RUN_NUMBER. Monótono creciente; la app
       # lo lee local con package_info_plus y lo compara contra el de
       # /api/v1/version para decidir si hay update.
-      - name: Build APK release
+      #
+      # --split-per-abi genera 3 APKs (armeabi-v7a, arm64-v8a, x86_64).
+      # Sin split, el universal APK pesa ~54 MB y supera el tope del
+      # plan free de Supabase Storage (50 MB). Cada ABI por separado
+      # pesa ~25-30 MB y cabe holgado. Subimos el arm64-v8a (el que
+      # usa el Huawei del usuario y la gran mayoría de Androids
+      # modernos). Si en el futuro queremos cubrir más devices,
+      # subimos los 3 y la app pide el suyo.
+      - name: Build APK release (split-per-abi)
         working-directory: app
         run: |
-          flutter build apk --release \
+          flutter build apk --release --split-per-abi \
             --build-number=$BUILD_NUMBER \
             --dart-define=MATIX_API_URL="$MATIX_API_URL" \
             --dart-define=MATIX_API_KEY="$MATIX_API_KEY" \
             --dart-define=MATIX_ENV=prod
+          ls -la build/app/outputs/flutter-apk/
         env:
           MATIX_API_URL: ${{ secrets.MATIX_API_URL }}
           MATIX_API_KEY: ${{ secrets.MATIX_API_KEY }}
@@ -121,12 +130,14 @@ jobs:
           SHA7="${SHA:0:7}"
           OBJ="matix-${BUILD_NUMBER}-${SHA7}.apk"
           echo "Subiendo $OBJ ..."
+          APK_PATH="app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
+          ls -la "$APK_PATH"
           HTTP_CODE=$(curl -s -o /tmp/upload.log -w "%{http_code}" \
             -X POST \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Content-Type: application/vnd.android.package-archive" \
             -H "x-upsert: true" \
-            --data-binary "@app/build/app/outputs/flutter-apk/app-release.apk" \
+            --data-binary "@$APK_PATH" \
             "$SUPABASE_URL/storage/v1/object/apks/$OBJ")
           echo "HTTP $HTTP_CODE"
           cat /tmp/upload.log
@@ -178,9 +189,9 @@ jobs:
           fi
           echo "✓ Versión $VERSION build $BUILD_NUMBER registrada"
 
-      - name: Subir APK como artifact (backup)
+      - name: Subir APKs como artifact (backup, los 3 ABIs)
         uses: actions/upload-artifact@v4
         with:
           name: app-release-${{ github.sha }}
-          path: app/build/app/outputs/flutter-apk/app-release.apk
+          path: app/build/app/outputs/flutter-apk/*-release.apk
           retention-days: 30
