@@ -63,6 +63,13 @@ class MatixClient {
   /// Timeout más corto para el ping de salud.
   static const _timeoutHealth = Duration(seconds: 5);
 
+  /// Timeout largo para `/api/v1/matix/chat` y otros endpoints de
+  /// IA. El chat puede encadenar embed (RAG) + búsqueda + tools +
+  /// LLM, fácilmente pasando los 10s del CRUD. 45s cubre con margen
+  /// el peor caso típico de Capa 3 (modo tutor: buscar → leer
+  /// apunte → resumir + generar preguntas).
+  static const _timeoutChat = Duration(seconds: 45);
+
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
         if (MatixConfig.hasApiKey) 'X-Matix-Key': MatixConfig.apiKey,
@@ -114,13 +121,23 @@ class MatixClient {
 
   Future<Map<String, dynamic>> post(
     String path,
-    Map<String, dynamic> body,
-  ) async {
-    final r = await _conTimeout(_inner.post(
-      _uri(path),
-      headers: _headers,
-      body: json.encode(body),
-    ));
+    Map<String, dynamic> body, {
+    Duration? timeout,
+  }) async {
+    // Si el caller no pasa timeout explícito, usamos el largo para
+    // rutas de IA (`/matix/...`) y el normal para el resto. Eso
+    // cubre `chat`, `transcribir`, `voz` y futuros endpoints
+    // pesados sin necesidad de que cada repo lo recuerde.
+    final t = timeout ??
+        (path.contains('/matix/') ? _timeoutChat : _timeoutNormal);
+    final r = await _conTimeout(
+      _inner.post(
+        _uri(path),
+        headers: _headers,
+        body: json.encode(body),
+      ),
+      timeout: t,
+    );
     if (r.statusCode != 201 && r.statusCode != 200) {
       throw MatixApiException(r.statusCode, _extraerMensaje(r.body));
     }

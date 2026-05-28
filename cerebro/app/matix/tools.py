@@ -623,6 +623,29 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "leer_apunte",
+            "description": (
+                "Trae el contenido COMPLETO de un apunte por id. "
+                "Usala después de `buscar_apuntes` cuando necesites "
+                "el texto entero para resumir, generar preguntas o "
+                "explicar — `buscar_apuntes` devuelve solo un "
+                "fragmento (600 chars), `leer_apunte` te da todo. "
+                "Si el usuario te da el nombre del apunte y no el id, "
+                "primero buscalo con `buscar_apuntes` y después leelo."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "apunte_id": _UUID,
+                },
+                "required": ["apunte_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "consultar_uso",
             "description": (
                 "Devuelve el consumo acumulado de la API de OpenAI "
@@ -1355,6 +1378,54 @@ async def _buscar_apuntes(db: Postgrest, args: dict) -> dict[str, Any]:
     )
 
 
+# ── leer_apunte — solo lectura, contenido completo (Capa 3 Paso 2) ──
+
+
+async def _leer_apunte(db: Postgrest, args: dict) -> dict[str, Any]:
+    """Devuelve el apunte completo (título + contenido + etiquetas)
+    para que el modelo lo use al resumir, generar preguntas o
+    explicar. Filtra papelera: si el apunte está soft-deleted, lo
+    tratamos como inexistente — Matix nunca debe usar contenido
+    borrado por el usuario.
+    """
+    raw_id = args.get("apunte_id")
+    apunte_id, err = _validar_uuid(raw_id, "apunte_id")
+    if err:
+        return err
+
+    apunte = await db.get("apuntes", apunte_id)
+    if apunte is None:
+        return _error(
+            "no_existe",
+            "Ese apunte no está en el hub.",
+            sugerencia=(
+                "Si llegaste a este id desde `buscar_apuntes`, "
+                "puede que mientras tanto se haya borrado. Volvé "
+                "a buscar."
+            ),
+        )
+    if apunte.get("eliminado_en"):
+        return _error(
+            "en_papelera",
+            "Ese apunte está en la papelera del usuario.",
+            sugerencia=(
+                "No leas su contenido. Si Gian Piero lo quiere, "
+                "tiene que restaurarlo desde la app."
+            ),
+        )
+
+    return _ok(
+        {
+            "id": apunte_id,
+            "titulo": apunte.get("titulo", ""),
+            "contenido": apunte.get("contenido", ""),
+            "etiquetas": apunte.get("etiquetas") or [],
+            "curso_id": apunte.get("curso_id"),
+            "proyecto_id": apunte.get("proyecto_id"),
+        }
+    )
+
+
 # ── consultar_uso — solo lectura ─────────────────────────────────────
 
 
@@ -1447,6 +1518,7 @@ _HANDLERS = {
     "registrar_cierre": _registrar_cierre,
     # Solo lectura
     "buscar_apuntes": _buscar_apuntes,
+    "leer_apunte": _leer_apunte,
     "consultar_uso": _consultar_uso,
 }
 
@@ -1473,6 +1545,7 @@ TABLAS_AFECTADAS = {
     "marcar_accion_siguiente_hecha": ["tareas", "proyectos"],
     "registrar_cierre": ["cierres_dia"],
     "buscar_apuntes": [],  # solo lectura
+    "leer_apunte": [],  # solo lectura
     "consultar_uso": [],  # solo lectura
 }
 
