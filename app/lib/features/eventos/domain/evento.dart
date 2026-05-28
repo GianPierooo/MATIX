@@ -14,6 +14,7 @@ class Evento {
     this.proyectoId,
     this.color,
     this.recordarEn,
+    this.origen = 'manual',
     required this.creadoEn,
     required this.actualizadoEn,
   });
@@ -29,8 +30,14 @@ class Evento {
   final String? proyectoId;
   final String? color;
   final DateTime? recordarEn;
+  /// "manual" para los creados desde la app, "google" para los
+  /// sincronizados desde Google Calendar (Capa 4 Paso 1). La UI
+  /// muestra un badge sutil para distinguirlos.
+  final String origen;
   final DateTime creadoEn;
   final DateTime actualizadoEn;
+
+  bool get esDeGoogle => origen == 'google';
 
   bool ocurreEn(DateTime dia) {
     final ini = iniciaEn.toLocal();
@@ -55,6 +62,7 @@ class Evento {
         recordarEn: json['recordar_en'] == null
             ? null
             : DateTime.parse(json['recordar_en'] as String),
+        origen: (json['origen'] as String?) ?? 'manual',
         creadoEn: DateTime.parse(json['creado_en'] as String),
         actualizadoEn: DateTime.parse(json['actualizado_en'] as String),
       );

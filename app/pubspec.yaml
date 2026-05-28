@@ -74,6 +74,11 @@ dependencies:
   package_info_plus: ^8.1.2
   ota_update: ^7.0.0
 
+  # OAuth Google (Capa 4 Paso 1): abrimos la URL de consentimiento
+  # en el navegador del sistema. Suficiente para el flujo — el
+  # callback vuelve al cerebro y el usuario vuelve a la app a mano.
+  url_launcher: ^6.3.1
+
 dependency_overrides:
   # `record 5.2.1` resuelve `record_linux 0.7.2`, que está fuera de
   # sync con el `record_platform_interface 1.6.0` que pide el resto

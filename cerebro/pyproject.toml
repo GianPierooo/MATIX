@@ -18,6 +18,12 @@ dependencies = [
     "python-multipart>=0.0.18",
     # Rate limiting básico (Capa 2 Despliegue). Limita por IP.
     "slowapi>=0.1.9",
+    # Google OAuth + APIs (Capa 4 Paso 1). google-auth maneja la
+    # negociación OAuth; google-api-python-client tiene el cliente
+    # del Calendar API que usamos para listar eventos.
+    "google-auth>=2.35",
+    "google-auth-oauthlib>=1.2",
+    "google-api-python-client>=2.150",
 ]
 
 [dependency-groups]

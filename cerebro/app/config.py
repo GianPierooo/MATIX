@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     # el futuro hay un cliente web.
     matix_cors_origins: str = ""
 
+    # OAuth Google (Capa 4 Paso 1). Si vacíos, los endpoints de
+    # /google/oauth devuelven 503 con mensaje claro — la app sabe que
+    # la integración no está habilitada y oculta la UI de conexión.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = ""
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [

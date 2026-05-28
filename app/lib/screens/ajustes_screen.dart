@@ -8,6 +8,7 @@ import '../core/providers.dart';
 import '../features/autoupdate/data/update_service.dart';
 import '../features/autoupdate/presentation/update_dialog.dart';
 import '../features/autoupdate/providers/update_providers.dart';
+import '../features/google/presentation/conexion_google_tile.dart';
 import '../features/papelera/presentation/papelera_screen.dart';
 import '../theme/matix_colors.dart';
 
@@ -163,6 +164,9 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
               MaterialPageRoute(builder: (_) => const PapeleraScreen()),
             ),
           ),
+
+          const _Seccion('Conexiones'),
+          const ConexionGoogleTile(),
 
           const _Seccion('Versión'),
           _BuscarActualizacionTile(),

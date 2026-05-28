@@ -36,6 +36,7 @@ from .routers import (
     cursos,
     evaluaciones,
     eventos,
+    google,
     matix,
     profile,
     proyectos,
@@ -166,5 +167,11 @@ for r in (
     cierres_dia.router,
     matix.router,
     version.router,
+    google.router,
 ):
     app.include_router(r, prefix="/api/v1")
+
+# El callback de OAuth Google va sin auth (Google no manda nuestra
+# X-Matix-Key). La defensa contra CSRF es el `state` que se valida
+# en el handler. Lo registramos con su propio router separado.
+app.include_router(google.router_callback, prefix="/api/v1")

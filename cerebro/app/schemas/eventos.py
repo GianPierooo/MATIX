@@ -45,5 +45,10 @@ class EventoRead(BaseModel):
     color: str | None = None
     recordar_en: datetime | None = None
     eliminado_en: datetime | None = None
+    # Capa 4 Paso 1: origen del evento. "manual" para los creados
+    # desde la app, "google" para los sync-eados.
+    origen: str = "manual"
+    external_id: str | None = None
+    external_account: str | None = None
     creado_en: datetime
     actualizado_en: datetime
