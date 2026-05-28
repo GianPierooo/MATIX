@@ -198,6 +198,31 @@ _ALUCINACIONES_WHISPER = (
 )
 
 
+async def embebir(
+    textos: list[str],
+    *,
+    model: str = "text-embedding-3-small",
+) -> list[list[float]]:
+    """Convierte una lista de textos en vectores (1536 dims con
+    `text-embedding-3-small`). Sigue siendo el único punto del
+    cerebro que importa `openai` — esto es Capa 3 Paso 1 RAG.
+
+    Hace una sola llamada para toda la lista (batching), que es
+    mucho más barato que una llamada por texto. Registra el uso
+    sumando todos los tokens del batch.
+
+    No deduplica ni cachea: el caller decide qué textos pasar.
+    Para apuntes, el caller embebe título+contenido juntos.
+    """
+    if not textos:
+        return []
+    client = _get_client()
+    resp = await client.embeddings.create(model=model, input=textos)
+    medidor.registrar_embedding(resp.usage.total_tokens)
+    # OpenAI devuelve los embeddings en el mismo orden del input.
+    return [item.embedding for item in resp.data]
+
+
 async def hablar(
     texto: str,
     *,

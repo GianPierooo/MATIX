@@ -125,6 +125,31 @@ class Postgrest:
         r.raise_for_status()
         return bool(r.json())
 
+    async def delete_where(
+        self, table: str, *, filters: dict[str, str]
+    ) -> int:
+        """Borra todas las filas que matcheen `filters` (igualdad).
+        Devuelve cuántas borró. Lo usa el indexador para purgar los
+        chunks viejos de un apunte antes de insertar los nuevos."""
+        params = {col: f"eq.{val}" for col, val in filters.items()}
+        r = await self._http.delete(
+            f"/{table}",
+            params=params,
+            headers={"Prefer": "return=representation"},
+        )
+        r.raise_for_status()
+        return len(r.json())
+
+    async def rpc(
+        self, function: str, payload: dict[str, Any] | None = None
+    ) -> Any:
+        """Llama a una función SQL expuesta vía PostgREST (`/rpc/<name>`).
+        Útil para queries que no se pueden expresar con select+filters
+        — p.ej. la búsqueda por similitud vectorial."""
+        r = await self._http.post(f"/rpc/{function}", json=payload or {})
+        r.raise_for_status()
+        return r.json()
+
 
 db = Postgrest()
 

@@ -58,6 +58,7 @@ from ..schemas.cierres_dia import CierreDiaCreate
 from ..schemas.eventos import EventoCreate, EventoUpdate
 from ..schemas.proyectos import ProyectoCreate, ProyectoUpdate
 from ..schemas.tareas import TareaCreate, TareaUpdate
+from .indexador import buscar_apuntes as _buscar_apuntes_rag
 from .uso import medidor
 
 # ─────────────────────────────────────────────────────────────────────
@@ -573,6 +574,48 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {"proyecto_id": _UUID},
                 "required": ["proyecto_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "buscar_apuntes",
+            "description": (
+                "Busca en los apuntes del usuario por SIGNIFICADO "
+                "semántico (RAG). Usala cuando el usuario pregunte "
+                "por algo que podría estar en sus notas: «¿qué "
+                "anoté sobre X?», «búscame mi resumen de Y», "
+                "«contame qué decía mi apunte de Z». Devuelve los "
+                "apuntes más relevantes con título y un fragmento. "
+                "Si la búsqueda no devuelve nada, decílo: NO "
+                "inventes contenido."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "consulta": {
+                        "type": "string",
+                        "description": (
+                            "Lo que se está buscando, en lenguaje "
+                            "natural. Podés expandir la pregunta "
+                            "del usuario si lo ayuda, pero no la "
+                            "reformules en tecnicismos — la "
+                            "búsqueda semántica funciona mejor con "
+                            "lenguaje similar al de los apuntes."
+                        ),
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": (
+                            "Cuántos apuntes traer (1 a 10). "
+                            "Default 5. Subílo solo si el usuario "
+                            "pide explorar varios."
+                        ),
+                    },
+                },
+                "required": ["consulta"],
                 "additionalProperties": False,
             },
         },
@@ -1270,6 +1313,48 @@ async def _reactivar_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
     return await _cambiar_estado_proyecto(db, args, nuevo_estado="activo")
 
 
+# ── buscar_apuntes — RAG, solo lectura (Capa 3 Paso 1) ──────────────
+
+
+async def _buscar_apuntes(db: Postgrest, args: dict) -> dict[str, Any]:
+    consulta = (args.get("consulta") or "").strip()
+    if not consulta:
+        return _error(
+            "validacion",
+            "Falta la `consulta` (qué buscar en los apuntes).",
+        )
+    top_k = args.get("top_k") or 5
+    try:
+        top_k = max(1, min(10, int(top_k)))
+    except (ValueError, TypeError):
+        top_k = 5
+
+    filas = await _buscar_apuntes_rag(db, consulta=consulta, top_k=top_k)
+    # Recortamos lo que devolvemos al modelo: solo id, título,
+    # fragmento y distancia. Sin metadata extra que infle el prompt.
+    return _ok(
+        {
+            "consulta": consulta,
+            "resultados": [
+                {
+                    "apunte_id": r["apunte_id"],
+                    "titulo": r["titulo"],
+                    "fragmento": r["fragmento"],
+                    "distancia": round(float(r["distancia"]), 4),
+                }
+                for r in filas
+            ],
+            # Hint para el modelo: si el mejor match tiene distancia
+            # alta (>1.0), probablemente no hay un apunte relevante.
+            "nota": (
+                "Si todos los resultados tienen distancia > 1.0, "
+                "el match es débil — decile al usuario que no "
+                "encontraste nada claro en lugar de inventar."
+            ),
+        }
+    )
+
+
 # ── consultar_uso — solo lectura ─────────────────────────────────────
 
 
@@ -1361,6 +1446,7 @@ _HANDLERS = {
     "marcar_accion_siguiente_hecha": _marcar_accion_siguiente_hecha,
     "registrar_cierre": _registrar_cierre,
     # Solo lectura
+    "buscar_apuntes": _buscar_apuntes,
     "consultar_uso": _consultar_uso,
 }
 
@@ -1386,6 +1472,7 @@ TABLAS_AFECTADAS = {
     "reactivar_proyecto": ["proyectos"],
     "marcar_accion_siguiente_hecha": ["tareas", "proyectos"],
     "registrar_cierre": ["cierres_dia"],
+    "buscar_apuntes": [],  # solo lectura
     "consultar_uso": [],  # solo lectura
 }
 

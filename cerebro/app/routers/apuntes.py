@@ -5,14 +5,18 @@ papelera, `/restaurar` lo recupera, `/permanente` destruye.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from ..db import Postgrest, get_db
+from ..matix.indexador import indexar_apunte
 from ..schemas.apuntes import ApunteCreate, ApunteRead, ApunteUpdate
 from ..security import require_api_key
+
+logger = logging.getLogger("matix.apuntes")
 
 router = APIRouter(
     prefix="/apuntes",
@@ -50,14 +54,38 @@ async def obtener(apunte_id: UUID, db: Postgrest = Depends(get_db)) -> dict:
     return row
 
 
+async def _reindexar_silencioso(db: Postgrest, apunte: dict) -> None:
+    """Wrapper que indexa el apunte en background y NO propaga
+    excepciones — el usuario ya recibió el 200/201, no queremos
+    abortarlo si OpenAI está caído o algo falla. El próximo edit
+    del apunte (o el script de backfill) lo reintenta."""
+    try:
+        await indexar_apunte(db, apunte)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "indexador falló para apunte %s", apunte.get("id")
+        )
+
+
 @router.post("", response_model=ApunteRead, status_code=status.HTTP_201_CREATED)
-async def crear(body: ApunteCreate, db: Postgrest = Depends(get_db)) -> dict:
-    return await db.insert(TABLE, body.model_dump(mode="json", exclude_none=True))
+async def crear(
+    body: ApunteCreate,
+    bg: BackgroundTasks,
+    db: Postgrest = Depends(get_db),
+) -> dict:
+    creado = await db.insert(TABLE, body.model_dump(mode="json", exclude_none=True))
+    # Indexar en background: la llamada a OpenAI tarda ~1s; no
+    # queremos bloquear el response.
+    bg.add_task(_reindexar_silencioso, db, creado)
+    return creado
 
 
 @router.patch("/{apunte_id}", response_model=ApunteRead)
 async def actualizar(
-    apunte_id: UUID, body: ApunteUpdate, db: Postgrest = Depends(get_db)
+    apunte_id: UUID,
+    body: ApunteUpdate,
+    bg: BackgroundTasks,
+    db: Postgrest = Depends(get_db),
 ) -> dict:
     payload = body.model_dump(mode="json", exclude_unset=True)
     row = await db.update(TABLE, str(apunte_id), payload)
@@ -65,6 +93,9 @@ async def actualizar(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Apunte no encontrado"
         )
+    # Re-indexar si cambió contenido relevante para búsqueda.
+    if any(k in payload for k in ("titulo", "contenido", "etiquetas")):
+        bg.add_task(_reindexar_silencioso, db, row)
     return row
 
 

@@ -42,6 +42,12 @@ _PRECIO_WHISPER_POR_MIN = 0.006
 # y costo en el modo manos libres.)
 _PRECIO_TTS_POR_M_CHARS = 15.0
 
+# text-embedding-3-small · USD por 1M tokens. Es el modelo barato
+# y rápido de OpenAI para embeddings (1536 dims). En la práctica
+# domina por tokens de input; los apuntes del usuario son del
+# orden de cientos a unos miles de tokens cada uno.
+_PRECIO_EMBED_POR_M = 0.020
+
 
 @dataclass
 class _Snapshot:
@@ -53,6 +59,8 @@ class _Snapshot:
     llamadas_whisper: int = 0
     caracteres_tts: int = 0
     llamadas_tts: int = 0
+    tokens_embedding: int = 0
+    llamadas_embedding: int = 0
 
 
 class MedidorUso:
@@ -97,6 +105,13 @@ class MedidorUso:
             self._s.caracteres_tts += int(caracteres)
             self._s.llamadas_tts += 1
 
+    def registrar_embedding(self, tokens: int) -> None:
+        if tokens <= 0:
+            return
+        with self._lock:
+            self._s.tokens_embedding += int(tokens)
+            self._s.llamadas_embedding += 1
+
     def snapshot(self) -> dict[str, Any]:
         """Devuelve el estado actual + costo estimado en USD."""
         with self._lock:
@@ -108,6 +123,7 @@ class MedidorUso:
             + s.completion_tokens * _PRECIO_OUTPUT_POR_M / 1_000_000
             + (s.segundos_whisper / 60.0) * _PRECIO_WHISPER_POR_MIN
             + s.caracteres_tts * _PRECIO_TTS_POR_M_CHARS / 1_000_000
+            + s.tokens_embedding * _PRECIO_EMBED_POR_M / 1_000_000
         )
         return {
             "prompt_tokens": s.prompt_tokens,
@@ -119,6 +135,8 @@ class MedidorUso:
             "llamadas_whisper": s.llamadas_whisper,
             "caracteres_tts": s.caracteres_tts,
             "llamadas_tts": s.llamadas_tts,
+            "tokens_embedding": s.tokens_embedding,
+            "llamadas_embedding": s.llamadas_embedding,
             "costo_usd": round(costo, 6),
             # Útil para la UI: precios usados para el cálculo.
             "precios": {
@@ -127,6 +145,7 @@ class MedidorUso:
                 "output_por_m_usd": _PRECIO_OUTPUT_POR_M,
                 "whisper_por_min_usd": _PRECIO_WHISPER_POR_MIN,
                 "tts_por_m_chars_usd": _PRECIO_TTS_POR_M_CHARS,
+                "embedding_por_m_usd": _PRECIO_EMBED_POR_M,
             },
         }
 
