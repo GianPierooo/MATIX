@@ -66,6 +66,37 @@ jobs:
         env:
           GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
 
+      # Firma de release ESTABLE. Antes, sin estos secrets, Gradle
+      # firmaba el release con la debug keystore de cada VM del CI,
+      # distinta en cada run. Resultado: APKs con firma diferente, y
+      # las OTA fallaban silenciosamente al instalar (el sistema
+      # rechaza updates con cambio de firma). Con un keystore propio
+      # guardado como secret + key.properties generado acá, todos los
+      # APKs salen firmados igual y las OTA fluyen.
+      - name: Decode keystore + key.properties
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          STORE_PW: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_PW: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KS_B64" ]; then
+            echo "::error::ANDROID_KEYSTORE_B64 vacío. La build NO va a firmarse con llave estable."
+            exit 1
+          fi
+          echo "$KS_B64" | base64 -d > app/android/app/matix-release.jks
+          cat > app/android/key.properties <<EOF
+          storeFile=app/matix-release.jks
+          storePassword=$STORE_PW
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PW
+          EOF
+          # Sanity: confirmar que keytool ve el alias correctamente
+          # ANTES de buildear (mejor fallar acá con mensaje claro).
+          keytool -list -keystore app/android/app/matix-release.jks \
+            -storepass "$STORE_PW" -alias "$KEY_ALIAS" > /dev/null
+          echo "✓ Keystore válido · alias=$KEY_ALIAS"
+
       # build_number = GITHUB_RUN_NUMBER. Monótono creciente; la app
       # lo lee local con package_info_plus y lo compara contra el de
       # /api/v1/version para decidir si hay update.

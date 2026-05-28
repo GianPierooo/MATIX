@@ -11,6 +11,9 @@
 # ningún .jks ni properties con la contraseña va al repo.
 *.jks
 app/android/key.properties
+# Notas locales con credenciales del keystore (passwords, alias) que
+# generamos para subir como secrets a GitHub. Nunca va al repo.
+.keystore-creds.local
 
 # Firebase: el `google-services.json` trae el appId del proyecto.
 # No es un secreto crítico (Firebase lo considera "client config"),
