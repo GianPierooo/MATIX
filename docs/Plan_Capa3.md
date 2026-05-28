@@ -40,21 +40,37 @@ Resultado: Matix responde "Hablaste de eso en tu apunte «Cálculo
 III · Continuidad». Decías que…", o "No tengo nada anotado sobre
 eso".
 
-## Paso 2 — Modo tutor
+## Paso 2 — Modo tutor (resumir / preguntar / explicar) ✅
 
-Sobre la base del Paso 1, Matix puede actuar como tutor del
-material del usuario.
+Sobre la base del Paso 1, Matix actúa como tutor del material del
+usuario. Implementado con UNA tool nueva (`leer_apunte` para
+acceder al contenido completo) + system prompt extendido. Las
+capacidades no son tools dedicadas — son comportamientos guiados
+por el prompt sobre la base de búsqueda + lectura del apunte.
 
-- **Resumir un apunte** o un conjunto: tool `resumir_apuntes(filtro)`
-  o conversacional sobre el resultado de `buscar_apuntes`.
-- **Generar preguntas de práctica** desde un apunte (tipo examen):
-  tool `generar_preguntas(apunte_id, n)`.
-- **Explicar un tema** con tus propios apuntes como base, no con
-  conocimiento genérico del modelo. Matix razona sobre lo que el
-  usuario ya escribió.
-- **Sesión de estudio**: voz manos libres + tutor → Matix pregunta,
-  el usuario responde, Matix corrige. Reusa la pantalla manos
-  libres y el TTS de Capa 2.
+- **Resumir** un apunte o un conjunto, citando título y resumiendo
+  con palabras propias.
+- **Preguntas de práctica** desde un apunte (5-8, conceptuales y
+  de aplicación, sin las respuestas en el primer turno).
+- **Explicar** un tema usando el apunte como fuente primaria,
+  complementando con conocimiento general cuando hace falta y
+  distinguiéndolo claramente.
+
+## Paso 3 — Sesión de estudio en voz ✅ (cierra Capa 3)
+
+Repaso interactivo conducido por Matix en modo manos libres,
+turno a turno. NO suma tools nuevas — la pieza central es el
+system prompt que codifica el protocolo de la sesión.
+
+- Punto de entrada: botón "Repasar" en el AppBar de Universidad
+  → abre manos libres con seed que invita al usuario a elegir
+  el apunte.
+- El protocolo: una pregunta por turno, evaluación específica
+  contra el apunte, feedback con cita, ritmo sin pausas
+  "¿seguimos?". Cierra con resumen (qué anduvo bien / qué
+  repasar).
+- Grounding: si el apunte no alcanza para evaluar lo que dijo
+  el usuario, Matix lo dice — no inventa.
 
 ---
 

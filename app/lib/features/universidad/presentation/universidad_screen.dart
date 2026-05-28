@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../theme/matix_colors.dart';
 import '../../../theme/matix_spacing.dart';
 import '../../cursos/domain/curso.dart';
+import '../../matix/presentation/manos_libres_screen.dart';
 import '../providers/universidad_providers.dart';
 import 'detalle_curso_screen.dart';
 import 'nuevo_curso_screen.dart';
@@ -19,6 +20,22 @@ class UniversidadScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Universidad'),
         actions: [
+          // Sesión de estudio por voz (Capa 3 Paso 3). Abre manos
+          // libres con un seed que pone a Matix en modo "tutor de
+          // sesión": empieza preguntando qué repasar.
+          IconButton(
+            tooltip: 'Repasar (sesión de estudio)',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const ManosLibresScreen(
+                  seedMensaje:
+                      'Quiero una sesión de estudio. Pregúntame de qué '
+                      'apunte querés tomarme examen.',
+                ),
+              ),
+            ),
+            icon: const Icon(Icons.psychology_alt_outlined),
+          ),
           IconButton(
             tooltip: 'Nuevo curso',
             onPressed: () => Navigator.of(context).push(
