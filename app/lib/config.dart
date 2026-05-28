@@ -38,6 +38,25 @@ class MatixConfig {
     defaultValue: 'dev',
   );
 
+  /// Build number inyectado en compile-time por el workflow CI
+  /// (= `GITHUB_RUN_NUMBER`). Monótono creciente.
+  ///
+  /// NO se usa el `versionCode` del AndroidManifest porque
+  /// `flutter build --split-per-abi` lo multiplica por una constante
+  /// (versionCode = base * 1000 + abi_offset) para diferenciar
+  /// APKs por ABI. Eso hace que `package_info_plus.buildNumber` no
+  /// se corresponda con el build "lógico" que conoce el cerebro,
+  /// y rompe la comparación al chequear updates.
+  ///
+  /// Default 0 cuando se buildea sin pasar el define (dev local),
+  /// lo que hace que cualquier versión publicada del servidor se
+  /// detecte como "nueva" en builds locales — comportamiento OK
+  /// para desarrollo.
+  static const int buildNumber = int.fromEnvironment(
+    'MATIX_BUILD_NUMBER',
+    defaultValue: 0,
+  );
+
   static bool get hasApiKey => apiKey.isNotEmpty;
 
   /// `true` si la URL configurada es HTTPS (i.e. estamos hablando con

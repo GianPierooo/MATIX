@@ -80,11 +80,19 @@ jobs:
       - name: Build APK release (split-per-abi)
         working-directory: app
         run: |
+          # --build-number setea el versionCode del manifest.
+          # --dart-define MATIX_BUILD_NUMBER inyecta el mismo número
+          # como constante de compile-time leíble desde Dart. Lo
+          # segundo es lo que usa el UpdateService para comparar
+          # contra /version: el manifest, con --split-per-abi, viene
+          # con versionCode mutado (multiplicado por 1000 + offset
+          # de ABI), por eso no se puede usar.
           flutter build apk --release --split-per-abi \
             --build-number=$BUILD_NUMBER \
             --dart-define=MATIX_API_URL="$MATIX_API_URL" \
             --dart-define=MATIX_API_KEY="$MATIX_API_KEY" \
-            --dart-define=MATIX_ENV=prod
+            --dart-define=MATIX_ENV=prod \
+            --dart-define=MATIX_BUILD_NUMBER=$BUILD_NUMBER
           ls -la build/app/outputs/flutter-apk/
         env:
           MATIX_API_URL: ${{ secrets.MATIX_API_URL }}

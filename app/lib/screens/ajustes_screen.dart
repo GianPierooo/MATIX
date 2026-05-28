@@ -395,64 +395,270 @@ class _Accion extends StatelessWidget {
 
 // ─── Auto-actualización (Capa Infra · post-Firebase) ────────────────
 
-/// Tile que pide explícitamente al servidor si hay versión nueva.
-/// Muestra el estado (chequeando · al día · disponible · sin red) y,
-/// si hay update, dispara el mismo diálogo que el chequeo automático
-/// del arranque.
+/// Card diagnóstica de versión: muestra build instalado, build
+/// disponible (cuando se pudo consultar), y estado claro con el
+/// detalle del error si lo hubo.
+///
+/// Diseñado para no ser caja negra: si algo va mal, querés saber
+/// si fue red, auth, parseo, o build local sin inyectar. Muestra
+/// las tres líneas — instalado · disponible · estado — siempre
+/// que sea posible, en vez de un mensaje único ambiguo.
 class _BuscarActualizacionTile extends ConsumerWidget {
   const _BuscarActualizacionTile();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final estado = ref.watch(updateCheckProvider);
-    return estado.when(
-      loading: () => const _Accion(
-        label: 'Chequeando…',
-        icon: Icons.refresh,
-        onTap: null,
-        subtitle: 'Consultando al cerebro',
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: MatixColors.card,
+        borderRadius: BorderRadius.circular(12),
       ),
-      error: (e, _) => _Accion(
-        label: 'Buscar actualizaciones',
-        icon: Icons.refresh,
-        onTap: () => ref.invalidate(updateCheckProvider),
-        subtitle: 'Último chequeo falló — tocá para reintentar',
-        subtitleColor: MatixColors.red,
-      ),
-      data: (result) {
-        if (result is HayActualizacion) {
-          return _Accion(
-            label: 'Descargar versión nueva',
-            icon: Icons.system_update_alt,
-            onTap: () => mostrarUpdateDialog(
-              context,
-              info: result.info,
+      child: estado.when(
+        loading: () => const _DiagnosticoLoading(),
+        error: (e, _) => _DiagnosticoFila(
+          buildLocal: MatixConfig.buildNumber,
+          buildRemoto: null,
+          estadoLabel: 'Provider falló',
+          estadoColor: MatixColors.red,
+          detalle: e.toString(),
+          onReintentar: () => ref.invalidate(updateCheckProvider),
+        ),
+        data: (result) {
+          if (result is HayActualizacion) {
+            return _DiagnosticoFila(
               buildLocal: result.buildLocal,
+              buildRemoto: result.info.buildNumber,
+              estadoLabel:
+                  'Hay actualización · build ${result.info.buildNumber} (${result.info.version})',
+              estadoColor: MatixColors.accent,
+              detalle: result.info.notas,
+              ctaLabel: 'Descargar e instalar',
+              ctaIcon: Icons.system_update_alt,
+              onCta: () => mostrarUpdateDialog(
+                context,
+                info: result.info,
+                buildLocal: result.buildLocal,
+              ),
+              onReintentar: () => ref.invalidate(updateCheckProvider),
+            );
+          }
+          if (result is Actualizado) {
+            return _DiagnosticoFila(
+              buildLocal: result.buildLocal,
+              buildRemoto: result.buildRemoto,
+              estadoLabel: 'Al día',
+              estadoColor: MatixColors.green,
+              detalle: result.buildRemoto == null
+                  ? 'El servidor todavía no publicó ninguna versión.'
+                  : null,
+              onReintentar: () => ref.invalidate(updateCheckProvider),
+            );
+          }
+          if (result is ChequeoFallido) {
+            return _DiagnosticoFila(
+              buildLocal: result.buildLocal,
+              buildRemoto: null,
+              estadoLabel: _labelDeRazon(result.razon),
+              estadoColor: _colorDeRazon(result.razon),
+              detalle: result.detalle,
+              onReintentar: () => ref.invalidate(updateCheckProvider),
+            );
+          }
+          return const SizedBox.shrink();
+        },
+      ),
+    );
+  }
+
+  String _labelDeRazon(RazonFallo r) => switch (r) {
+        RazonFallo.sinRed => 'Sin conexión al cerebro',
+        RazonFallo.authInvalida => 'Error de autenticación',
+        RazonFallo.errorServidor => 'El cerebro devolvió error',
+        RazonFallo.parseo => 'Respuesta inesperada del cerebro',
+        RazonFallo.buildLocalAusente => 'Build local no inyectado',
+        RazonFallo.otro => 'Falló el chequeo',
+      };
+
+  Color _colorDeRazon(RazonFallo r) => switch (r) {
+        RazonFallo.sinRed => MatixColors.amber,
+        RazonFallo.authInvalida => MatixColors.red,
+        RazonFallo.errorServidor => MatixColors.red,
+        RazonFallo.parseo => MatixColors.red,
+        RazonFallo.buildLocalAusente => MatixColors.amber,
+        RazonFallo.otro => MatixColors.amber,
+      };
+}
+
+class _DiagnosticoLoading extends StatelessWidget {
+  const _DiagnosticoLoading();
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: MatixColors.accent,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          'Chequeando versión…',
+          style: TextStyle(
+            fontSize: 14,
+            color: MatixColors.text,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DiagnosticoFila extends StatelessWidget {
+  const _DiagnosticoFila({
+    required this.buildLocal,
+    required this.buildRemoto,
+    required this.estadoLabel,
+    required this.estadoColor,
+    required this.onReintentar,
+    this.detalle,
+    this.ctaLabel,
+    this.ctaIcon,
+    this.onCta,
+  });
+
+  final int buildLocal;
+  final int? buildRemoto;
+  final String estadoLabel;
+  final Color estadoColor;
+  final String? detalle;
+  final String? ctaLabel;
+  final IconData? ctaIcon;
+  final VoidCallback? onCta;
+  final VoidCallback onReintentar;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(
+              Icons.system_update_alt,
+              color: MatixColors.accent,
+              size: 20,
             ),
-            subtitle:
-                'Build ${result.buildLocal} → ${result.info.buildNumber} (${result.info.version})',
-            subtitleColor: MatixColors.accent,
-          );
-        }
-        if (result is Actualizado) {
-          return _Accion(
-            label: 'Buscar actualizaciones',
-            icon: Icons.refresh,
-            onTap: () => ref.invalidate(updateCheckProvider),
-            subtitle: 'Estás al día (build ${result.buildLocal})',
-          );
-        }
-        if (result is ChequeoFallido) {
-          return _Accion(
-            label: 'Buscar actualizaciones',
-            icon: Icons.refresh,
-            onTap: () => ref.invalidate(updateCheckProvider),
-            subtitle: 'Sin conexión al cerebro — tocá para reintentar',
-            subtitleColor: MatixColors.amber,
-          );
-        }
-        return const SizedBox.shrink();
-      },
+            const SizedBox(width: 10),
+            Text(
+              'Versión',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: MatixColors.text,
+              ),
+            ),
+            const Spacer(),
+            IconButton(
+              tooltip: 'Reintentar',
+              icon: const Icon(Icons.refresh, size: 18),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(
+                minWidth: 32,
+                minHeight: 32,
+              ),
+              onPressed: onReintentar,
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        _linea(
+          'Instalado',
+          buildLocal == 0
+              ? 'build 0 (no inyectado — build local)'
+              : 'build $buildLocal',
+          color: buildLocal == 0 ? MatixColors.muted : MatixColors.text,
+        ),
+        const SizedBox(height: 2),
+        _linea(
+          'Disponible',
+          buildRemoto == null ? '—' : 'build $buildRemoto',
+          color: buildRemoto == null ? MatixColors.muted : MatixColors.text,
+        ),
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: estadoColor.withValues(alpha: 0.12),
+            border: Border.all(
+              color: estadoColor.withValues(alpha: 0.4),
+            ),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            estadoLabel,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: estadoColor,
+            ),
+          ),
+        ),
+        if (detalle != null && detalle!.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            detalle!,
+            style: const TextStyle(
+              fontSize: 11.5,
+              color: MatixColors.muted,
+              height: 1.35,
+            ),
+          ),
+        ],
+        if (ctaLabel != null && onCta != null) ...[
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: onCta,
+              icon: Icon(ctaIcon ?? Icons.download_rounded, size: 18),
+              label: Text(ctaLabel!),
+              style: FilledButton.styleFrom(
+                backgroundColor: MatixColors.accent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _linea(String etiqueta, String valor, {required Color color}) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 80,
+          child: Text(
+            etiqueta,
+            style: TextStyle(fontSize: 12, color: MatixColors.muted),
+          ),
+        ),
+        Text(
+          valor,
+          style: TextStyle(
+            fontSize: 12.5,
+            color: color,
+            fontFamily: 'monospace',
+          ),
+        ),
+      ],
     );
   }
 }
