@@ -20,6 +20,7 @@ defensa contra ataques CSRF.
 from __future__ import annotations
 
 import secrets
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -43,11 +44,33 @@ router = APIRouter(
 # (Google no manda nuestra API key). El `state` es la defensa.
 router_callback = APIRouter(prefix="/google", tags=["google"])
 
-# `state` en memoria del proceso: lo generamos al pedir la URL y
-# lo verificamos en el callback. Single-user app + Railway con 1
-# replica = dict en memoria alcanza. Si en el futuro hay
-# escalado horizontal, lo movemos a Supabase con TTL.
-_PENDING_STATES: set[str] = set()
+# Estados pendientes del round-trip de OAuth, indexados por el `state`
+# que generamos. Cada entrada guarda el `code_verifier` de PKCE — sin
+# esto, el callback no puede cerrar el intercambio code→tokens y
+# Google rechaza con `invalid_grant: Missing code verifier`.
+#
+# Single-user app + Railway con 1 replica = dict en memoria alcanza.
+# Si en el futuro hay escalado horizontal, esto va a Supabase con TTL.
+_PENDING_STATES: dict[str, dict[str, Any]] = {}
+
+# TTL del state pendiente: 10 minutos. El usuario tiene que aprobar
+# el consentimiento en ese plazo; pasado eso, la entrada se cae para
+# no acumular basura en memoria.
+_STATE_TTL_SEG = 600
+
+
+def _prune_estados_viejos() -> None:
+    """Elimina states con más de `_STATE_TTL_SEG` de antigüedad.
+    Lo invocamos en cada generación/lookup para mantener el dict
+    chico sin necesidad de un task de background."""
+    ahora = time.monotonic()
+    expirados = [
+        s
+        for s, info in _PENDING_STATES.items()
+        if ahora - info["creado_en"] > _STATE_TTL_SEG
+    ]
+    for s in expirados:
+        _PENDING_STATES.pop(s, None)
 
 
 def _no_configurado() -> HTTPException:
@@ -72,9 +95,9 @@ async def estado(db: Postgrest = Depends(get_db)) -> dict[str, Any]:
 async def construir_url_autorizacion() -> dict[str, str]:
     """Genera y devuelve la URL que la app le pasa al navegador.
 
-    El `state` se guarda en memoria — el callback la valida para
-    asegurarse de que la respuesta corresponde a una autorización
-    que nosotros iniciamos.
+    Guardamos en memoria el `state` (defensa CSRF) y el `code_verifier`
+    de PKCE — el callback los necesita para cerrar el intercambio
+    code→tokens con Google.
     """
     if not (
         settings.google_client_id
@@ -82,16 +105,19 @@ async def construir_url_autorizacion() -> dict[str, str]:
         and settings.google_redirect_uri
     ):
         raise _no_configurado()
+    _prune_estados_viejos()
     state = secrets.token_urlsafe(24)
-    _PENDING_STATES.add(state)
     try:
-        url = goauth.url_de_autorizacion(state)
+        url, code_verifier = goauth.url_de_autorizacion(state)
     except RuntimeError as e:
-        _PENDING_STATES.discard(state)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(e),
         ) from e
+    _PENDING_STATES[state] = {
+        "code_verifier": code_verifier,
+        "creado_en": time.monotonic(),
+    }
     return {"url": url, "state": state}
 
 
@@ -110,20 +136,26 @@ async def callback(
             mensaje=f"Google reportó error: {error}",
         ), status_code=400)
 
-    if state not in _PENDING_STATES:
+    _prune_estados_viejos()
+    info = _PENDING_STATES.pop(state, None)
+    if info is None:
         return HTMLResponse(_pagina_resultado(
             ok=False,
             mensaje=(
-                "El state no coincide. Esto puede pasar si abriste "
-                "el link de autorización en otro dispositivo o si "
-                "ya expiró. Volvé a tocar 'Conectar Google' en la app."
+                "El state no coincide o expiró. Esto puede pasar si "
+                "abriste el link de autorización en otro dispositivo, "
+                "si tardaste más de 10 minutos en autorizar o si el "
+                "cerebro se reinició mientras tanto. Volvé a tocar "
+                "'Conectar Google' en la app."
             ),
         ), status_code=400)
-    _PENDING_STATES.discard(state)
 
     try:
         email = await goauth.completar_autorizacion(
-            db, code=code, state=state
+            db,
+            code=code,
+            state=state,
+            code_verifier=info["code_verifier"],
         )
     except Exception as e:  # noqa: BLE001
         return HTMLResponse(_pagina_resultado(

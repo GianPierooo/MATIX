@@ -45,7 +45,16 @@ def _build_flow(state: str | None = None) -> Flow:
     """Arma un `Flow` de google-auth con la config de cliente del
     cerebro (Web application credentials del proyecto Google Cloud).
     El `state` lo usa Google para protegernos de CSRF — lo pasamos
-    al hacer la URL y lo verificamos en el callback."""
+    al hacer la URL y lo verificamos en el callback.
+
+    Importante: en `google-auth-oauthlib >= 1.x`, el `Flow` viene con
+    `autogenerate_code_verifier=True` por defecto, así que cada vez
+    que se llama a `authorization_url()` se genera un nuevo
+    `code_verifier` y se manda el `code_challenge` correspondiente a
+    Google. Eso obliga a persistir el verifier entre la generación
+    de la URL y el callback (ver `url_de_autorizacion` y
+    `completar_autorizacion`).
+    """
     if not (
         settings.google_client_id
         and settings.google_client_secret
@@ -73,18 +82,26 @@ def _build_flow(state: str | None = None) -> Flow:
     return flow
 
 
-def url_de_autorizacion(state: str) -> str:
-    """Genera la URL a la que la app manda al usuario.
+def url_de_autorizacion(state: str) -> tuple[str, str]:
+    """Genera la URL de consentimiento y devuelve `(url, code_verifier)`.
 
-    - `access_type='offline'` para que Google nos dé refresh_token
-      (sin esto, solo nos da access_token de 1 hora y nunca más).
-    - `prompt='consent'` fuerza que aparezca la pantalla aunque ya
-      hayamos autorizado antes — necesario para garantizar que
-      refresh_token venga en la respuesta. Sin esto, después de la
-      primera vez Google no lo manda.
-    - `include_granted_scopes='true'` permite que en pasos futuros,
-      cuando sumemos scopes, Google haga el incremental consent
-      sin perder los previos.
+    El `code_verifier` del PKCE lo genera el `Flow` automáticamente
+    al armar la URL (google-auth-oauthlib lo trae habilitado por
+    defecto). Google guarda el `code_challenge` derivado y, en el
+    intercambio code→tokens, exige que se mande de vuelta el
+    `code_verifier` original. Por eso esta función lo devuelve junto
+    con la URL: el router tiene que persistirlo indexado por `state`
+    y pasarlo a `completar_autorizacion()` en el callback. Si no, el
+    token exchange falla con `invalid_grant: Missing code verifier`.
+
+    Parámetros que pedimos a Google:
+    - `access_type='offline'` para que nos dé refresh_token (sin esto,
+      solo access_token de 1 hora y nunca más).
+    - `prompt='consent'` fuerza la pantalla aunque ya hayamos
+      autorizado antes — necesario para garantizar que refresh_token
+      venga en la respuesta.
+    - `include_granted_scopes='true'` permite incremental consent en
+      futuros pasos sin perder scopes previos.
     """
     flow = _build_flow(state=state)
     url, _ = flow.authorization_url(
@@ -92,15 +109,23 @@ def url_de_autorizacion(state: str) -> str:
         prompt="consent",
         include_granted_scopes="true",
     )
-    return url
+    return url, flow.code_verifier
 
 
 async def completar_autorizacion(
-    db: Postgrest, code: str, state: str
+    db: Postgrest, code: str, state: str, code_verifier: str
 ) -> str:
     """Intercambia el `code` por tokens y los guarda en Supabase.
-    Devuelve el email de la cuenta autorizada."""
+    Devuelve el email de la cuenta autorizada.
+
+    `code_verifier` es el que generamos al armar la URL — Google lo
+    exige para cerrar el PKCE iniciado en la fase de autorización.
+    Se lo seteamos al Flow ANTES de `fetch_token` y desactivamos el
+    autogenerate para que no nos genere otro distinto.
+    """
     flow = _build_flow(state=state)
+    flow.code_verifier = code_verifier
+    flow.autogenerate_code_verifier = False
     flow.fetch_token(code=code)
     creds = flow.credentials
 
