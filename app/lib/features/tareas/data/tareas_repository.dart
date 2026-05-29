@@ -6,6 +6,8 @@
 import '../../../api/matix_client.dart';
 import '../../../core/notif_id.dart';
 import '../../../core/notificaciones_service.dart';
+import '../../nudges/data/nudges_prefs.dart';
+import '../../nudges/domain/nudges.dart';
 import '../domain/selectores.dart';
 import '../domain/tarea.dart';
 
@@ -18,9 +20,10 @@ import '../domain/tarea.dart';
 /// se deriva del uuid de la tarea (ver `notif_id.dart`), así es
 /// estable entre runs sin necesidad de persistir nada.
 class TareasRepository {
-  TareasRepository(this._client, this._notif);
+  TareasRepository(this._client, this._notif, this._nudgesPrefs);
   final MatixClient _client;
   final NotificacionesService _notif;
+  final NudgesPrefs _nudgesPrefs;
 
   // ─── Tareas ───────────────────────────────────────────────────────────
 
@@ -73,6 +76,7 @@ class TareasRepository {
     final j = await _client.post('/api/v1/tareas', body);
     final t = Tarea.fromJson(j);
     await _reprogramarRecordatorio(t);
+    await _reprogramarNudges(t);
     return t;
   }
 
@@ -80,6 +84,7 @@ class TareasRepository {
     final j = await _client.patch('/api/v1/tareas/$id', cambios);
     final t = Tarea.fromJson(j);
     await _reprogramarRecordatorio(t);
+    await _reprogramarNudges(t);
     return t;
   }
 
@@ -98,6 +103,7 @@ class TareasRepository {
     // dispararla.
     await _client.delete('/api/v1/tareas/$id');
     await _notif.cancelar(notifIdDe(id));
+    await _cancelarNudges(id);
   }
 
   /// Saca una tarea de la papelera. Devuelve la tarea restaurada
@@ -106,6 +112,7 @@ class TareasRepository {
     final j = await _client.post('/api/v1/tareas/$id/restaurar', const {});
     final t = Tarea.fromJson(j);
     await _reprogramarRecordatorio(t);
+    await _reprogramarNudges(t);
     return t;
   }
 
@@ -115,6 +122,7 @@ class TareasRepository {
     await _client.delete('/api/v1/tareas/$id/permanente');
     // notif ya cancelada en `borrar`, pero por si acaso:
     await _notif.cancelar(notifIdDe(id));
+    await _cancelarNudges(id);
   }
 
   /// Cancela la notificación previa (si la había) y programa una
@@ -138,7 +146,55 @@ class TareasRepository {
       titulo: t.titulo,
       cuerpo: _cuerpoRecordatorio(t),
       cuando: r.toLocal(),
+      payload: 'tarea:${t.id}',
     );
+  }
+
+  // ─── Nudges escalados (Urgencia-2) ────────────────────────────────────
+
+  /// Cancela TODOS los posibles nudges de una tarea (rango fijo de ids,
+  /// sin guardar estado) y, si corresponde, agenda el calendario nuevo.
+  /// No agenda nada para tareas completadas, sin plazo, o con los nudges
+  /// apagados — y `programar` ignora puntos en el pasado.
+  Future<void> _reprogramarNudges(Tarea t) async {
+    await _cancelarNudges(t.id);
+    if (t.completada || t.venceEn == null) return;
+    final cfg = await _nudgesPrefs.leerConfig();
+    final silenciada = await _nudgesPrefs.estaSilenciada(t.id);
+    final plan = planNudges(
+      t,
+      DateTime.now(),
+      intensidad: cfg.intensidad,
+      silencio: cfg.silencio,
+      silenciada: silenciada,
+    );
+    if (plan.isEmpty) return;
+    await _notif.pedirPermisos();
+    for (final n in plan) {
+      await _notif.programar(
+        id: n.id,
+        titulo: t.titulo,
+        cuerpo: n.cuerpo,
+        cuando: n.cuando,
+        payload: 'tarea:${t.id}',
+      );
+    }
+  }
+
+  Future<void> _cancelarNudges(String tareaId) async {
+    for (var i = 0; i < kMaxNudges; i++) {
+      await _notif.cancelar(notifIdDeNudge(tareaId, i));
+    }
+  }
+
+  /// Reprograma los nudges de TODAS las tareas. Lo llama el ajuste
+  /// global de nudges (intensidad / horas de silencio) para que el
+  /// cambio aplique de inmediato sin tener que editar tarea por tarea.
+  Future<void> reprogramarNudgesDeTodas() async {
+    final tareas = await listar();
+    for (final t in tareas) {
+      await _reprogramarNudges(t);
+    }
   }
 
   String _cuerpoRecordatorio(Tarea t) {

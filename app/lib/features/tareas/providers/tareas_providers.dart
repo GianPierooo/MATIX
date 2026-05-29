@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/notificaciones_service.dart';
 import '../../../core/providers.dart';
+import '../../nudges/providers/nudges_providers.dart';
 import '../data/selectores_repository.dart';
 import '../data/tareas_repository.dart';
 import '../domain/selectores.dart';
@@ -14,6 +15,7 @@ final tareasRepositoryProvider = Provider<TareasRepository>((ref) {
   return TareasRepository(
     ref.watch(matixClientProvider),
     ref.watch(notificacionesServiceProvider),
+    ref.watch(nudgesPrefsProvider),
   );
 });
 

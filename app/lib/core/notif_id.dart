@@ -34,3 +34,19 @@ int notifIdDeOcurrencia(String uuid, DateTime dia) {
   }
   return hash & 0x7fffffff;
 }
+
+/// Id de notificación estable para el N-ésimo nudge escalado de una
+/// tarea (Capa 7 · Urgencia-2). Una tarea tiene varios nudges (uno por
+/// punto del calendario), así que derivamos un id distinto por índice
+/// con FNV-1a sobre `'$uuid#nudge$indice'`. Determinista entre runs:
+/// permite cancelar/reprogramar el rango fijo 0..kMaxNudges-1 sin
+/// guardar estado. No choca con [notifIdDe] (el del recordatorio único).
+int notifIdDeNudge(String uuid, int indice) {
+  final clave = '$uuid#nudge$indice';
+  var hash = 0x811c9dc5;
+  for (final code in clave.codeUnits) {
+    hash ^= code;
+    hash = (hash * 0x01000193) & 0xffffffff;
+  }
+  return hash & 0x7fffffff;
+}

@@ -6,6 +6,7 @@ import '../../../api/matix_client.dart';
 import '../../../core/undo_snackbar.dart';
 import '../../../core/urgencia.dart';
 import '../../../theme/matix_colors.dart';
+import '../../nudges/providers/nudges_providers.dart';
 import '../domain/selectores.dart';
 import '../domain/tarea.dart';
 import '../providers/tareas_providers.dart';
@@ -35,6 +36,10 @@ class _NuevaTareaScreenState extends ConsumerState<NuevaTareaScreen> {
   String? _cursoId;
   String? _proyectoId;
 
+  /// Urgencia-2: si está en true, esta tarea NO manda nudges escalados
+  /// (interruptor por tarea). Se persiste en prefs, no en el hub.
+  bool _nudgesSilenciados = false;
+
   bool _cargandoInicial = false;
   bool _guardando = false;
   String? _error;
@@ -59,6 +64,8 @@ class _NuevaTareaScreenState extends ConsumerState<NuevaTareaScreen> {
     setState(() => _cargandoInicial = true);
     try {
       final t = await ref.read(tareasRepositoryProvider).obtener(widget.tareaId!);
+      final silenciada =
+          await ref.read(nudgesPrefsProvider).estaSilenciada(widget.tareaId!);
       setState(() {
         _tituloCtrl.text = t.titulo;
         _notaCtrl.text = t.nota ?? '';
@@ -69,6 +76,7 @@ class _NuevaTareaScreenState extends ConsumerState<NuevaTareaScreen> {
         _categoriaId = t.categoriaId;
         _cursoId = t.cursoId;
         _proyectoId = t.proyectoId;
+        _nudgesSilenciados = silenciada;
       });
     } catch (e) {
       setState(() => _error = e.toString());
@@ -93,6 +101,11 @@ class _NuevaTareaScreenState extends ConsumerState<NuevaTareaScreen> {
     final repo = ref.read(tareasRepositoryProvider);
     try {
       if (_esEdicion) {
+        // Persistimos el interruptor de nudges ANTES de actualizar: la
+        // reprogramación que dispara `actualizar` lee este valor.
+        await ref
+            .read(nudgesPrefsProvider)
+            .setSilenciada(widget.tareaId!, _nudgesSilenciados);
         await repo.actualizar(widget.tareaId!, {
           'titulo': _tituloCtrl.text.trim(),
           'nota': _notaCtrl.text.trim().isEmpty ? null : _notaCtrl.text.trim(),
@@ -249,6 +262,35 @@ class _NuevaTareaScreenState extends ConsumerState<NuevaTareaScreen> {
                             child: ContadorUrgencia(
                               objetivo: _venceEn!,
                               fondo: true,
+                            ),
+                          ),
+                        // Urgencia-2: interruptor de nudges por tarea. Solo
+                        // tiene sentido al editar una tarea con plazo.
+                        if (_esEdicion && _venceEn != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              dense: true,
+                              value: !_nudgesSilenciados,
+                              onChanged: (v) =>
+                                  setState(() => _nudgesSilenciados = !v),
+                              title: const Text(
+                                'Avisos de urgencia',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: MatixColors.text,
+                                ),
+                              ),
+                              subtitle: Text(
+                                _nudgesSilenciados
+                                    ? 'Apagados para esta tarea'
+                                    : 'Te avisaré más seguido al acercarse',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: MatixColors.muted,
+                                ),
+                              ),
                             ),
                           ),
 

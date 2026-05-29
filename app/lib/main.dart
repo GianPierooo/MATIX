@@ -18,6 +18,7 @@ import 'features/eventos/presentation/nuevo_evento_screen.dart';
 import 'features/eventos/providers/eventos_providers.dart';
 import 'features/matix/data/captura_apunte_repository.dart';
 import 'features/matix/providers/captura_apunte_providers.dart';
+import 'features/tareas/presentation/nueva_tarea_screen.dart';
 import 'screens/home_shell.dart';
 import 'theme/matix_theme.dart';
 
@@ -91,6 +92,16 @@ class _MatixAppState extends ConsumerState<MatixApp> {
         // Recordatorio de evento (Cal-2): abrimos su detalle/edición.
         // El detalle es la propia pantalla de edición.
         unawaited(_abrirEvento(payload.substring('evento:'.length)));
+      } else if (payload != null && payload.startsWith('tarea:')) {
+        // Nudge de urgencia (Urgencia-2) o recordatorio de tarea:
+        // tocar abre la tarea para actuar sobre ella.
+        _navigatorKey.currentState?.push(
+          MaterialPageRoute(
+            builder: (_) => NuevaTareaScreen(
+              tareaId: payload.substring('tarea:'.length),
+            ),
+          ),
+        );
       }
     });
     // Aseguramos la inicialización (carga timezones + plugin). Si
