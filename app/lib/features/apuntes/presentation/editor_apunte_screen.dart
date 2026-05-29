@@ -6,8 +6,14 @@ import '../../../theme/matix_colors.dart';
 import '../providers/apuntes_providers.dart';
 
 class EditorApunteScreen extends ConsumerStatefulWidget {
-  const EditorApunteScreen({super.key, this.apunteId});
+  const EditorApunteScreen({super.key, this.apunteId, this.avisoOcr});
   final String? apunteId;
+
+  /// Capa 7 · Paso 1: si la pantalla se abre tras un "apunte desde
+  /// foto" y el OCR falló, ese mensaje se pinta como banner ámbar.
+  /// Null en cualquier otro caso.
+  final String? avisoOcr;
+
   @override
   ConsumerState<EditorApunteScreen> createState() =>
       _EditorApunteScreenState();
@@ -138,6 +144,10 @@ class _EditorApunteScreenState extends ConsumerState<EditorApunteScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(20),
                 children: [
+                  if (widget.avisoOcr != null) ...[
+                    _BannerOcrFallo(mensaje: widget.avisoOcr!),
+                    const SizedBox(height: 16),
+                  ],
                   TextField(
                     controller: _titulo,
                     decoration: const InputDecoration(labelText: 'Título'),
@@ -181,6 +191,48 @@ class _EditorApunteScreenState extends ConsumerState<EditorApunteScreen> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+class _BannerOcrFallo extends StatelessWidget {
+  const _BannerOcrFallo({required this.mensaje});
+  final String mensaje;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: MatixColors.amber.withValues(alpha: 0.12),
+        border:
+            Border.all(color: MatixColors.amber.withValues(alpha: 0.45)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 1),
+            child: Icon(
+              Icons.image_search,
+              color: MatixColors.amber,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              mensaje,
+              style: const TextStyle(
+                fontSize: 12.5,
+                color: MatixColors.text,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -31,6 +31,13 @@
          lo manejamos en el flujo de descarga). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 
+    <!-- Capa 7 Paso 1: apunte desde foto. CAMERA habilita
+         `ImageSource.camera` de image_picker. Para galería NO
+         hace falta declarar `READ_MEDIA_IMAGES` — image_picker
+         usa el Photo Picker del sistema (Android 13+) que opera
+         sin permisos. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+
     <application
         android:label="matix"
         android:name="${applicationName}"

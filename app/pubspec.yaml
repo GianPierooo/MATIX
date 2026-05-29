@@ -79,6 +79,15 @@ dependencies:
   # callback vuelve al cerebro y el usuario vuelve a la app a mano.
   url_launcher: ^6.3.1
 
+  # Capa 8 reducida Paso 1: preferencia local del briefing matutino
+  # (switch on/off + hora + minuto). Es estado de dispositivo, no
+  # del hub — por eso no va a Supabase.
+  shared_preferences: ^2.3.3
+
+  # Capa 7 Paso 1: cámara + galería para apunte desde foto. Cubre
+  # los dos picks con un solo plugin (más simple que `camera`).
+  image_picker: ^1.1.2
+
 dependency_overrides:
   # `record 5.2.1` resuelve `record_linux 0.7.2`, que está fuera de
   # sync con el `record_platform_interface 1.6.0` que pide el resto

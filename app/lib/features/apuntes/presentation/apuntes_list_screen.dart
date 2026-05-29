@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../../theme/matix_colors.dart';
 import '../domain/apunte.dart';
 import '../providers/apuntes_providers.dart';
+import 'apunte_desde_foto_flow.dart';
 import 'editor_apunte_screen.dart';
 
 class ApuntesListScreen extends ConsumerWidget {
@@ -16,6 +17,11 @@ class ApuntesListScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Apuntes'),
         actions: [
+          IconButton(
+            tooltip: 'Apunte desde foto',
+            icon: const Icon(Icons.camera_alt_outlined),
+            onPressed: () => iniciarFlujoApunteDesdeFoto(context, ref),
+          ),
           IconButton(
             tooltip: 'Nuevo apunte',
             icon: const Icon(Icons.add),
