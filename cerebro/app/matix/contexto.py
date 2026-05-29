@@ -140,6 +140,10 @@ async def contexto_vivo(db: Postgrest) -> str:
     futuras.sort(key=lambda x: x["fecha"])
     futuras = futuras[:5]
 
+    # ── Tracks de aprendizaje activos (Fase 2)
+    tracks_activos = await db.list("tracks", filters={"estado": "activo"})
+    tracks_activos.sort(key=lambda t: t.get("creado_en") or "")
+
     # ── Último cierre del día
     cierres = await db.list("cierres_dia", order="fecha.desc", limit=1)
 
@@ -281,6 +285,24 @@ async def contexto_vivo(db: Postgrest) -> str:
                 )
                 + f"  {e['titulo']}"
             )
+        lineas.append("")
+
+    # Tracks de aprendizaje activos (Fase 2) — para que Matix sepa qué
+    # está aprendiendo y en qué bloque va ("vas en el bloque 3 de
+    # calistenia, hoy toca…").
+    if tracks_activos:
+        lineas.append("### Tracks de aprendizaje activos")
+        for t in tracks_activos:
+            pos = t.get("bloque_actual") or "sin posición"
+            extra = ""
+            if t.get("semana") is not None:
+                extra += f", semana {t['semana']}"
+            if t.get("dia") is not None:
+                extra += f", día {t['dia']}"
+            linea = f"- **{t['nombre']}** — {pos}{extra}  `id={t['id']}`"
+            if t.get("descripcion"):
+                linea += f" · {t['descripcion']}"
+            lineas.append(linea)
         lineas.append("")
 
     # Próximas evaluaciones

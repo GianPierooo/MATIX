@@ -44,6 +44,7 @@ from .routers import (
     sesiones_clase,
     subtareas,
     tareas,
+    tracks,
     version,
 )
 
@@ -165,6 +166,7 @@ for r in (
     cuadernos.router,
     apuntes.router,
     proyectos.router,
+    tracks.router,
     cierres_dia.router,
     matix.router,
     version.router,
