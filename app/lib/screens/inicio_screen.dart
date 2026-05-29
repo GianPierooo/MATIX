@@ -4,13 +4,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../api/matix_client.dart';
+import '../features/apuntes/domain/apunte.dart';
 import '../features/apuntes/presentation/apuntes_list_screen.dart';
+import '../features/apuntes/presentation/editor_apunte_screen.dart';
+import '../features/apuntes/providers/apuntes_providers.dart';
 import '../features/busqueda/presentation/busqueda_screen.dart';
 import '../features/cierre/presentation/cierre_dia_screen.dart';
+import '../features/cursos/domain/curso.dart';
+import '../features/cursos/domain/sesion_clase.dart';
+import '../features/evaluaciones/domain/evaluacion.dart';
 import '../features/eventos/domain/evento.dart';
 import '../features/eventos/presentation/calendario_screen.dart';
 import '../features/eventos/providers/eventos_providers.dart';
-import '../features/evaluaciones/domain/evaluacion.dart';
 import '../features/matix/presentation/manos_libres_screen.dart';
 import '../features/proyectos/domain/proyecto.dart';
 import '../features/proyectos/presentation/detalle_proyecto_screen.dart';
@@ -22,6 +28,125 @@ import '../features/universidad/providers/universidad_providers.dart';
 import '../theme/matix_colors.dart';
 import '../theme/matix_spacing.dart';
 import 'ajustes_screen.dart';
+import 'universidad_screen.dart';
+
+// ══════════════════════════════════════════════════════════════════
+// Lógica pura del tablero (testeable sin red ni widgets).
+// ══════════════════════════════════════════════════════════════════
+
+/// Tareas que entran al bloque "Hoy": sin completar y que vencen hoy
+/// o ya vencieron. Ordena vencidas primero, luego por hora de
+/// vencimiento ascendente.
+///
+/// Usa `ahora` para todo el cálculo (en vez de `Tarea.estaVencida`,
+/// que lee `DateTime.now()` internamente) para que la función sea
+/// determinística en tests.
+List<Tarea> tareasDeHoy(List<Tarea> todas, DateTime ahora) {
+  bool vencida(Tarea t) => t.venceEn != null && t.venceEn!.isBefore(ahora);
+  final out = todas
+      .where((t) => !t.completada && (t.venceHoy(ahora) || vencida(t)))
+      .toList()
+    ..sort((a, b) {
+      final av = vencida(a) ? 0 : 1;
+      final bv = vencida(b) ? 0 : 1;
+      if (av != bv) return av - bv;
+      final ae = a.venceEn;
+      final be = b.venceEn;
+      if (ae == null && be == null) return 0;
+      if (ae == null) return 1;
+      if (be == null) return -1;
+      return ae.compareTo(be);
+    });
+  return out;
+}
+
+/// Los `max` apuntes más recientes por fecha de actualización.
+List<Apunte> apuntesRecientes(List<Apunte> todos, {int max = 5}) {
+  final out = [...todos]
+    ..sort((a, b) => b.actualizadoEn.compareTo(a.actualizadoEn));
+  return out.take(max).toList();
+}
+
+/// Un ítem próximo de Universidad: o una clase recurrente, o una
+/// entrega/examen. `cuando` es el instante en que ocurre.
+@immutable
+class ProximoUni {
+  const ProximoUni({
+    required this.titulo,
+    required this.cuando,
+    required this.esClase,
+    this.cursoNombre,
+    this.tipoLabel,
+  });
+
+  final String titulo;
+  final DateTime cuando;
+  final bool esClase;
+  final String? cursoNombre;
+
+  /// Para entregas: "Entrega" / "Examen" / … . Null para clases.
+  final String? tipoLabel;
+}
+
+/// La próxima clase (barriendo los próximos 14 días) o la próxima
+/// entrega futura sin nota — la que ocurra antes. `null` si no hay
+/// ninguna de las dos.
+ProximoUni? proximoUni(
+  List<SesionClase> sesiones,
+  List<Curso> cursos,
+  List<Evaluacion> evaluaciones,
+  DateTime ahora,
+) {
+  final cursosMap = {for (final c in cursos) c.id: c};
+
+  // Próxima clase: el primer día (de hoy en adelante) que tenga una
+  // sesión cuya hora de inicio aún no pasó da la clase más próxima.
+  ProximoUni? clase;
+  for (var i = 0; i < 14; i++) {
+    final dia =
+        DateTime(ahora.year, ahora.month, ahora.day).add(Duration(days: i));
+    for (final s in sesiones) {
+      if (!s.ocurreEn(dia)) continue;
+      final inicio = s.inicioEn(dia);
+      if (!inicio.isAfter(ahora)) continue;
+      if (clase == null || inicio.isBefore(clase.cuando)) {
+        final curso = cursosMap[s.cursoId];
+        clase = ProximoUni(
+          titulo: curso?.nombre ?? 'Clase',
+          cuando: inicio,
+          esClase: true,
+          cursoNombre: curso?.nombre,
+        );
+      }
+    }
+    if (clase != null) break;
+  }
+
+  // Próxima entrega/examen futura y sin nota.
+  ProximoUni? entrega;
+  for (final e in evaluaciones) {
+    if (e.tieneNota) continue;
+    if (!e.fecha.isAfter(ahora)) continue;
+    if (entrega == null || e.fecha.isBefore(entrega.cuando)) {
+      final curso = cursosMap[e.cursoId];
+      entrega = ProximoUni(
+        titulo: e.titulo,
+        cuando: e.fecha,
+        esClase: false,
+        cursoNombre: curso?.nombre,
+        tipoLabel: e.tipo.label,
+      );
+    }
+  }
+
+  if (clase == null) return entrega;
+  if (entrega == null) return clase;
+  return clase.cuando.isBefore(entrega.cuando) ? clase : entrega;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Pantalla
+// ══════════════════════════════════════════════════════════════════
 
 class InicioScreen extends ConsumerWidget {
   const InicioScreen({super.key});
@@ -101,6 +226,9 @@ class InicioScreen extends ConsumerWidget {
           ref.invalidate(tareasProvider);
           ref.invalidate(eventosProvider);
           ref.invalidate(evaluacionesListProvider);
+          ref.invalidate(apuntesListProvider);
+          ref.invalidate(sesionesClaseProvider);
+          ref.invalidate(cursosListProvider);
         },
         child: ListView(
           // Cubre la nav inferior + safe area + saliente del FAB.
@@ -112,10 +240,11 @@ class InicioScreen extends ConsumerWidget {
           ),
           children: const [
             _BotonesRitual(),
-            _BloqueProyectos(),
-            _BloqueParaHoy(),
-            _BloqueProximasEntregas(),
-            _BloqueTuDia(),
+            _CapturaApunte(),
+            _BloqueHoy(),
+            _BloqueApuntesRecientes(),
+            _BloqueProyectosActivos(),
+            _BloqueUniversidad(),
           ],
         ),
       ),
@@ -150,7 +279,7 @@ class _BotonesRitual extends StatelessWidget {
     final esNoche = h >= 20 || h < 5;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       child: Row(
         children: [
           Expanded(
@@ -239,164 +368,213 @@ class _BotonRitual extends StatelessWidget {
   }
 }
 
-// ─── Bloque: Tus 3 proyectos activos ────────────────────────────
-class _BloqueProyectos extends ConsumerWidget {
-  const _BloqueProyectos();
+// ─── Captura de apunte: "Anota algo…" ───────────────────────────
+//
+// Captura sin fricción (principio #1 del hub): el texto que escribes
+// se vuelve el título de un apunte general (sin curso). El modelo ya
+// admite apuntes sin curso, así que no hace falta migrar nada. Solo
+// texto en este paso; la voz llega aparte.
+class _CapturaApunte extends ConsumerStatefulWidget {
+  const _CapturaApunte();
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final proys = ref.watch(proyectosListProvider);
-    return proys.when(
-      loading: () => const SizedBox(height: 110),
-      error: (_, _) => const SizedBox.shrink(),
-      data: (lista) {
-        final activos = lista
-            .where((p) => p.estado == EstadoProyecto.activo)
-            .toList()
-          ..sort((a, b) =>
-              (a.prioridad ?? 99).compareTo(b.prioridad ?? 99));
-        if (activos.isEmpty) return const SizedBox.shrink();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  ConsumerState<_CapturaApunte> createState() => _CapturaApunteState();
+}
+
+class _CapturaApunteState extends ConsumerState<_CapturaApunte> {
+  final _ctrl = TextEditingController();
+  bool _guardando = false;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _guardar() async {
+    final texto = _ctrl.text.trim();
+    if (texto.isEmpty || _guardando) return;
+    setState(() => _guardando = true);
+    try {
+      await ref.read(apuntesRepoProvider).crear(titulo: texto);
+      _ctrl.clear();
+      ref.invalidate(apuntesListProvider);
+      if (!mounted) return;
+      FocusScope.of(context).unfocus();
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('Apunte guardado')));
+    } on MatixApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No pude guardar: ${e.message}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No pude guardar: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      child: Container(
+        decoration: BoxDecoration(
+          color: MatixColors.card,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: MatixColors.hairline),
+        ),
+        padding: const EdgeInsets.fromLTRB(14, 0, 4, 0),
+        child: Row(
           children: [
-            _SectionLabel(
-                label: 'Tus ${activos.length} proyectos activos'),
-            SizedBox(
-              height: 122,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: activos.length,
-                itemBuilder: (_, i) => _ProyectoMini(p: activos[i]),
+            const Icon(Icons.edit_note, color: MatixColors.muted, size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                controller: _ctrl,
+                enabled: !_guardando,
+                textInputAction: TextInputAction.send,
+                onSubmitted: (_) => _guardar(),
+                style: const TextStyle(color: MatixColors.text, fontSize: 14),
+                decoration: const InputDecoration(
+                  hintText: 'Anota algo…',
+                  hintStyle:
+                      TextStyle(color: MatixColors.muted, fontSize: 14),
+                  border: InputBorder.none,
+                  isCollapsed: true,
+                  contentPadding: EdgeInsets.symmetric(vertical: 15),
+                ),
               ),
             ),
+            _guardando
+                ? const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        color: MatixColors.accent,
+                      ),
+                    ),
+                  )
+                : IconButton(
+                    tooltip: 'Guardar apunte',
+                    icon: const Icon(Icons.arrow_upward_rounded),
+                    color: MatixColors.accent,
+                    onPressed: _guardar,
+                  ),
           ],
-        );
-      },
+        ),
+      ),
     );
   }
 }
 
-class _ProyectoMini extends StatelessWidget {
-  const _ProyectoMini({required this.p});
-  final Proyecto p;
+// ─── Bloque: Hoy (eventos del día + tareas de hoy/vencidas) ─────
+class _BloqueHoy extends ConsumerWidget {
+  const _BloqueHoy();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ahora = DateTime.now();
+    final tareasAsync = ref.watch(tareasProvider);
+    final eventosAsync = ref.watch(eventosDelDiaProvider(ahora));
+
+    final eventos = eventosAsync.valueOrNull ?? const <Evento>[];
+    final tareas =
+        tareasDeHoy(tareasAsync.valueOrNull ?? const <Tarea>[], ahora);
+    final total = eventos.length + tareas.length;
+    final cargando = !tareasAsync.hasValue || !eventosAsync.hasValue;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionLabel(label: 'Hoy', count: total == 0 ? null : total),
+        if (cargando && total == 0)
+          const _LoaderLinea()
+        else if (total == 0)
+          const _EmptyCard(
+            'Hoy no tienes nada agendado. Disfruta el día.',
+            icono: Icons.check_circle_outline,
+          )
+        else ...[
+          ...eventos.map((e) => _EventoMini(e: e)),
+          ...tareas.map((t) => _TareaMini(t: t)),
+        ],
+      ],
+    );
+  }
+}
+
+class _EventoMini extends StatelessWidget {
+  const _EventoMini({required this.e});
+  final Evento e;
   @override
   Widget build(BuildContext context) {
-    final calorColor = p.enRiesgo ? MatixColors.red : MatixColors.green;
-    return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => DetalleProyectoScreen(proyectoId: p.id),
-        ),
-      ),
-      child: Container(
-        width: 220,
-        margin: const EdgeInsets.only(right: 10),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: MatixColors.card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-              color: MatixColors.accent.withValues(alpha: 0.35)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+    final hi = e.todoElDia
+        ? 'Todo'
+        : DateFormat.Hm().format(e.iniciaEn.toLocal());
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 3, 16, 3),
+      child: Material(
+        color: MatixColors.card,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const CalendarioScreen()),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
               children: [
-                Container(
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    color: MatixColors.accent.withValues(alpha: 0.18),
-                    border: Border.all(
-                        color:
-                            MatixColors.accent.withValues(alpha: 0.45)),
-                    borderRadius: BorderRadius.circular(7),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text('#${p.prioridad ?? "-"}',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        color: MatixColors.accent,
-                      )),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
+                SizedBox(
+                  width: 44,
                   child: Text(
-                    p.nombre,
-                    overflow: TextOverflow.ellipsis,
+                    hi,
                     style: const TextStyle(
-                      fontSize: 14,
+                      fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: MatixColors.text,
                     ),
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 6, vertical: 2),
+                  width: 4,
+                  height: 32,
                   decoration: BoxDecoration(
-                    color: calorColor.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(6),
+                    color: MatixColors.accent,
+                    borderRadius: BorderRadius.circular(4),
                   ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
                   child: Text(
-                    p.enRiesgo
-                        ? '${p.etiquetaCalor.toUpperCase()}·RIESGO'
-                        : p.etiquetaCalor.toUpperCase(),
-                    style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                      color: calorColor,
+                    e.titulo,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: MatixColors.text,
                     ),
                   ),
                 ),
+                if (e.esDeGoogle) ...[
+                  const SizedBox(width: 8),
+                  const Icon(Icons.sync, size: 14, color: MatixColors.muted),
+                ],
               ],
             ),
-            if (p.lineaMeta != null) ...[
-              const SizedBox(height: 10),
-              Text(
-                p.lineaMeta!,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: MatixColors.muted,
-                  height: 1.4,
-                ),
-              ),
-            ],
-          ],
+          ),
         ),
       ),
-    );
-  }
-}
-
-// ─── Bloque: Para hoy ────────────────────────────────────────────
-class _BloqueParaHoy extends ConsumerWidget {
-  const _BloqueParaHoy();
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final tareas = ref.watch(tareasProvider);
-    return tareas.when(
-      loading: () => const SizedBox(height: 60),
-      error: (_, _) => const SizedBox.shrink(),
-      data: (lista) {
-        final ahora = DateTime.now();
-        final hoy = lista
-            .where((t) => !t.completada && t.venceHoy(ahora))
-            .toList()
-          ..sort((a, b) => a.venceEn!.compareTo(b.venceEn!));
-        if (hoy.isEmpty) return const SizedBox.shrink();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _SectionLabel(label: 'Para hoy', count: hoy.length),
-            ...hoy.take(5).map((t) => _TareaMini(t: t)),
-          ],
-        );
-      },
     );
   }
 }
@@ -447,6 +625,8 @@ class _TareaMini extends ConsumerWidget {
                 Expanded(
                   child: Text(
                     t.titulo,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -475,189 +655,467 @@ class _TareaMini extends ConsumerWidget {
   }
 }
 
-// ─── Bloque: Próximas entregas (evaluaciones) ───────────────────
-class _BloqueProximasEntregas extends ConsumerWidget {
-  const _BloqueProximasEntregas();
+// ─── Bloque: Apuntes recientes ──────────────────────────────────
+class _BloqueApuntesRecientes extends ConsumerWidget {
+  const _BloqueApuntesRecientes();
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final evs = ref.watch(evaluacionesListProvider);
-    final cursos = ref.watch(cursosListProvider);
-    return evs.when(
-      loading: () => const SizedBox(height: 60),
-      error: (_, _) => const SizedBox.shrink(),
-      data: (lista) {
-        final ahora = DateTime.now();
-        final futuras = lista
-            .where((e) => !e.tieneNota && e.fecha.isAfter(ahora))
-            .toList()
-          ..sort((a, b) => a.fecha.compareTo(b.fecha));
-        if (futuras.isEmpty) return const SizedBox.shrink();
-        final mapaCursos = {
-          for (final c in cursos.valueOrNull ?? []) c.id: c.nombre,
-        };
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _SectionLabel(
-                label: 'Próximas entregas', count: futuras.length),
-            ...futuras
-                .take(4)
-                .map((e) => _EvalMini(eval: e, curso: mapaCursos[e.cursoId])),
-          ],
-        );
-      },
+    final apuntesAsync = ref.watch(apuntesListProvider);
+    final proyectos =
+        ref.watch(proyectosListProvider).valueOrNull ?? const <Proyecto>[];
+    final cursos =
+        ref.watch(cursosListProvider).valueOrNull ?? const <Curso>[];
+    final proyMap = {for (final p in proyectos) p.id: p.nombre};
+    final cursoMap = {for (final c in cursos) c.id: c.nombre};
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionLabel(
+          label: 'Apuntes recientes',
+          accionLabel: 'Ver todos',
+          onAccion: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ApuntesListScreen()),
+          ),
+        ),
+        apuntesAsync.when(
+          loading: () => const _LoaderLinea(),
+          error: (_, _) => const _EmptyCard('No pude cargar tus apuntes.'),
+          data: (lista) {
+            final recientes = apuntesRecientes(lista);
+            if (recientes.isEmpty) {
+              return const _EmptyCard(
+                'Aún no tienes apuntes. Escribe algo arriba para empezar.',
+                icono: Icons.notes_outlined,
+              );
+            }
+            return Column(
+              children: [
+                for (final a in recientes)
+                  _ApunteMini(
+                    apunte: a,
+                    chip: proyMap[a.proyectoId] ?? cursoMap[a.cursoId],
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
     );
   }
 }
 
-class _EvalMini extends StatelessWidget {
-  const _EvalMini({required this.eval, this.curso});
-  final Evaluacion eval;
-  final String? curso;
+class _ApunteMini extends StatelessWidget {
+  const _ApunteMini({required this.apunte, this.chip});
+  final Apunte apunte;
+  final String? chip;
   @override
   Widget build(BuildContext context) {
-    final fecha = DateFormat("EEE d MMM HH:mm", 'es')
-        .format(eval.fecha.toLocal());
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 3, 16, 3),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: MatixColors.card,
+      child: Material(
+        color: MatixColors.card,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
           borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: MatixColors.accent.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                eval.tipo.label.toUpperCase(),
-                style: const TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  color: MatixColors.accent,
-                ),
-              ),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => EditorApunteScreen(apunteId: apunte.id),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(eval.titulo,
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w600,
-                        color: MatixColors.text,
-                      )),
-                  Text(
-                    [if (curso != null) curso!, fecha].join(' · '),
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      color: MatixColors.muted,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        apunte.titulo,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: MatixColors.text,
+                        ),
+                      ),
+                      if (apunte.contenido.trim().isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          apunte.contenido,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: MatixColors.muted,
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (chip != null) ...[
+                  const SizedBox(width: 10),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 120),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: MatixColors.accent.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        chip!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: MatixColors.accent,
+                        ),
+                      ),
                     ),
                   ),
                 ],
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-// ─── Bloque: Tu día (eventos de hoy) ────────────────────────────
-class _BloqueTuDia extends ConsumerWidget {
-  const _BloqueTuDia();
+// ─── Bloque: Proyectos activos (máx 3) ──────────────────────────
+class _BloqueProyectosActivos extends ConsumerWidget {
+  const _BloqueProyectosActivos();
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final eventos = ref.watch(eventosDelDiaProvider(DateTime.now()));
-    return eventos.when(
-      loading: () => const SizedBox(height: 60),
-      error: (_, _) => const SizedBox.shrink(),
-      data: (lista) {
-        if (lista.isEmpty) return const SizedBox.shrink();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _SectionLabel(label: 'Tu día', count: lista.length),
-            ...lista.take(5).map((e) => _EventoMini(e: e)),
-          ],
-        );
-      },
+    final proysAsync = ref.watch(proyectosListProvider);
+    final tareas = ref.watch(tareasProvider).valueOrNull ?? const <Tarea>[];
+    final tareaTitulo = {for (final t in tareas) t.id: t.titulo};
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionLabel(label: 'Proyectos activos'),
+        proysAsync.when(
+          loading: () => const _LoaderLinea(),
+          error: (_, _) => const _EmptyCard('No pude cargar tus proyectos.'),
+          data: (lista) {
+            final activos = lista
+                .where((p) => p.estado == EstadoProyecto.activo)
+                .toList()
+              ..sort((a, b) =>
+                  (a.prioridad ?? 99).compareTo(b.prioridad ?? 99));
+            final top = activos.take(3).toList();
+            if (top.isEmpty) {
+              return const _EmptyCard(
+                'Sin proyectos activos. Crea uno desde la pestaña Proyectos.',
+                icono: Icons.flag_outlined,
+              );
+            }
+            return SizedBox(
+              height: 132,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: top.length,
+                itemBuilder: (_, i) {
+                  final p = top[i];
+                  final proxima = p.tareaSiguienteId == null
+                      ? null
+                      : tareaTitulo[p.tareaSiguienteId];
+                  return _ProyectoMini(p: p, proximaAccion: proxima);
+                },
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 }
 
-class _EventoMini extends StatelessWidget {
-  const _EventoMini({required this.e});
-  final Evento e;
+class _ProyectoMini extends StatelessWidget {
+  const _ProyectoMini({required this.p, this.proximaAccion});
+  final Proyecto p;
+  final String? proximaAccion;
   @override
   Widget build(BuildContext context) {
-    final hi = e.todoElDia
-        ? 'Todo'
-        : DateFormat.Hm().format(e.iniciaEn.toLocal());
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 3, 16, 3),
+    final calorColor = p.enRiesgo ? MatixColors.red : MatixColors.green;
+    return GestureDetector(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => DetalleProyectoScreen(proyectoId: p.id),
+        ),
+      ),
       child: Container(
+        width: 220,
+        margin: const EdgeInsets.only(right: 10),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: MatixColors.card,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
+          border:
+              Border.all(color: MatixColors.accent.withValues(alpha: 0.35)),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
-              width: 44,
-              child: Text(
-                hi,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: MatixColors.text,
+            Row(
+              children: [
+                Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: MatixColors.accent.withValues(alpha: 0.18),
+                    border: Border.all(
+                        color: MatixColors.accent.withValues(alpha: 0.45)),
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text('#${p.prioridad ?? "-"}',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: MatixColors.accent,
+                      )),
                 ),
-              ),
-            ),
-            Container(
-              width: 4,
-              height: 32,
-              decoration: BoxDecoration(
-                color: MatixColors.accent,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                e.titulo,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: MatixColors.text,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    p.nombre,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: MatixColors.text,
+                    ),
+                  ),
                 ),
-              ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: calorColor.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    p.enRiesgo
+                        ? '${p.etiquetaCalor.toUpperCase()}·RIESGO'
+                        : p.etiquetaCalor.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: calorColor,
+                    ),
+                  ),
+                ),
+              ],
             ),
+            const SizedBox(height: 10),
+            Expanded(child: _detalle()),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detalle() {
+    if (proximaAccion != null) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 1),
+            child: Icon(Icons.arrow_right_alt,
+                size: 15, color: MatixColors.accent),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              proximaAccion!,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12,
+                color: MatixColors.text,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    if (p.lineaMeta != null && p.lineaMeta!.isNotEmpty) {
+      return Text(
+        p.lineaMeta!,
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 12,
+          color: MatixColors.muted,
+          height: 1.4,
+        ),
+      );
+    }
+    return Text(
+      'Sin acción siguiente. Tócalo para definirla.',
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: 12,
+        color: MatixColors.muted.withValues(alpha: 0.8),
+        height: 1.4,
+        fontStyle: FontStyle.italic,
+      ),
+    );
+  }
+}
+
+// ─── Bloque: Universidad (próxima clase o entrega) ──────────────
+class _BloqueUniversidad extends ConsumerWidget {
+  const _BloqueUniversidad();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sesiones =
+        ref.watch(sesionesClaseProvider).valueOrNull ?? const <SesionClase>[];
+    final cursos =
+        ref.watch(cursosListProvider).valueOrNull ?? const <Curso>[];
+    final evals = ref.watch(evaluacionesListProvider).valueOrNull ??
+        const <Evaluacion>[];
+    final prox = proximoUni(sesiones, cursos, evals, DateTime.now());
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionLabel(
+          label: 'Universidad',
+          accionLabel: 'Abrir',
+          onAccion: () => _abrir(context),
+        ),
+        if (prox == null)
+          const _EmptyCard(
+            'Sin clases ni entregas próximas.',
+            icono: Icons.school_outlined,
+          )
+        else
+          _UniMini(prox: prox, onTap: () => _abrir(context)),
+      ],
+    );
+  }
+
+  void _abrir(BuildContext context) => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const UniversidadScreen()),
+      );
+}
+
+class _UniMini extends StatelessWidget {
+  const _UniMini({required this.prox, required this.onTap});
+  final ProximoUni prox;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) {
+    final fecha = DateFormat("EEE d MMM · HH:mm", 'es')
+        .format(prox.cuando.toLocal());
+    final color = prox.esClase ? MatixColors.teal : MatixColors.accent;
+    final etiqueta =
+        prox.esClase ? 'CLASE' : (prox.tipoLabel ?? 'Entrega').toUpperCase();
+    final subtitulo = [
+      if (!prox.esClase && prox.cursoNombre != null) prox.cursoNombre!,
+      fecha,
+    ].join(' · ');
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 3, 16, 3),
+      child: Material(
+        color: MatixColors.card,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    etiqueta,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: color,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        prox.titulo,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: MatixColors.text,
+                        ),
+                      ),
+                      Text(
+                        subtitulo,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: MatixColors.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right,
+                    color: MatixColors.muted, size: 18),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
+// ─── Piezas compartidas ─────────────────────────────────────────
+
 class _SectionLabel extends StatelessWidget {
-  const _SectionLabel({required this.label, this.count});
+  const _SectionLabel({
+    required this.label,
+    this.count,
+    this.accionLabel,
+    this.onAccion,
+  });
   final String label;
   final int? count;
+  final String? accionLabel;
+  final VoidCallback? onAccion;
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 18, 22, 6),
+      padding: const EdgeInsets.fromLTRB(22, 18, 14, 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.baseline,
         textBaseline: TextBaseline.alphabetic,
@@ -682,7 +1140,83 @@ class _SectionLabel extends StatelessWidget {
               ),
             ),
           ],
+          const Spacer(),
+          if (accionLabel != null && onAccion != null)
+            GestureDetector(
+              onTap: onAccion,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                child: Text(
+                  accionLabel!,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: MatixColors.accent,
+                  ),
+                ),
+              ),
+            ),
         ],
+      ),
+    );
+  }
+}
+
+class _LoaderLinea extends StatelessWidget {
+  const _LoaderLinea();
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 18),
+      child: Center(
+        child: SizedBox(
+          width: 22,
+          height: 22,
+          child: CircularProgressIndicator(
+            strokeWidth: 2.4,
+            color: MatixColors.accent,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyCard extends StatelessWidget {
+  const _EmptyCard(this.texto, {this.icono});
+  final String texto;
+  final IconData? icono;
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 2),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: MatixColors.card,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: MatixColors.hairline),
+        ),
+        child: Row(
+          children: [
+            if (icono != null) ...[
+              Icon(icono, color: MatixColors.muted, size: 18),
+              const SizedBox(width: 10),
+            ],
+            Expanded(
+              child: Text(
+                texto,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: MatixColors.muted,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
