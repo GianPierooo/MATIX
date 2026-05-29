@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -5,7 +7,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
 import 'api/matix_client.dart';
+import 'core/notificaciones_service.dart';
 import 'core/providers.dart';
+import 'features/briefing/presentation/briefing_screen.dart';
+import 'features/cierre/presentation/cierre_screen.dart';
 import 'screens/home_shell.dart';
 import 'theme/matix_theme.dart';
 
@@ -48,9 +53,40 @@ class MatixApp extends ConsumerStatefulWidget {
 class _MatixAppState extends ConsumerState<MatixApp> {
   late final MatixClient _client = ref.read(matixClientProvider);
 
+  /// Llave del Navigator para que callbacks que viven fuera del
+  /// widget tree (handler de notificaciones, deep links) puedan
+  /// empujar pantallas. Se la pasamos al MaterialApp.
+  final GlobalKey<NavigatorState> _navigatorKey =
+      GlobalKey<NavigatorState>();
+
+  @override
+  void initState() {
+    super.initState();
+    // Registrar el handler de tap de notificaciones: si el payload
+    // es 'briefing', abrimos la pantalla del briefing. Capa 8
+    // reducida · Paso 1.
+    final notis = ref.read(notificacionesServiceProvider);
+    notis.registrarOnTap((payload) {
+      if (payload == 'briefing') {
+        _navigatorKey.currentState?.push(
+          MaterialPageRoute(builder: (_) => const BriefingScreen()),
+        );
+      } else if (payload == 'cierre') {
+        _navigatorKey.currentState?.push(
+          MaterialPageRoute(builder: (_) => const CierreScreen()),
+        );
+      }
+    });
+    // Aseguramos la inicialización (carga timezones + plugin). Si
+    // el usuario ya tiene la noti del briefing activa, el config
+    // controller la reprograma al leer SharedPreferences.
+    unawaited(notis.inicializar());
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: 'Matix',
       debugShowCheckedModeBanner: false,
       theme: buildMatixTheme(),

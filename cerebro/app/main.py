@@ -30,6 +30,7 @@ from .config import settings
 from .db import db
 from .routers import (
     apuntes,
+    briefing,
     categorias,
     cierres_dia,
     cuadernos,
@@ -168,6 +169,7 @@ for r in (
     matix.router,
     version.router,
     google.router,
+    briefing.router,
 ):
     app.include_router(r, prefix="/api/v1")
 

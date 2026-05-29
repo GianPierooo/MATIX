@@ -222,3 +222,16 @@ construido de forma profesional y sostenible en el tiempo.
   probada de forma sólida.
 - Construir cada capa sección por sección, no todo de golpe.
 - Ante una duda de diseño, preguntar antes de asumir.
+
+### Commit + push al cerrar cada paso (norma estable)
+
+- **Cada paso se cierra con un commit + push a `main`** — no se
+  acumulan pasos sin commitear. Acumular rompe el ciclo de validación
+  en device: el usuario necesita que el APK que construye el CI
+  contenga el trabajo del paso para poder probarlo en el teléfono.
+- Un commit por paso, con mensaje `feat(capaN/M): <descripción>` (o
+  `fix(...)`, `docs(...)` según corresponda). Esto mantiene la
+  historia limpia y permite rollback selectivo por paso.
+- Esta norma rige aunque el paso haya pedido "detente para validación":
+  primero se entrega y valida el trabajo, y el cierre del paso incluye
+  dejarlo commiteado y pusheado, no en el working tree.

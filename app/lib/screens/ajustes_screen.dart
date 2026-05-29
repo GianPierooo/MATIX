@@ -8,6 +8,12 @@ import '../core/providers.dart';
 import '../features/autoupdate/data/update_service.dart';
 import '../features/autoupdate/presentation/update_dialog.dart';
 import '../features/autoupdate/providers/update_providers.dart';
+import '../features/briefing/data/briefing_prefs.dart';
+import '../features/briefing/presentation/briefing_screen.dart';
+import '../features/briefing/providers/briefing_providers.dart';
+import '../features/cierre/data/cierre_prefs.dart';
+import '../features/cierre/presentation/cierre_screen.dart';
+import '../features/cierre/providers/cierre_providers.dart';
 import '../features/google/presentation/conexion_google_tile.dart';
 import '../features/papelera/presentation/papelera_screen.dart';
 import '../theme/matix_colors.dart';
@@ -244,6 +250,28 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
             ),
           ),
 
+          const _Seccion('Briefing matutino'),
+          const _BriefingMatutinoTile(),
+          _Accion(
+            label: 'Ver briefing de hoy',
+            icon: Icons.wb_sunny_outlined,
+            subtitle: 'Resumen del día: eventos, tareas, alertas.',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const BriefingScreen()),
+            ),
+          ),
+
+          const _Seccion('Cierre del día'),
+          const _CierreDelDiaTile(),
+          _Accion(
+            label: 'Ver cierre de hoy',
+            icon: Icons.nightlight_outlined,
+            subtitle: 'Repaso: qué hiciste, qué queda, qué viene.',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const CierreScreen()),
+            ),
+          ),
+
           const _Seccion('Información'),
           const _Fila(label: 'Versión', value: '1.0.0+1'),
           const _Fila(label: 'Plataforma', value: 'Android'),
@@ -392,6 +420,220 @@ class _Accion extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ─── Briefing matutino (Capa 8 reducida · Paso 1) ───────────────────
+
+class _BriefingMatutinoTile extends ConsumerWidget {
+  const _BriefingMatutinoTile();
+
+  Future<void> _elegirHora(
+    BuildContext context,
+    WidgetRef ref,
+    BriefingConfig actual,
+  ) async {
+    final t = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: actual.hora, minute: actual.minuto),
+      helpText: 'Hora del briefing',
+    );
+    if (t == null) return;
+    await ref
+        .read(briefingConfigProvider.notifier)
+        .cambiarHora(t.hour, t.minute);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cfg = ref.watch(briefingConfigProvider);
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      padding: const EdgeInsets.fromLTRB(14, 4, 8, 4),
+      decoration: BoxDecoration(
+        color: MatixColors.card,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.wb_twilight,
+                color: MatixColors.accent,
+                size: 22,
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Activar briefing matutino',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: MatixColors.text,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Te aviso con el resumen del día.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: MatixColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: cfg.activo,
+                onChanged: (v) =>
+                    ref.read(briefingConfigProvider.notifier).activar(v),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(36, 4, 8, 8),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.access_time,
+                  color: MatixColors.muted,
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Hora: ${cfg.horaFormateada}',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: MatixColors.text,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                TextButton(
+                  onPressed: () => _elegirHora(context, ref, cfg),
+                  style: TextButton.styleFrom(
+                    foregroundColor: MatixColors.accent,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    minimumSize: const Size(0, 32),
+                  ),
+                  child: const Text('Cambiar'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Ajuste del cierre del día (Capa 8 · Paso 2). Espejo del tile del
+/// briefing pero apuntando al `cierreConfigProvider`.
+class _CierreDelDiaTile extends ConsumerWidget {
+  const _CierreDelDiaTile();
+
+  Future<void> _elegirHora(
+    BuildContext context,
+    WidgetRef ref,
+    CierreConfig actual,
+  ) async {
+    final t = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: actual.hora, minute: actual.minuto),
+      helpText: 'Hora del cierre',
+    );
+    if (t == null) return;
+    await ref
+        .read(cierreConfigProvider.notifier)
+        .cambiarHora(t.hour, t.minute);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cfg = ref.watch(cierreConfigProvider);
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      padding: const EdgeInsets.fromLTRB(14, 4, 8, 4),
+      decoration: BoxDecoration(
+        color: MatixColors.card,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.nightlight_round,
+                color: MatixColors.accent,
+                size: 22,
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Activar cierre del día',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: MatixColors.text,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Repaso amable antes de dormir.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: MatixColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: cfg.activo,
+                onChanged: (v) =>
+                    ref.read(cierreConfigProvider.notifier).activar(v),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(36, 4, 8, 8),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.access_time,
+                  color: MatixColors.muted,
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Hora: ${cfg.horaFormateada}',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: MatixColors.text,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                TextButton(
+                  onPressed: () => _elegirHora(context, ref, cfg),
+                  style: TextButton.styleFrom(
+                    foregroundColor: MatixColors.accent,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    minimumSize: const Size(0, 32),
+                  ),
+                  child: const Text('Cambiar'),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -30,6 +30,19 @@ class NotificacionesService {
 
   bool _inicializado = false;
 
+  /// Callback que dispara al tocar una notificación. El payload es
+  /// el string que se le pasó al programar (Capa 8 reducida usa
+  /// `'briefing'` para abrir la pantalla del briefing). Si el
+  /// payload es null o no hay handler registrado, no pasa nada.
+  void Function(String? payload)? _onTapHandler;
+
+  /// Registra el handler que se invocará al tocar una notificación.
+  /// Llamar desde `main`/`MatixApp.initState` con un callback que
+  /// usa un `GlobalKey<NavigatorState>` para navegar.
+  void registrarOnTap(void Function(String? payload) handler) {
+    _onTapHandler = handler;
+  }
+
   Future<void> inicializar() async {
     if (_inicializado) return;
 
@@ -39,10 +52,16 @@ class NotificacionesService {
     // Maestro). En Capa 4+ se podría leer la del perfil.
     tz.setLocalLocation(tz.getLocation('America/Lima'));
 
-    // 2) Plugin
+    // 2) Plugin — con handler de tap para deep-links (briefing matutino,
+    // futuras notificaciones contextuales).
     const initAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
     const settings = InitializationSettings(android: initAndroid);
-    await _plugin.initialize(settings);
+    await _plugin.initialize(
+      settings,
+      onDidReceiveNotificationResponse: (resp) {
+        _onTapHandler?.call(resp.payload);
+      },
+    );
 
     _inicializado = true;
   }
@@ -123,6 +142,7 @@ class NotificacionesService {
     required String cuerpo,
     required int hora,
     required int minuto,
+    String? payload,
   }) async {
     if (!_inicializado) await inicializar();
     final ahora = tz.TZDateTime.now(tz.local);
@@ -156,6 +176,7 @@ class NotificacionesService {
       // Repite cada día a la misma hora — el plugin la vuelve a
       // disparar sin que tengamos que reprogramarla.
       matchDateTimeComponents: DateTimeComponents.time,
+      payload: payload,
     );
   }
 
