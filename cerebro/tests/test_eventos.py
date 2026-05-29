@@ -84,3 +84,72 @@ async def test_recordatorio_offset_round_trip(client: AsyncClient) -> None:
     finally:
         r = await client.delete(f"/api/v1/eventos/{eid}/permanente")
         assert r.status_code in (204, 404)
+
+
+async def test_recurrencia_round_trip(client: AsyncClient) -> None:
+    """La regla de recurrencia (Cal-3) viaja ida y vuelta y se puede limpiar.
+
+    El cerebro solo guarda/lee la regla; la expansión de ocurrencias vive
+    en la app. Verificamos que las 5 columnas se persisten, que el array de
+    días de semana sobrevive, y que un PATCH con null las limpia (volver a
+    evento único).
+    """
+    r = await client.post(
+        "/api/v1/eventos",
+        json={
+            "titulo": "_test_recurrencia",
+            "inicia_en": "2026-06-15T10:00:00Z",
+            # Clases lunes y miércoles hasta fin de ciclo.
+            "recurrencia_freq": "semanal",
+            "recurrencia_dias_semana": [1, 3],
+            "recurrencia_fin_tipo": "hasta",
+            "recurrencia_hasta": "2026-07-15",
+        },
+    )
+    assert r.status_code == 201, r.text
+    creada = r.json()
+    eid = creada["id"]
+
+    try:
+        assert creada["recurrencia_freq"] == "semanal"
+        assert creada["recurrencia_dias_semana"] == [1, 3]
+        assert creada["recurrencia_fin_tipo"] == "hasta"
+        assert creada["recurrencia_hasta"] == "2026-07-15"
+
+        # Cambiar la regla de toda la serie: diaria, 5 repeticiones.
+        r = await client.patch(
+            f"/api/v1/eventos/{eid}",
+            json={
+                "recurrencia_freq": "diaria",
+                "recurrencia_dias_semana": None,
+                "recurrencia_fin_tipo": "conteo",
+                "recurrencia_hasta": None,
+                "recurrencia_conteo": 5,
+            },
+        )
+        assert r.status_code == 200
+        actualizada = r.json()
+        assert actualizada["recurrencia_freq"] == "diaria"
+        assert actualizada["recurrencia_conteo"] == 5
+        assert actualizada["recurrencia_hasta"] is None
+
+        # Volver a evento único: toda la recurrencia a null.
+        r = await client.patch(
+            f"/api/v1/eventos/{eid}",
+            json={
+                "recurrencia_freq": None,
+                "recurrencia_dias_semana": None,
+                "recurrencia_fin_tipo": None,
+                "recurrencia_hasta": None,
+                "recurrencia_conteo": None,
+            },
+        )
+        assert r.status_code == 200
+        limpia = r.json()
+        assert limpia["recurrencia_freq"] is None
+        assert limpia["recurrencia_dias_semana"] is None
+        assert limpia["recurrencia_fin_tipo"] is None
+        assert limpia["recurrencia_conteo"] is None
+    finally:
+        r = await client.delete(f"/api/v1/eventos/{eid}/permanente")
+        assert r.status_code in (204, 404)

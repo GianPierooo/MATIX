@@ -87,6 +87,13 @@ class _MatixAppState extends ConsumerState<MatixApp> {
     // el usuario ya tiene la noti del briefing activa, el config
     // controller la reprograma al leer SharedPreferences.
     unawaited(notis.inicializar());
+    // Refresca la ventana móvil de recordatorios de eventos (Cal-3):
+    // las series recurrentes solo tienen agendados los próximos ~30
+    // días, así que al abrir la app reagendamos para que la ventana
+    // avance. Best-effort: si no hay red, la próxima apertura reintenta.
+    unawaited(
+      ref.read(eventosRepositoryProvider).refrescarVentanaRecordatorios(),
+    );
   }
 
   /// Trae el evento por id y abre su pantalla de edición (que hace de

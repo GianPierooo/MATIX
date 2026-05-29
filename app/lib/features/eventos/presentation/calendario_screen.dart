@@ -8,6 +8,7 @@ import '../../cursos/domain/sesion_clase.dart';
 import '../../universidad/providers/universidad_providers.dart';
 import '../domain/choque.dart';
 import '../domain/evento.dart';
+import '../domain/recurrencia.dart';
 import '../providers/eventos_providers.dart';
 import 'nuevo_evento_screen.dart';
 
@@ -287,22 +288,58 @@ class _ListaDelDia extends StatelessWidget {
   final List<(SesionClase, Curso?)> clases;
   final Map<String, Curso> cursosPorId;
 
-  @override
-  Widget build(BuildContext context) {
-    // Mezclamos eventos y clases recurrentes en una sola lista
-    // ordenada por hora de inicio.
-    final filas = <_Fila>[
-      for (final e in eventos)
+  /// Una fila por cada vez que `e` ocurre en `dia`. Para un evento único es
+  /// una sola fila con su hora real; para una serie recurrente, una fila por
+  /// ocurrencia con la hora desplazada, pero conservando `evento: e` (la
+  /// serie original) para que el tap edite el ancla.
+  List<_Fila> _filasDeEvento(Evento e) {
+    final color = _colorEvento(e, cursosPorId);
+    final regla = e.regla;
+    if (regla == null) {
+      return [
         _Fila(
           inicio: e.iniciaEn.toLocal(),
           fin: e.terminaEn?.toLocal(),
           titulo: e.titulo,
           subtitulo: e.ubicacion,
-          color: _colorEvento(e, cursosPorId),
+          color: color,
           esClase: false,
           todoElDia: e.todoElDia,
+          esRecurrente: false,
           evento: e,
         ),
+      ];
+    }
+    final inicioSerie = e.iniciaEn.toLocal();
+    final duracion = e.terminaEn?.toLocal().difference(inicioSerie);
+    return [
+      for (final occ in ocurrenciasEnDia(
+        regla: regla,
+        inicioSerie: inicioSerie,
+        dia: dia,
+      ))
+        _Fila(
+          inicio: occ,
+          fin: duracion == null ? null : occ.add(duracion),
+          titulo: e.titulo,
+          subtitulo: e.ubicacion,
+          color: color,
+          esClase: false,
+          todoElDia: e.todoElDia,
+          esRecurrente: true,
+          evento: e,
+        ),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Mezclamos eventos y clases recurrentes en una sola lista
+    // ordenada por hora de inicio. Para series recurrentes mostramos la
+    // ocurrencia de este día (hora desplazada), pero `evento` apunta a la
+    // serie original para que al tocar se edite el ancla, no la instancia.
+    final filas = <_Fila>[
+      for (final e in eventos) ..._filasDeEvento(e),
       for (final entry in clases)
         _Fila(
           inicio: entry.$1.inicioEn(dia),
@@ -418,6 +455,15 @@ class _ListaDelDia extends StatelessWidget {
                               ),
                             ),
                           ),
+                          if (f.esRecurrente)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 6),
+                              child: Icon(
+                                Icons.repeat,
+                                size: 14,
+                                color: MatixColors.muted,
+                              ),
+                            ),
                           if (f.esClase)
                             Container(
                               padding: const EdgeInsets.symmetric(
@@ -487,6 +533,7 @@ class _Fila {
     required this.color,
     required this.esClase,
     required this.todoElDia,
+    this.esRecurrente = false,
     this.evento,
   });
   final DateTime inicio;
@@ -496,6 +543,8 @@ class _Fila {
   final Color color;
   final bool esClase;
   final bool todoElDia;
+  /// `true` si la fila es una ocurrencia de un evento recurrente (no clase).
+  final bool esRecurrente;
   /// El evento de origen, o `null` si la fila es una clase recurrente.
   final Evento? evento;
 }

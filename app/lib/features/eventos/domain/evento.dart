@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'recurrencia.dart';
+
 @immutable
 class Evento {
   const Evento({
@@ -15,6 +17,7 @@ class Evento {
     this.color,
     this.recordarEn,
     this.recordatorioOffsetMin,
+    this.regla,
     this.origen = 'manual',
     this.externalId,
     this.googleUpdatedAt,
@@ -37,6 +40,9 @@ class Evento {
   /// recordatorio, 0 = a la hora). Fuente de verdad del preset que se
   /// muestra en el detalle; `recordarEn` es su espejo absoluto.
   final int? recordatorioOffsetMin;
+  /// Regla de recurrencia de la serie (Calendario · Paso 3), o `null` si el
+  /// evento es único. `iniciaEn` es el ancla (primera ocurrencia).
+  final ReglaRecurrencia? regla;
   /// "manual" para los creados desde la app, "google" para los
   /// sincronizados desde Google Calendar (Capa 4 Paso 1). La UI
   /// muestra un badge sutil para distinguirlos.
@@ -57,7 +63,49 @@ class Evento {
   /// Vale para manuales pusheados y para todos los `origen='google'`.
   bool get estaSincronizado => externalId != null;
 
+  bool get esRecurrente => regla != null;
+
+  /// Copia el evento desplazado a la fecha/hora de una ocurrencia concreta,
+  /// conservando la duración. Pensado para mostrar ocurrencias expandidas en
+  /// el calendario sin tocar la serie; mantiene el mismo `id` (sigue
+  /// apuntando a la fila ancla) y limpia la regla porque ya es una instancia.
+  Evento copyConInicio(DateTime nuevoInicio) {
+    final fin = terminaEn != null
+        ? nuevoInicio.add(terminaEn!.difference(iniciaEn))
+        : null;
+    return Evento(
+      id: id,
+      titulo: titulo,
+      descripcion: descripcion,
+      iniciaEn: nuevoInicio,
+      terminaEn: fin,
+      todoElDia: todoElDia,
+      ubicacion: ubicacion,
+      cursoId: cursoId,
+      proyectoId: proyectoId,
+      color: color,
+      recordarEn: recordarEn,
+      recordatorioOffsetMin: recordatorioOffsetMin,
+      regla: null,
+      origen: origen,
+      externalId: externalId,
+      googleUpdatedAt: googleUpdatedAt,
+      creadoEn: creadoEn,
+      actualizadoEn: actualizadoEn,
+    );
+  }
+
+  /// `true` si una ocurrencia del evento empieza en el día local `dia`.
+  /// Para eventos únicos compara el día del inicio; para recurrentes expande
+  /// la regla restringida a ese día.
   bool ocurreEn(DateTime dia) {
+    if (regla != null) {
+      return eventoOcurreEnDia(
+        regla: regla!,
+        inicioSerie: iniciaEn.toLocal(),
+        dia: dia,
+      );
+    }
     final ini = iniciaEn.toLocal();
     final iniDia = DateTime(ini.year, ini.month, ini.day);
     final esteDia = DateTime(dia.year, dia.month, dia.day);
@@ -81,6 +129,7 @@ class Evento {
             ? null
             : DateTime.parse(json['recordar_en'] as String),
         recordatorioOffsetMin: (json['recordatorio_offset_min'] as num?)?.toInt(),
+        regla: ReglaRecurrencia.maybeFromEventoJson(json),
         origen: (json['origen'] as String?) ?? 'manual',
         externalId: json['external_id'] as String?,
         googleUpdatedAt: json['google_updated_at'] == null

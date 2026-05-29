@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -8,7 +9,14 @@ import '../../cursos/domain/curso.dart';
 import '../../universidad/providers/universidad_providers.dart';
 import '../domain/evento.dart';
 import '../domain/recordatorio_evento.dart';
+import '../domain/recurrencia.dart';
 import '../providers/eventos_providers.dart';
+
+/// Preset de frecuencia que ve el usuario. "Cada día de semana" no es una
+/// frecuencia propia: se guarda como semanal con días {lun..vie}.
+enum _PresetFreq { ninguna, diaria, semanalDias, cadaDiaSemana, mensual }
+
+const _diasLaborables = {1, 2, 3, 4, 5};
 
 /// Alta y edición de un evento del calendario nativo.
 ///
@@ -38,6 +46,13 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
   bool _borrando = false;
   String? _error;
 
+  // Recurrencia (Cal-3).
+  _PresetFreq _presetFreq = _PresetFreq.ninguna;
+  Set<int> _diasSemana = {};
+  FinRecurrencia _fin = FinRecurrencia.nunca;
+  DateTime? _hasta;
+  late final TextEditingController _conteo;
+
   bool get _editando => widget.evento != null;
 
   @override
@@ -52,12 +67,43 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
     _recordatorioOffsetMin = e?.recordatorioOffsetMin;
     _todoElDia = e?.todoElDia ?? false;
     _cursoId = e?.cursoId;
+    _conteo = TextEditingController(
+      text: e?.regla?.conteo?.toString() ?? '10',
+    );
+    _cargarRecurrencia(e?.regla);
+  }
+
+  /// Reconstruye el estado de la UI desde la regla guardada (o sin regla).
+  void _cargarRecurrencia(ReglaRecurrencia? regla) {
+    if (regla == null) {
+      _presetFreq = _PresetFreq.ninguna;
+      return;
+    }
+    switch (regla.frecuencia) {
+      case FrecuenciaRecurrencia.diaria:
+        _presetFreq = _PresetFreq.diaria;
+        break;
+      case FrecuenciaRecurrencia.mensual:
+        _presetFreq = _PresetFreq.mensual;
+        break;
+      case FrecuenciaRecurrencia.semanal:
+        if (setEquals(regla.diasSemana, _diasLaborables)) {
+          _presetFreq = _PresetFreq.cadaDiaSemana;
+        } else {
+          _presetFreq = _PresetFreq.semanalDias;
+          _diasSemana = {...regla.diasSemana};
+        }
+        break;
+    }
+    _fin = regla.fin;
+    _hasta = regla.hasta;
   }
 
   @override
   void dispose() {
     _titulo.dispose();
     _ubicacion.dispose();
+    _conteo.dispose();
     super.dispose();
   }
 
@@ -77,8 +123,52 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
     return DateTime(fecha.year, fecha.month, fecha.day, hora.hour, hora.minute);
   }
 
+  /// Arma la regla de recurrencia desde el estado de la UI, o `null` si el
+  /// usuario eligió "Ninguna".
+  ReglaRecurrencia? _construirRegla() {
+    final FrecuenciaRecurrencia frecuencia;
+    var dias = const <int>{};
+    switch (_presetFreq) {
+      case _PresetFreq.ninguna:
+        return null;
+      case _PresetFreq.diaria:
+        frecuencia = FrecuenciaRecurrencia.diaria;
+        break;
+      case _PresetFreq.semanalDias:
+        frecuencia = FrecuenciaRecurrencia.semanal;
+        // Sin días marcados, usa el día de inicio de la serie.
+        dias = _diasSemana.isNotEmpty ? _diasSemana : {_inicia.weekday};
+        break;
+      case _PresetFreq.cadaDiaSemana:
+        frecuencia = FrecuenciaRecurrencia.semanal;
+        dias = _diasLaborables;
+        break;
+      case _PresetFreq.mensual:
+        frecuencia = FrecuenciaRecurrencia.mensual;
+        break;
+    }
+    final conteo = _fin == FinRecurrencia.conteo
+        ? (int.tryParse(_conteo.text.trim()) ?? 1).clamp(1, 999)
+        : null;
+    return ReglaRecurrencia(
+      frecuencia: frecuencia,
+      diasSemana: dias,
+      fin: _fin,
+      hasta: _fin == FinRecurrencia.hasta ? _hasta : null,
+      conteo: conteo,
+    );
+  }
+
   Future<void> _guardar() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+    final regla = _construirRegla();
+    // "Hasta una fecha" sin fecha elegida no puede guardarse.
+    if (regla != null &&
+        regla.fin == FinRecurrencia.hasta &&
+        regla.hasta == null) {
+      setState(() => _error = 'Elige la fecha en la que termina la repetición.');
+      return;
+    }
     setState(() {
       _guardando = true;
       _error = null;
@@ -100,6 +190,9 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
           'curso_id': _cursoId,
           'recordatorio_offset_min': _recordatorioOffsetMin,
           'recordar_en': recordarEn?.toUtc().toIso8601String(),
+          // Editar la serie cambia todas: guardamos la regla en el ancla.
+          // Sin recurrencia, limpiamos cualquier regla previa con nulls.
+          ...(regla?.toJson() ?? ReglaRecurrencia.jsonNulo()),
         });
       } else {
         await repo.crear(
@@ -110,6 +203,7 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
           ubicacion: ubic,
           cursoId: _cursoId,
           recordatorioOffsetMin: _recordatorioOffsetMin,
+          regla: regla,
         );
       }
       ref.invalidate(eventosProvider);
@@ -161,6 +255,116 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
     } finally {
       if (mounted) setState(() => _borrando = false);
     }
+  }
+
+  static const _etiquetaPreset = {
+    _PresetFreq.ninguna: 'No se repite',
+    _PresetFreq.diaria: 'Cada día',
+    _PresetFreq.semanalDias: 'Semanal (elijo días)',
+    _PresetFreq.cadaDiaSemana: 'Cada día de semana (L–V)',
+    _PresetFreq.mensual: 'Cada mes',
+  };
+
+  static const _etiquetaFin = {
+    FinRecurrencia.nunca: 'Sin fecha de fin',
+    FinRecurrencia.hasta: 'Hasta una fecha',
+    FinRecurrencia.conteo: 'Tras N repeticiones',
+  };
+
+  // ISO 1=lunes … 7=domingo.
+  static const _diasCorto = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+
+  Future<void> _pickFechaHasta() async {
+    final base = _hasta ?? _inicia.add(const Duration(days: 30));
+    final fecha = await showDatePicker(
+      context: context,
+      initialDate: base,
+      firstDate: _inicia,
+      lastDate: _inicia.add(const Duration(days: 365 * 5)),
+    );
+    if (fecha != null) setState(() => _hasta = fecha);
+  }
+
+  Widget _seccionRecurrencia() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropdownButtonFormField<_PresetFreq>(
+          initialValue: _presetFreq,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'Repetición'),
+          items: [
+            for (final p in _PresetFreq.values)
+              DropdownMenuItem(value: p, child: Text(_etiquetaPreset[p]!)),
+          ],
+          onChanged: (v) => setState(() {
+            _presetFreq = v ?? _PresetFreq.ninguna;
+            // Al elegir "semanal", arranca con el día de inicio marcado.
+            if (_presetFreq == _PresetFreq.semanalDias &&
+                _diasSemana.isEmpty) {
+              _diasSemana = {_inicia.weekday};
+            }
+          }),
+        ),
+        if (_presetFreq == _PresetFreq.semanalDias) ...[
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 6,
+            children: [
+              for (var iso = 1; iso <= 7; iso++)
+                FilterChip(
+                  label: Text(_diasCorto[iso - 1]),
+                  selected: _diasSemana.contains(iso),
+                  onSelected: (sel) => setState(() {
+                    if (sel) {
+                      _diasSemana.add(iso);
+                    } else {
+                      _diasSemana.remove(iso);
+                    }
+                  }),
+                ),
+            ],
+          ),
+        ],
+        if (_presetFreq != _PresetFreq.ninguna) ...[
+          const SizedBox(height: 10),
+          DropdownButtonFormField<FinRecurrencia>(
+            initialValue: _fin,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Termina'),
+            items: [
+              for (final f in FinRecurrencia.values)
+                DropdownMenuItem(value: f, child: Text(_etiquetaFin[f]!)),
+            ],
+            onChanged: (v) => setState(() {
+              _fin = v ?? FinRecurrencia.nunca;
+              if (_fin == FinRecurrencia.hasta && _hasta == null) {
+                _hasta = _inicia.add(const Duration(days: 30));
+              }
+            }),
+          ),
+          if (_fin == FinRecurrencia.hasta)
+            _Pick(
+              label: 'Hasta',
+              value: _hasta == null
+                  ? 'Elige una fecha'
+                  : DateFormat("EEE d MMM y", 'es').format(_hasta!),
+              onTap: _pickFechaHasta,
+            ),
+          if (_fin == FinRecurrencia.conteo) ...[
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _conteo,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Repeticiones',
+                helperText: 'Cuántas veces se repite en total',
+              ),
+            ),
+          ],
+        ],
+      ],
+    );
   }
 
   @override
@@ -232,6 +436,8 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
                 onChanged: (v) =>
                     setState(() => _recordatorioOffsetMin = v),
               ),
+              const SizedBox(height: 12),
+              _seccionRecurrencia(),
               const SizedBox(height: 12),
               _SelectorCurso(
                 cursos: cursos,

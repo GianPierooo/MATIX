@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -21,6 +21,13 @@ class EventoCreate(BaseModel):
     # recordatorio, 0 = a la hora). La app lo usa para reprogramar la
     # notificación local; `recordar_en` queda como espejo derivado.
     recordatorio_offset_min: int | None = None
+    # Calendario Paso 3: regla de recurrencia (NULL = evento único). La app
+    # expande las ocurrencias por rango; aquí solo se guarda/lee la regla.
+    recurrencia_freq: str | None = None
+    recurrencia_dias_semana: list[int] | None = None
+    recurrencia_fin_tipo: str | None = None
+    recurrencia_hasta: date | None = None
+    recurrencia_conteo: int | None = None
 
 
 class EventoUpdate(BaseModel):
@@ -35,6 +42,11 @@ class EventoUpdate(BaseModel):
     color: str | None = None
     recordar_en: datetime | None = None
     recordatorio_offset_min: int | None = None
+    recurrencia_freq: str | None = None
+    recurrencia_dias_semana: list[int] | None = None
+    recurrencia_fin_tipo: str | None = None
+    recurrencia_hasta: date | None = None
+    recurrencia_conteo: int | None = None
 
 
 class EventoRead(BaseModel):
@@ -50,6 +62,11 @@ class EventoRead(BaseModel):
     color: str | None = None
     recordar_en: datetime | None = None
     recordatorio_offset_min: int | None = None
+    recurrencia_freq: str | None = None
+    recurrencia_dias_semana: list[int] | None = None
+    recurrencia_fin_tipo: str | None = None
+    recurrencia_hasta: date | None = None
+    recurrencia_conteo: int | None = None
     eliminado_en: datetime | None = None
     # Capa 4 Paso 1: origen del evento. "manual" para los creados
     # desde la app, "google" para los sync-eados.
