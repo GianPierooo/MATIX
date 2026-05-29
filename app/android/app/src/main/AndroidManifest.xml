@@ -64,6 +64,18 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Compartir-a-Matix (Capa 7): recibir texto plano y URLs
+                 desde el menú "compartir" de cualquier app (WhatsApp,
+                 navegador, notas…). Lo compartido se captura como
+                 apunte clasificado. Solo text/plain — las URLs llegan
+                 como texto en EXTRA_TEXT. Imágenes / otros tipos NO
+                 (paso aparte). MainActivity maneja el intent y lo pasa
+                 a Flutter por un MethodChannel. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
