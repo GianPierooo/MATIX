@@ -211,6 +211,100 @@ async def test_crear_apunte(_fresh_db: Postgrest, client: AsyncClient) -> None:
         await client.delete(f"/api/v1/apuntes/{aid}/permanente")
 
 
+# ── crear_apunte: clasificación (proyecto / curso / general) ─────────
+#
+# La decisión de a qué proyecto/curso pertenece una idea la toma el
+# MODELO (no determinista, no se testea acá). Lo que sí garantiza el
+# handler es: si recibe un `proyecto_id`/`curso_id`, etiqueta y reporta
+# dónde lo archivó; si no recibe ninguno, queda general. Y nunca tiene
+# poder para crear un proyecto/curso.
+
+
+async def test_crear_apunte_etiquetado_a_proyecto(
+    _fresh_db: Postgrest, client: AsyncClient
+) -> None:
+    # Proyecto aparcado para no chocar con el tope de 3 activos.
+    crear = await client.post(
+        "/api/v1/proyectos",
+        json={"nombre": "_test_tool_apunte_proyecto", "estado": "aparcado"},
+    )
+    assert crear.status_code == 201, crear.text
+    pid = crear.json()["id"]
+
+    r = await ejecutar_tool(
+        _fresh_db,
+        "crear_apunte",
+        {
+            "titulo": "_test_tool_apunte_clasif",
+            "contenido": "idea que pertenece al proyecto",
+            "proyecto_id": pid,
+        },
+    )
+    assert r["ok"], r
+    aid = r["datos"]["id"]
+    try:
+        # El handler reporta dónde lo archivó, con nombre desde la BD.
+        assert r["datos"]["general"] is False
+        assert r["datos"]["proyecto_nombre"] == "_test_tool_apunte_proyecto"
+        assert "curso_nombre" not in r["datos"]
+        # Y la fila quedó realmente etiquetada al proyecto.
+        got = (await client.get(f"/api/v1/apuntes/{aid}")).json()
+        assert got["proyecto_id"] == pid
+    finally:
+        await client.delete(f"/api/v1/apuntes/{aid}/permanente")
+        await client.delete(f"/api/v1/proyectos/{pid}")
+
+
+async def test_crear_apunte_etiquetado_a_curso(
+    _fresh_db: Postgrest, client: AsyncClient, curso_id: str
+) -> None:
+    r = await ejecutar_tool(
+        _fresh_db,
+        "crear_apunte",
+        {
+            "titulo": "_test_tool_apunte_curso",
+            "contenido": "idea de la materia",
+            "curso_id": curso_id,
+        },
+    )
+    assert r["ok"], r
+    aid = r["datos"]["id"]
+    try:
+        assert r["datos"]["general"] is False
+        assert r["datos"]["curso_nombre"] == "_test_curso_fix"
+        assert "proyecto_nombre" not in r["datos"]
+    finally:
+        await client.delete(f"/api/v1/apuntes/{aid}/permanente")
+
+
+async def test_crear_apunte_ambiguo_queda_general(
+    _fresh_db: Postgrest, client: AsyncClient
+) -> None:
+    """Idea sin proyecto ni curso → general. El handler no debe crear
+    ningún proyecto para clasificar: el conteo de proyectos no cambia."""
+    antes = len((await client.get("/api/v1/proyectos")).json())
+
+    r = await ejecutar_tool(
+        _fresh_db,
+        "crear_apunte",
+        {
+            "titulo": "_test_tool_apunte_general",
+            "contenido": "una idea suelta que no calza con nada",
+        },
+    )
+    assert r["ok"], r
+    aid = r["datos"]["id"]
+    try:
+        assert r["datos"]["general"] is True
+        assert "proyecto_nombre" not in r["datos"]
+        assert "curso_nombre" not in r["datos"]
+        # crear_apunte no tiene poder para crear proyectos.
+        despues = len((await client.get("/api/v1/proyectos")).json())
+        assert despues == antes
+    finally:
+        await client.delete(f"/api/v1/apuntes/{aid}/permanente")
+
+
 # ── registrar_cierre ────────────────────────────────────────────────
 
 

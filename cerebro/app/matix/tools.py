@@ -46,6 +46,7 @@ providers del Flutter):
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
@@ -59,7 +60,10 @@ from ..schemas.eventos import EventoCreate, EventoUpdate
 from ..schemas.proyectos import ProyectoCreate, ProyectoUpdate
 from ..schemas.tareas import TareaCreate, TareaUpdate
 from .indexador import buscar_apuntes as _buscar_apuntes_rag
+from .indexador import indexar_apunte
 from .uso import medidor
+
+logger = logging.getLogger("matix.tools")
 
 # ─────────────────────────────────────────────────────────────────────
 # Schemas JSON Schema que OpenAI espera (tools=[...]).
@@ -194,9 +198,15 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "crear_apunte",
             "description": (
-                "Crea un apunte (nota). Úsalo cuando el usuario "
-                "pida 'apuntá', 'anotá esto', 'guardame esto'. "
-                "El contenido puede tener saltos de línea."
+                "Crea un apunte (nota). Úsalo cuando el usuario pida "
+                "'apuntá', 'anotá esto', 'guardame esto', o dicte una "
+                "idea para registrar. El contenido puede tener saltos "
+                "de línea. Si la idea encaja CLARAMENTE con un proyecto "
+                "activo o un curso que YA existe en el contexto vivo, "
+                "etiquétalo pasando su `proyecto_id` y/o `curso_id`. Si "
+                "no encaja claro con ninguno, déjalo general (sin "
+                "ninguno de los dos). NUNCA inventes ni crees un "
+                "proyecto o curso para poder clasificar."
             ),
             "parameters": {
                 "type": "object",
@@ -762,6 +772,37 @@ async def _crear_evento(db: Postgrest, args: dict) -> dict[str, Any]:
     )
 
 
+async def _indexar_silencioso(db: Postgrest, apunte: dict) -> None:
+    """Indexa el apunte para el RAG sin propagar fallos. El apunte ya
+    quedó guardado; si el embedding falla (OpenAI caído, etc.) no
+    rompemos la tool: el próximo edit o el backfill lo reintenta.
+    Mismo criterio que `_reindexar_silencioso` del router de apuntes."""
+    try:
+        await indexar_apunte(db, apunte)
+    except Exception:  # noqa: BLE001
+        logger.exception("indexador falló para apunte %s", apunte.get("id"))
+
+
+async def _destino_apunte(db: Postgrest, apunte: dict) -> dict[str, Any]:
+    """Resuelve dónde quedó archivado el apunte (proyecto y/o curso,
+    con nombre) para que Matix lo confirme en una línea. Un apunte sin
+    proyecto ni curso es `general`. Devolvemos el nombre desde la BD
+    para que el modelo no lo adivine."""
+    out: dict[str, Any] = {}
+    proyecto_id = apunte.get("proyecto_id")
+    curso_id = apunte.get("curso_id")
+    if proyecto_id:
+        proyecto = await db.get("proyectos", str(proyecto_id))
+        if proyecto:
+            out["proyecto_nombre"] = proyecto.get("nombre")
+    if curso_id:
+        curso = await db.get("cursos", str(curso_id))
+        if curso:
+            out["curso_nombre"] = curso.get("nombre")
+    out["general"] = not (out.get("proyecto_nombre") or out.get("curso_nombre"))
+    return out
+
+
 async def _crear_apunte(db: Postgrest, args: dict) -> dict[str, Any]:
     try:
         body = ApunteCreate(**args)
@@ -770,13 +811,19 @@ async def _crear_apunte(db: Postgrest, args: dict) -> dict[str, Any]:
 
     payload = body.model_dump(mode="json", exclude_none=True)
     fila = await db.insert("apuntes", payload)
-    return _ok(
-        {
-            "id": fila["id"],
-            "titulo": fila["titulo"],
-            "etiquetas": fila.get("etiquetas", []),
-        }
-    )
+
+    # Que quede buscable por el RAG, igual que cuando se crea desde la
+    # app (Capa 3). No es crítico para la creación: si falla, el apunte
+    # ya está guardado.
+    await _indexar_silencioso(db, fila)
+
+    datos: dict[str, Any] = {
+        "id": fila["id"],
+        "titulo": fila["titulo"],
+        "etiquetas": fila.get("etiquetas", []),
+    }
+    datos.update(await _destino_apunte(db, fila))
+    return _ok(datos)
 
 
 async def _completar_tarea(db: Postgrest, args: dict) -> dict[str, Any]:

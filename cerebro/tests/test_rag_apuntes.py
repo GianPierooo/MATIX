@@ -170,6 +170,42 @@ async def test_tool_buscar_apuntes(_fresh_db: Postgrest, client: AsyncClient):
     assert isinstance(r["datos"]["resultados"], list)
 
 
+async def test_crear_apunte_por_tool_queda_buscable(
+    _fresh_db: Postgrest, client: AsyncClient
+):
+    """Un apunte creado por la tool de Matix (la vía de la voz) pasa
+    por el pipeline de embeddings igual que uno creado desde la app:
+    después se encuentra por significado, no solo por palabras."""
+    r = await ejecutar_tool(
+        _fresh_db,
+        "crear_apunte",
+        {
+            "titulo": "_test_rag_tool_fotosintesis",
+            "contenido": (
+                "Las plantas captan luz solar y la usan para convertir "
+                "dióxido de carbono y agua en glucosa, liberando oxígeno. "
+                "Ocurre en los cloroplastos, sobre todo en las hojas."
+            ),
+            "etiquetas": ["test"],
+        },
+    )
+    assert r["ok"], r
+    aid = r["datos"]["id"]
+    try:
+        # Consulta con vocabulario DISTINTO al del apunte.
+        resultados = await buscar_apuntes(
+            _fresh_db,
+            consulta="cómo transforman las plantas la energía del sol en alimento",
+            top_k=5,
+        )
+        ids = [str(x["apunte_id"]) for x in resultados]
+        assert aid in ids, (
+            f"el apunte creado por la tool {aid} no quedó indexado; ids: {ids}"
+        )
+    finally:
+        await client.delete(f"/api/v1/apuntes/{aid}/permanente")
+
+
 def test_indexador_recorta_apuntes_enormes():
     """El indexador recorta el texto a `_MAX_CHARS_POR_CHUNK` antes
     de embeber, para no mandar cosas absurdas a OpenAI si alguien
