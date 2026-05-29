@@ -27,6 +27,8 @@ from ..schemas.matix import (
     CapturaApunteResponse,
     ChatRequest,
     ChatResponse,
+    DesglosarTareaRequest,
+    DesglosarTareaResponse,
     EstimarDuracionesRequest,
     EstimarDuracionesResponse,
     ExtraerTareasRequest,
@@ -190,6 +192,28 @@ async def estimar_duraciones(body: EstimarDuracionesRequest) -> dict:
             {"tarea_id": tid, "minutos": m} for tid, m in duraciones.items()
         ]
     }
+
+
+@router.post("/desglosar-tarea", response_model=DesglosarTareaResponse)
+async def desglosar_tarea(body: DesglosarTareaRequest) -> dict:
+    """Parte una tarea en pasos accionables con horizonte (Capa 7 ·
+    Desglose). No persiste nada — la app revisa y crea los pasos. Si la
+    tarea ya es atómica, devuelve `es_atomica=True` y `pasos=[]`."""
+    try:
+        resultado = await llm.desglosar_tarea_json(
+            body.titulo, contexto=body.nota
+        )
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error llamando al modelo: {e}",
+        ) from e
+    return resultado
 
 
 @router.post("/transcribir", response_model=TranscripcionResponse)

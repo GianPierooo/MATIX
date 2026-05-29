@@ -297,6 +297,90 @@ async def estimar_duraciones_json(
     return out
 
 
+_HORIZONTES = {"ahora", "pronto", "mas_adelante"}
+
+
+async def desglosar_tarea_json(
+    titulo: str,
+    *,
+    contexto: str | None = None,
+    model: str = "gpt-4o-mini",
+) -> dict:
+    """Parte una tarea en pasos accionables, en orden lógico, cada uno
+    etiquetado por horizonte (Capa 7 · Desglose).
+
+    Devuelve un dict:
+        {"es_atomica": bool, "pasos": [{"titulo": str, "horizonte": str}]}
+
+    `horizonte` es uno de `"ahora"`, `"pronto"`, `"mas_adelante"`.
+
+    Honestidad: si la tarea YA es un paso concreto y atómico, el modelo
+    devuelve `es_atomica=True` y `pasos=[]` — no infla pasos de relleno.
+    """
+    client = _get_client()
+    system = (
+        "Eres un asistente que parte tareas en pasos accionables. "
+        "Recibes el título de una tarea (y a veces una nota con "
+        "contexto) y la desglosas en pasos CONCRETOS, en orden lógico.\n\n"
+        "Reglas estrictas:\n"
+        "- Cada paso es una acción concreta que se hace y se completa "
+        "(empieza con un verbo). Nada de pasos vagos ni de relleno.\n"
+        "- Si la tarea YA es atómica y accionable (no hay nada que "
+        "desglosar), devuelve es_atomica=true y pasos=[]. NO inventes "
+        "pasos para justificar el desglose.\n"
+        "- Etiqueta cada paso por horizonte temporal: 'ahora' (lo "
+        "primero, lo que se puede arrancar ya), 'pronto' (el siguiente "
+        "tramo), 'mas_adelante' (lo que viene después). Ordena los pasos "
+        "de 'ahora' a 'mas_adelante'.\n"
+        "- Entre 2 y 8 pasos; títulos cortos.\n\n"
+        "Responde SOLO un objeto JSON con esta forma exacta:\n"
+        '{"es_atomica": false, "pasos": [{"titulo": "...", '
+        '"horizonte": "ahora" | "pronto" | "mas_adelante"}]}'
+    )
+    user = titulo.strip()
+    if contexto and contexto.strip():
+        user += f"\n\nContexto: {contexto.strip()}"
+
+    resp = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.3,
+        response_format={"type": "json_object"},
+    )
+    medidor.registrar_chat(resp.usage)
+
+    contenido = resp.choices[0].message.content or "{}"
+    try:
+        datos = json.loads(contenido)
+    except json.JSONDecodeError:
+        return {"es_atomica": False, "pasos": []}
+    if not isinstance(datos, dict):
+        return {"es_atomica": False, "pasos": []}
+
+    es_atomica = bool(datos.get("es_atomica", False))
+    crudas = datos.get("pasos")
+    pasos: list[dict] = []
+    if isinstance(crudas, list):
+        for item in crudas:
+            if not isinstance(item, dict):
+                continue
+            t = item.get("titulo")
+            if not isinstance(t, str) or not t.strip():
+                continue
+            h = item.get("horizonte")
+            if h not in _HORIZONTES:
+                h = "pronto"
+            pasos.append({"titulo": t.strip(), "horizonte": h})
+
+    # Si no hay pasos, lo tratamos como atómica (no hay nada que crear).
+    if not pasos:
+        es_atomica = True
+    return {"es_atomica": es_atomica, "pasos": pasos}
+
+
 async def transcribir(
     audio_bytes: bytes,
     *,

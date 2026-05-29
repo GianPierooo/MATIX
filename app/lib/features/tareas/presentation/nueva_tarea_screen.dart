@@ -6,6 +6,7 @@ import '../../../api/matix_client.dart';
 import '../../../core/undo_snackbar.dart';
 import '../../../core/urgencia.dart';
 import '../../../theme/matix_colors.dart';
+import '../../desglose/presentation/desglosar_screen.dart';
 import '../../nudges/providers/nudges_providers.dart';
 import '../domain/selectores.dart';
 import '../domain/tarea.dart';
@@ -240,6 +241,36 @@ class _NuevaTareaScreenState extends ConsumerState<NuevaTareaScreen> {
                           minLines: 1,
                           maxLines: 4,
                         ),
+
+                        // Desglose (Capa 7): partir una tarea grande o
+                        // vaga en pasos accionables. Solo al editar (la
+                        // tarea ya existe y conocemos su proyecto/curso).
+                        if (_esEdicion) ...[
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                            onPressed: _guardando
+                                ? null
+                                : () => Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => DesglosarScreen(
+                                          titulo: _tituloCtrl.text.trim(),
+                                          nota: _notaCtrl.text.trim().isEmpty
+                                              ? null
+                                              : _notaCtrl.text.trim(),
+                                          proyectoId: _proyectoId,
+                                          cursoId: _cursoId,
+                                        ),
+                                      ),
+                                    ),
+                            icon: const Icon(Icons.account_tree_outlined,
+                                size: 18),
+                            label: const Text('Desglosar con Matix'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: MatixColors.accent,
+                              side: const BorderSide(color: MatixColors.accent),
+                            ),
+                          ),
+                        ],
 
                         const _SeccionTitulo('Prioridad'),
                         _PrioridadSelector(

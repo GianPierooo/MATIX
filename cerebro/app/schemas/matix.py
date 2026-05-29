@@ -143,6 +143,37 @@ class EstimarDuracionesResponse(BaseModel):
     duraciones: list[DuracionEstimada] = Field(default_factory=list)
 
 
+class DesglosarTareaRequest(BaseModel):
+    """Cuerpo de `/matix/desglosar-tarea` (Capa 7 · Desglose).
+
+    `titulo` es la tarea a partir; `nota` es contexto opcional. El
+    cerebro propone pasos accionables; NO crea nada — la app los muestra
+    para que el usuario revise y confirme.
+    """
+
+    titulo: str = Field(min_length=1)
+    nota: str | None = None
+
+
+class PasoPropuesto(BaseModel):
+    """Un paso del desglose. `horizonte` ordena el paso en el tiempo:
+    `ahora` (arrancar ya), `pronto`, `mas_adelante`."""
+
+    titulo: str
+    horizonte: Literal["ahora", "pronto", "mas_adelante"] = "pronto"
+
+
+class DesglosarTareaResponse(BaseModel):
+    """Respuesta de `/matix/desglosar-tarea`.
+
+    Si la tarea ya es atómica, `es_atomica=True` y `pasos` viene vacía —
+    la app muestra "esto ya es accionable, no hay qué desglosar".
+    """
+
+    es_atomica: bool = False
+    pasos: list[PasoPropuesto] = Field(default_factory=list)
+
+
 class ChatResponse(BaseModel):
     """Respuesta del endpoint `/matix/chat`.
 
