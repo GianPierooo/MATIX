@@ -135,6 +135,94 @@ async def responder_con_tools(
     }
 
 
+async def extraer_tareas_json(
+    texto: str,
+    *,
+    hoy: str,
+    model: str = "gpt-4o-mini",
+) -> list[dict]:
+    """Extrae tareas accionables de un texto libre y las devuelve
+    estructuradas (Capa 7-B). El texto suele venir del OCR de una foto
+    (una lista escrita a mano, una pizarra, un post-it) ya corregido
+    por el usuario, así que puede traer ruido y errores.
+
+    Usa el **modo JSON** de OpenAI (`response_format=json_object`):
+    el modelo está obligado a responder un objeto JSON válido, así no
+    tenemos que rascar texto libre buscando el bloque.
+
+    Devuelve una lista de dicts `{"titulo": str, "vence_en": str|None}`
+    donde `vence_en` es una fecha `YYYY-MM-DD` o `None`. Reglas que
+    fija el prompt:
+
+    - Solo acciones concretas que la persona debe HACER. Prosa,
+      definiciones, apuntes de estudio o ruido → no son tareas.
+    - Si el texto no tiene tareas claras, devuelve lista vacía. NO
+      inventa tareas ni fechas.
+    - Resuelve fechas relativas ("el viernes", "mañana", "en dos
+      semanas") a una fecha real usando `hoy` como referencia. Si una
+      tarea no menciona fecha, `vence_en` es `null`.
+
+    `hoy` se pasa como `YYYY-MM-DD` en hora de Lima (lo calcula el
+    router). Esto mantiene la función pura y testeable: misma entrada,
+    misma salida, sin depender del reloj del proceso.
+    """
+    client = _get_client()
+    system = (
+        "Eres un extractor de tareas. Recibes un texto libre que puede "
+        "venir del escaneo (OCR) de una foto: una lista escrita a mano, "
+        "una pizarra, notas sueltas. Puede traer errores de OCR.\n\n"
+        f"Hoy es {hoy} (zona horaria de Lima, Perú).\n\n"
+        "Tu trabajo: identificar las ACCIONES CONCRETAS que la persona "
+        "debe hacer y devolverlas como JSON. Reglas estrictas:\n"
+        "- Solo tareas accionables (algo que se hace y se completa). La "
+        "prosa, las definiciones, los apuntes de estudio o el ruido NO "
+        "son tareas.\n"
+        "- Si el texto no contiene tareas claras, devuelve la lista "
+        "vacía. NO inventes tareas.\n"
+        "- Cada tarea: un título corto y claro en infinitivo o imperativo "
+        "('Comprar pan', 'Entregar informe').\n"
+        "- Si la tarea menciona una fecha (relativa o absoluta), "
+        "resuélvela a una fecha real en formato YYYY-MM-DD usando la "
+        "fecha de hoy como referencia. Si no menciona fecha, usa null. "
+        "NO inventes fechas.\n\n"
+        'Responde SOLO un objeto JSON con esta forma exacta:\n'
+        '{"tareas": [{"titulo": "...", "vence_en": "YYYY-MM-DD" | null}]}'
+    )
+    resp = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": texto},
+        ],
+        temperature=0.2,
+        response_format={"type": "json_object"},
+    )
+    medidor.registrar_chat(resp.usage)
+
+    contenido = resp.choices[0].message.content or "{}"
+    try:
+        datos = json.loads(contenido)
+    except json.JSONDecodeError:
+        return []
+
+    crudas = datos.get("tareas") if isinstance(datos, dict) else None
+    if not isinstance(crudas, list):
+        return []
+
+    tareas: list[dict] = []
+    for item in crudas:
+        if not isinstance(item, dict):
+            continue
+        titulo = item.get("titulo")
+        if not isinstance(titulo, str) or not titulo.strip():
+            continue
+        vence = item.get("vence_en")
+        if not isinstance(vence, str) or not vence.strip():
+            vence = None
+        tareas.append({"titulo": titulo.strip(), "vence_en": vence})
+    return tareas
+
+
 async def transcribir(
     audio_bytes: bytes,
     *,

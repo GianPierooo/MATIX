@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -72,6 +73,42 @@ class CapturaApunteResponse(BaseModel):
     curso_nombre: str | None = None
     general: bool = True
     tablas_cambiadas: list[str] = Field(default_factory=lambda: ["apuntes"])
+
+
+class ExtraerTareasRequest(BaseModel):
+    """Cuerpo del endpoint `/matix/extraer-tareas` (Capa 7-B).
+
+    `texto` es el resultado del OCR de una foto (Capa 7-A) que el
+    usuario ya revisó y corrigió en la app. SOLO viaja el texto: la
+    imagen se quedó en el teléfono. El cerebro lo lee y propone tareas;
+    no crea nada — la app las muestra para que el usuario confirme.
+    """
+
+    texto: str = Field(min_length=1)
+
+
+class TareaPropuesta(BaseModel):
+    """Una tarea candidata extraída del texto.
+
+    `vence_en` es una fecha (sin hora) o `None`. El modelo resuelve
+    fechas relativas ('el viernes') a una fecha real; si la tarea no
+    menciona fecha, queda en `None`. La app deja editar título y fecha
+    en la hoja de revisión antes de crear.
+    """
+
+    titulo: str
+    vence_en: date | None = None
+
+
+class ExtraerTareasResponse(BaseModel):
+    """Respuesta del endpoint `/matix/extraer-tareas`.
+
+    `tareas` puede venir vacía cuando el texto no tiene acciones
+    claras — es un resultado válido, no un error. La app lo muestra
+    como "No encontré tareas claras en el texto".
+    """
+
+    tareas: list[TareaPropuesta] = Field(default_factory=list)
 
 
 class ChatResponse(BaseModel):

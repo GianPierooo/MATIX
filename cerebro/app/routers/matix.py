@@ -13,6 +13,8 @@ Endpoints:
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import Response
 
@@ -25,6 +27,8 @@ from ..schemas.matix import (
     CapturaApunteResponse,
     ChatRequest,
     ChatResponse,
+    ExtraerTareasRequest,
+    ExtraerTareasResponse,
     TranscripcionResponse,
     VozRequest,
 )
@@ -108,6 +112,49 @@ async def capturar(
         "general": datos.get("general", True),
         "tablas_cambiadas": ["apuntes"],
     }
+
+
+@router.post("/extraer-tareas", response_model=ExtraerTareasResponse)
+async def extraer_tareas(body: ExtraerTareasRequest) -> dict:
+    """Convierte texto libre (OCR de una foto, ya corregido por el
+    usuario) en tareas estructuradas que la app muestra para revisar
+    (Capa 7-B).
+
+    SOLO viaja el texto: la imagen se quedó en el teléfono (Capa 7-A).
+    Este endpoint **no persiste nada** — devuelve las tareas propuestas
+    y la app las crea con su CRUD de siempre tras la confirmación del
+    usuario. Si el texto no tiene tareas claras, `tareas` viene vacía.
+    """
+    texto = body.texto.strip()
+    if not texto:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El texto está vacío.",
+        )
+
+    # La fecha de referencia es HOY en Lima (UTC-5, sin DST). El cerebro
+    # corre con reloj UTC; explicitamos la conversión para que "el
+    # viernes" se resuelva contra el día del usuario, no el del server.
+    hoy = (
+        datetime.now(timezone.utc)
+        .astimezone(timezone(timedelta(hours=-5)))
+        .strftime("%Y-%m-%d")
+    )
+
+    try:
+        tareas = await llm.extraer_tareas_json(texto, hoy=hoy)
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error llamando al modelo: {e}",
+        ) from e
+
+    return {"tareas": tareas}
 
 
 @router.post("/transcribir", response_model=TranscripcionResponse)
