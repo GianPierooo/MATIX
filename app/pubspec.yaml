@@ -94,6 +94,15 @@ dependencies:
   # los dos picks con un solo plugin (más simple que `camera`).
   image_picker: ^1.1.2
 
+  # Capa 7-A: cámara con preview en vivo (`camera`) + OCR on-device
+  # (`google_mlkit_text_recognition`). Es un flujo NUEVO y aparte del
+  # de foto→apunte (que sube la imagen a OpenAI): acá la imagen NO sale
+  # del teléfono — ML Kit corre el reconocimiento de texto local, con
+  # el modelo latino empaquetado. Usamos `camera` (no image_picker)
+  # porque queremos preview en vivo y disparo desde la propia pantalla.
+  camera: ^0.12.0+1
+  google_mlkit_text_recognition: ^0.15.1
+
 dependency_overrides:
   # `record 5.2.1` resuelve `record_linux 0.7.2`, que está fuera de
   # sync con el `record_platform_interface 1.6.0` que pide el resto

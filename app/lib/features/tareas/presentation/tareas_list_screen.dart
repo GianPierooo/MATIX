@@ -6,6 +6,7 @@ import '../../../api/matix_client.dart';
 import '../../../core/undo_snackbar.dart';
 import '../../../theme/matix_colors.dart';
 import '../../../theme/matix_spacing.dart';
+import '../../captura_camara/presentation/captura_camara_screen.dart';
 import '../domain/selectores.dart';
 import '../domain/tarea.dart';
 import '../providers/tareas_providers.dart';
@@ -48,6 +49,11 @@ class TareasListScreen extends ConsumerWidget {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Capturar texto con la cámara',
+            onPressed: () => _abrirCaptura(context),
+            icon: const Icon(Icons.document_scanner_outlined),
+          ),
           IconButton(
             tooltip: 'Filtros',
             onPressed: () => _abrirFiltros(context),
@@ -176,6 +182,14 @@ class TareasListScreen extends ConsumerWidget {
   void _abrirNueva(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const NuevaTareaScreen()),
+    );
+  }
+
+  // Capa 7-A: por ahora solo abre la pantalla de captura + OCR
+  // on-device. Convertir ese texto en tareas es 7-B.
+  void _abrirCaptura(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const CapturaCamaraScreen()),
     );
   }
 }
