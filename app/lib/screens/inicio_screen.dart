@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../api/matix_client.dart';
+import '../config.dart';
 import '../features/apuntes/domain/apunte.dart';
 import '../features/apuntes/presentation/apuntes_list_screen.dart';
 import '../features/apuntes/presentation/editor_apunte_screen.dart';
@@ -713,7 +714,7 @@ class _EventoMini extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (e.esDeGoogle) ...[
+                if (MatixConfig.googleVisible && e.esDeGoogle) ...[
                   const SizedBox(width: 8),
                   const Icon(Icons.sync, size: 14, color: MatixColors.muted),
                 ],

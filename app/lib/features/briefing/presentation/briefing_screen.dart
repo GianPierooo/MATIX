@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../config.dart';
 import '../../../theme/matix_colors.dart';
 import '../../matix/data/tts_service.dart';
 import '../data/briefing_repository.dart';
@@ -334,7 +335,7 @@ class _EventoFila extends StatelessWidget {
                         ),
                       ),
                     ),
-                    if (ev.esDeGoogle)
+                    if (MatixConfig.googleVisible && ev.esDeGoogle)
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 6,

@@ -172,8 +172,12 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
             ),
           ),
 
-          const _Seccion('Conexiones'),
-          const ConexionGoogleTile(),
+          // Capa 4 dormida: la conexión con Google no se muestra. El
+          // tile sigue vivo tras el flag para poder revivirla.
+          if (MatixConfig.googleVisible) ...[
+            const _Seccion('Conexiones'),
+            const ConexionGoogleTile(),
+          ],
 
           const _Seccion('Versión'),
           _BuscarActualizacionTile(),

@@ -25,6 +25,8 @@ class _CalendarioScreenState extends ConsumerState<CalendarioScreen> {
   @override
   Widget build(BuildContext context) {
     final eventos = ref.watch(eventosProvider);
+    final cursos = ref.watch(cursosListProvider).valueOrNull ?? const <Curso>[];
+    final cursosPorId = {for (final c in cursos) c.id: c};
 
     return Scaffold(
       appBar: AppBar(
@@ -75,6 +77,7 @@ class _CalendarioScreenState extends ConsumerState<CalendarioScreen> {
                 eventos: todos.where((e) => e.ocurreEn(_dia)).toList()
                   ..sort((a, b) => a.iniciaEn.compareTo(b.iniciaEn)),
                 clases: ref.watch(sesionesDelDiaProvider(_dia)),
+                cursosPorId: cursosPorId,
               ),
             ),
           ],
@@ -277,10 +280,12 @@ class _ListaDelDia extends StatelessWidget {
     required this.dia,
     required this.eventos,
     required this.clases,
+    required this.cursosPorId,
   });
   final DateTime dia;
   final List<Evento> eventos;
   final List<(SesionClase, Curso?)> clases;
+  final Map<String, Curso> cursosPorId;
 
   @override
   Widget build(BuildContext context) {
@@ -293,9 +298,10 @@ class _ListaDelDia extends StatelessWidget {
           fin: e.terminaEn?.toLocal(),
           titulo: e.titulo,
           subtitulo: e.ubicacion,
-          color: MatixColors.accent,
+          color: _colorEvento(e, cursosPorId),
           esClase: false,
           todoElDia: e.todoElDia,
+          evento: e,
         ),
       for (final entry in clases)
         _Fila(
@@ -343,12 +349,10 @@ class _ListaDelDia extends StatelessWidget {
     return ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: filas.length,
-      itemBuilder: (_, i) {
+      itemBuilder: (context, i) {
         final f = filas[i];
         final tieneChoque = choca[i];
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-          child: Container(
+        final contenido = Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: tieneChoque
@@ -444,6 +448,29 @@ class _ListaDelDia extends StatelessWidget {
                 ),
               ],
             ),
+          );
+        // Las clases son recurrentes (se editan en Universidad); solo
+        // los eventos abren el editor para corregir o borrar.
+        if (f.evento == null) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: contenido,
+          );
+        }
+        final ev = f.evento!;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => NuevoEventoScreen(evento: ev),
+                ),
+              ),
+              child: contenido,
+            ),
           ),
         );
       },
@@ -460,6 +487,7 @@ class _Fila {
     required this.color,
     required this.esClase,
     required this.todoElDia,
+    this.evento,
   });
   final DateTime inicio;
   final DateTime? fin;
@@ -468,10 +496,21 @@ class _Fila {
   final Color color;
   final bool esClase;
   final bool todoElDia;
+  /// El evento de origen, o `null` si la fila es una clase recurrente.
+  final Evento? evento;
 }
 
 Color _colorCurso(String? hex) {
   if (hex == null || hex.length != 7) return MatixColors.accent;
   final v = int.tryParse(hex.substring(1), radix: 16);
   return v == null ? MatixColors.accent : Color(0xFF000000 | v);
+}
+
+/// Color de la barra de un evento: su color propio si lo trae (p.ej.
+/// el heredado de Google), si no el del curso asociado, si no acento.
+Color _colorEvento(Evento e, Map<String, Curso> cursos) {
+  if (e.color != null && e.color!.length == 7) return _colorCurso(e.color);
+  final curso = e.cursoId == null ? null : cursos[e.cursoId];
+  if (curso?.color != null) return _colorCurso(curso!.color);
+  return MatixColors.accent;
 }

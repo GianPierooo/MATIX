@@ -57,6 +57,16 @@ class MatixConfig {
     defaultValue: 0,
   );
 
+  /// Capa 4 (Google Calendar) quedó dormida: el calendario nativo es
+  /// EL calendario de Matix. Este flag esconde toda la UI de conectar
+  /// y sincronizar Google sin borrar el código de Capa 4 — sigue ahí,
+  /// listo para revivir. Para volver a mostrarla, compilar con
+  /// `--dart-define MATIX_GOOGLE_VISIBLE=true`.
+  static const bool googleVisible = bool.fromEnvironment(
+    'MATIX_GOOGLE_VISIBLE',
+    defaultValue: false,
+  );
+
   static bool get hasApiKey => apiKey.isNotEmpty;
 
   /// `true` si la URL configurada es HTTPS (i.e. estamos hablando con

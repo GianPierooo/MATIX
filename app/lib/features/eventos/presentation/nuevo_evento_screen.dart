@@ -4,10 +4,21 @@ import 'package:intl/intl.dart';
 
 import '../../../api/matix_client.dart';
 import '../../../theme/matix_colors.dart';
+import '../../cursos/domain/curso.dart';
+import '../../universidad/providers/universidad_providers.dart';
+import '../domain/evento.dart';
 import '../providers/eventos_providers.dart';
 
+/// Alta y edición de un evento del calendario nativo.
+///
+/// Si recibe `evento`, entra en modo edición: precarga los campos,
+/// guarda con PATCH y ofrece borrar. Sin `evento`, crea uno nuevo.
 class NuevoEventoScreen extends ConsumerStatefulWidget {
-  const NuevoEventoScreen({super.key});
+  const NuevoEventoScreen({super.key, this.evento});
+
+  /// Evento a editar. `null` = alta.
+  final Evento? evento;
+
   @override
   ConsumerState<NuevoEventoScreen> createState() =>
       _NuevoEventoScreenState();
@@ -15,14 +26,32 @@ class NuevoEventoScreen extends ConsumerStatefulWidget {
 
 class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _titulo = TextEditingController();
-  final _ubicacion = TextEditingController();
-  DateTime _inicia = DateTime.now().add(const Duration(hours: 1));
+  late final TextEditingController _titulo;
+  late final TextEditingController _ubicacion;
+  late DateTime _inicia;
   DateTime? _termina;
   DateTime? _recordar;
   bool _todoElDia = false;
+  String? _cursoId;
   bool _guardando = false;
+  bool _borrando = false;
   String? _error;
+
+  bool get _editando => widget.evento != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.evento;
+    _titulo = TextEditingController(text: e?.titulo ?? '');
+    _ubicacion = TextEditingController(text: e?.ubicacion ?? '');
+    _inicia =
+        e?.iniciaEn.toLocal() ?? DateTime.now().add(const Duration(hours: 1));
+    _termina = e?.terminaEn?.toLocal();
+    _recordar = e?.recordarEn?.toLocal();
+    _todoElDia = e?.todoElDia ?? false;
+    _cursoId = e?.cursoId;
+  }
 
   @override
   void dispose() {
@@ -35,7 +64,7 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
     final fecha = await showDatePicker(
       context: context,
       initialDate: base,
-      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+      firstDate: DateTime.now().subtract(const Duration(days: 365 * 2)),
       lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
     );
     if (fecha == null || !mounted) return null;
@@ -53,17 +82,31 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
       _guardando = true;
       _error = null;
     });
+    final repo = ref.read(eventosRepositoryProvider);
+    final ubic =
+        _ubicacion.text.trim().isEmpty ? null : _ubicacion.text.trim();
     try {
-      await ref.read(eventosRepositoryProvider).crear(
-            titulo: _titulo.text.trim(),
-            iniciaEn: _inicia,
-            terminaEn: _termina,
-            todoElDia: _todoElDia,
-            ubicacion: _ubicacion.text.trim().isEmpty
-                ? null
-                : _ubicacion.text.trim(),
-            recordarEn: _recordar,
-          );
+      if (_editando) {
+        await repo.actualizar(widget.evento!.id, {
+          'titulo': _titulo.text.trim(),
+          'inicia_en': _inicia.toUtc().toIso8601String(),
+          'termina_en': _termina?.toUtc().toIso8601String(),
+          'todo_el_dia': _todoElDia,
+          'ubicacion': ubic,
+          'curso_id': _cursoId,
+          'recordar_en': _recordar?.toUtc().toIso8601String(),
+        });
+      } else {
+        await repo.crear(
+          titulo: _titulo.text.trim(),
+          iniciaEn: _inicia,
+          terminaEn: _termina,
+          todoElDia: _todoElDia,
+          ubicacion: ubic,
+          cursoId: _cursoId,
+          recordarEn: _recordar,
+        );
+      }
       ref.invalidate(eventosProvider);
       if (mounted) Navigator.of(context).pop();
     } on MatixApiException catch (e) {
@@ -75,10 +118,68 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
     }
   }
 
+  Future<void> _borrar() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('¿Borrar este evento?'),
+        content: Text(
+          'Vas a mandar "${widget.evento!.titulo}" a la papelera. '
+          'Puedes restaurarlo desde Ajustes.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: MatixColors.red),
+            child: const Text('Borrar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() {
+      _borrando = true;
+      _error = null;
+    });
+    try {
+      await ref.read(eventosRepositoryProvider).borrar(widget.evento!.id);
+      ref.invalidate(eventosProvider);
+      if (mounted) Navigator.of(context).pop();
+    } on MatixApiException catch (e) {
+      setState(() => _error = e.message);
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _borrando = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final cursos = ref.watch(cursosListProvider).valueOrNull ?? const <Curso>[];
     return Scaffold(
-      appBar: AppBar(title: const Text('Nuevo evento')),
+      appBar: AppBar(
+        title: Text(_editando ? 'Editar evento' : 'Nuevo evento'),
+        actions: [
+          if (_editando)
+            IconButton(
+              tooltip: 'Borrar',
+              onPressed: _borrando || _guardando ? null : _borrar,
+              icon: _borrando
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          color: MatixColors.red, strokeWidth: 2.2),
+                    )
+                  : const Icon(Icons.delete_outline, color: MatixColors.red),
+            ),
+        ],
+      ),
       body: SafeArea(
         child: Form(
           key: _formKey,
@@ -88,7 +189,7 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
               TextFormField(
                 controller: _titulo,
                 decoration: const InputDecoration(labelText: 'Título'),
-                autofocus: true,
+                autofocus: !_editando,
                 validator: (s) =>
                     (s == null || s.trim().isEmpty) ? 'Pon un título' : null,
               ),
@@ -113,8 +214,7 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
                     ? 'Sin fin definido'
                     : DateFormat("EEE d MMM HH:mm", 'es').format(_termina!),
                 onTap: () async {
-                  final d =
-                      await _pickDateTime(_termina ?? _inicia);
+                  final d = await _pickDateTime(_termina ?? _inicia);
                   if (d != null) setState(() => _termina = d);
                 },
                 onClear: _termina == null
@@ -134,6 +234,12 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
                 onClear: _recordar == null
                     ? null
                     : () => setState(() => _recordar = null),
+              ),
+              const SizedBox(height: 12),
+              _SelectorCurso(
+                cursos: cursos,
+                cursoId: _cursoId,
+                onChanged: (v) => setState(() => _cursoId = v),
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -163,12 +269,48 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
                         child: CircularProgressIndicator(
                             color: Colors.white, strokeWidth: 2.2),
                       )
-                    : const Text('Crear evento'),
+                    : Text(_editando ? 'Guardar cambios' : 'Crear evento'),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Desplegable de curso (opcional). El color del curso pinta el evento
+/// en el calendario; sin curso, el evento usa el color de acento.
+class _SelectorCurso extends StatelessWidget {
+  const _SelectorCurso({
+    required this.cursos,
+    required this.cursoId,
+    required this.onChanged,
+  });
+  final List<Curso> cursos;
+  final String? cursoId;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    // El valor solo es válido si el curso sigue existiendo.
+    final valor = cursos.any((c) => c.id == cursoId) ? cursoId : null;
+    return DropdownButtonFormField<String?>(
+      initialValue: valor,
+      isExpanded: true,
+      decoration: const InputDecoration(labelText: 'Curso (opcional)'),
+      items: [
+        const DropdownMenuItem<String?>(
+          value: null,
+          child: Text('Sin curso'),
+        ),
+        for (final c in cursos)
+          DropdownMenuItem<String?>(
+            value: c.id,
+            child: Text(c.nombre, overflow: TextOverflow.ellipsis),
+          ),
+      ],
+      onChanged: onChanged,
     );
   }
 }
