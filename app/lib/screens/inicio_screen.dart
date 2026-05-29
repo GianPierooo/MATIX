@@ -10,7 +10,6 @@ import '../features/apuntes/presentation/apuntes_list_screen.dart';
 import '../features/apuntes/presentation/editor_apunte_screen.dart';
 import '../features/apuntes/providers/apuntes_providers.dart';
 import '../features/busqueda/presentation/busqueda_screen.dart';
-import '../features/cierre/presentation/cierre_dia_screen.dart';
 import '../features/cursos/domain/curso.dart';
 import '../features/cursos/domain/sesion_clase.dart';
 import '../features/evaluaciones/domain/evaluacion.dart';
@@ -187,27 +186,6 @@ class InicioScreen extends ConsumerWidget {
             icon: const Icon(Icons.search),
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const BusquedaScreen()),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Calendario',
-            icon: const Icon(Icons.calendar_today_outlined),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const CalendarioScreen()),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Apuntes',
-            icon: const Icon(Icons.note_alt_outlined),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ApuntesListScreen()),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Cierre del día',
-            icon: const Icon(Icons.nightlight_outlined),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => CierreDiaScreen()),
             ),
           ),
           IconButton(

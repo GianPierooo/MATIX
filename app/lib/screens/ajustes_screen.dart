@@ -12,6 +12,7 @@ import '../features/briefing/data/briefing_prefs.dart';
 import '../features/briefing/presentation/briefing_screen.dart';
 import '../features/briefing/providers/briefing_providers.dart';
 import '../features/cierre/data/cierre_prefs.dart';
+import '../features/cierre/presentation/cierre_dia_screen.dart';
 import '../features/cierre/presentation/cierre_screen.dart';
 import '../features/cierre/providers/cierre_providers.dart';
 import '../features/google/presentation/conexion_google_tile.dart';
@@ -247,6 +248,14 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
                   onChanged: _toggleEnCurso ? null : _toggleCierreDiario,
                 ),
               ],
+            ),
+          ),
+          _Accion(
+            label: 'Hacer el cierre de hoy',
+            icon: Icons.nightlight_outlined,
+            subtitle: '3 cosas que sí hiciste + descarga mental.',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const CierreDiaScreen()),
             ),
           ),
 

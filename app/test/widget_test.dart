@@ -18,10 +18,10 @@ void main() {
     // Los 5 labels del bottom nav (Inicio aparece también como
     // título de la pantalla activa por defecto, de ahí `findsWidgets`).
     expect(find.text('Inicio'), findsWidgets);
-    expect(find.text('Proyectos'), findsOneWidget);
-    expect(find.text('Matix'), findsOneWidget);
     expect(find.text('Tareas'), findsOneWidget);
-    expect(find.text('Universidad'), findsOneWidget);
+    expect(find.text('Matix'), findsOneWidget);
+    expect(find.text('Calendario'), findsOneWidget);
+    expect(find.text('Proyectos'), findsOneWidget);
   });
 
   testWidgets('Tocar Proyectos abre la pantalla real (AppBar + loading)',

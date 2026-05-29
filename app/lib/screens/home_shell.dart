@@ -6,25 +6,24 @@ import '../config.dart';
 import '../features/autoupdate/data/update_service.dart';
 import '../features/autoupdate/presentation/update_dialog.dart';
 import '../features/autoupdate/providers/update_providers.dart';
+import '../features/eventos/presentation/calendario_screen.dart';
 import '../features/matix/presentation/matix_chat_screen.dart';
 import '../features/proyectos/presentation/proyectos_list_screen.dart';
 import '../features/tareas/presentation/tareas_list_screen.dart';
 import '../theme/matix_colors.dart';
 import 'inicio_screen.dart';
-import 'universidad_screen.dart';
 
 /// Cáscara principal: bottom nav personalizado + IndexedStack que preserva
 /// el estado de cada sección al cambiar de pestaña.
 ///
 /// La barra inferior tiene **cinco pestañas** con Matix elevado en el
-/// centro (estilo FAB), siguiendo `mockups/matix-nav.jsx`:
+/// centro (estilo FAB):
 ///
-///   Inicio · Proyectos · Matix(centro) · Tareas · Universidad
+///   Inicio · Tareas · Matix(centro) · Calendario · Proyectos
 ///
-/// Apuntes y Calendario son secciones del hub pero no viven en la barra:
-/// Calendario se accede desde Inicio (header) y desde "Ver agenda";
-/// Apuntes se accederán desde Universidad y desde Proyectos cuando se
-/// construyan esas pantallas.
+/// Universidad y Apuntes son secciones del hub pero no viven en la barra:
+/// se alcanzan desde sus tarjetas en Inicio (Universidad por la tarjeta
+/// "Universidad"; la lista completa de Apuntes por "Ver todos").
 ///
 /// Al arrancar, hace un ping al cerebro vía `/health`. Si falla, muestra
 /// un `SnackBar` con el detalle.
@@ -43,10 +42,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   static const _screens = <Widget>[
     InicioScreen(),
-    ProyectosListScreen(),
-    MatixChatScreen(),
     TareasListScreen(),
-    UniversidadScreen(),
+    MatixChatScreen(),
+    CalendarioScreen(),
+    ProyectosListScreen(),
   ];
 
   @override
@@ -156,9 +155,9 @@ class _MatixBottomNav extends StatelessWidget {
       activeIcon: Icons.home,
     ),
     _NavItem(
-      label: 'Proyectos',
-      icon: Icons.flag_outlined,
-      activeIcon: Icons.flag,
+      label: 'Tareas',
+      icon: Icons.checklist_outlined,
+      activeIcon: Icons.checklist,
     ),
     _NavItem(
       label: 'Matix',
@@ -167,14 +166,14 @@ class _MatixBottomNav extends StatelessWidget {
       isCenter: true,
     ),
     _NavItem(
-      label: 'Tareas',
-      icon: Icons.checklist_outlined,
-      activeIcon: Icons.checklist,
+      label: 'Calendario',
+      icon: Icons.calendar_today_outlined,
+      activeIcon: Icons.calendar_today,
     ),
     _NavItem(
-      label: 'Universidad',
-      icon: Icons.school_outlined,
-      activeIcon: Icons.school,
+      label: 'Proyectos',
+      icon: Icons.flag_outlined,
+      activeIcon: Icons.flag,
     ),
   ];
 
