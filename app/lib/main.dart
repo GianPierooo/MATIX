@@ -11,6 +11,8 @@ import 'core/notificaciones_service.dart';
 import 'core/providers.dart';
 import 'features/briefing/presentation/briefing_screen.dart';
 import 'features/cierre/presentation/cierre_screen.dart';
+import 'features/eventos/presentation/nuevo_evento_screen.dart';
+import 'features/eventos/providers/eventos_providers.dart';
 import 'screens/home_shell.dart';
 import 'theme/matix_theme.dart';
 
@@ -75,12 +77,29 @@ class _MatixAppState extends ConsumerState<MatixApp> {
         _navigatorKey.currentState?.push(
           MaterialPageRoute(builder: (_) => const CierreScreen()),
         );
+      } else if (payload != null && payload.startsWith('evento:')) {
+        // Recordatorio de evento (Cal-2): abrimos su detalle/edición.
+        // El detalle es la propia pantalla de edición.
+        unawaited(_abrirEvento(payload.substring('evento:'.length)));
       }
     });
     // Aseguramos la inicialización (carga timezones + plugin). Si
     // el usuario ya tiene la noti del briefing activa, el config
     // controller la reprograma al leer SharedPreferences.
     unawaited(notis.inicializar());
+  }
+
+  /// Trae el evento por id y abre su pantalla de edición (que hace de
+  /// detalle). Si la red falla, no abrimos nada — mejor mudo que crash.
+  Future<void> _abrirEvento(String id) async {
+    try {
+      final evento = await ref.read(eventosRepositoryProvider).obtener(id);
+      _navigatorKey.currentState?.push(
+        MaterialPageRoute(builder: (_) => NuevoEventoScreen(evento: evento)),
+      );
+    } catch (e) {
+      if (kDebugMode) debugPrint('Deep link evento falló: $e');
+    }
   }
 
   @override

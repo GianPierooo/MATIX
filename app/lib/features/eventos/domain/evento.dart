@@ -14,6 +14,7 @@ class Evento {
     this.proyectoId,
     this.color,
     this.recordarEn,
+    this.recordatorioOffsetMin,
     this.origen = 'manual',
     this.externalId,
     this.googleUpdatedAt,
@@ -32,6 +33,10 @@ class Evento {
   final String? proyectoId;
   final String? color;
   final DateTime? recordarEn;
+  /// Recordatorio como offset en minutos antes del inicio (NULL = sin
+  /// recordatorio, 0 = a la hora). Fuente de verdad del preset que se
+  /// muestra en el detalle; `recordarEn` es su espejo absoluto.
+  final int? recordatorioOffsetMin;
   /// "manual" para los creados desde la app, "google" para los
   /// sincronizados desde Google Calendar (Capa 4 Paso 1). La UI
   /// muestra un badge sutil para distinguirlos.
@@ -75,6 +80,7 @@ class Evento {
         recordarEn: json['recordar_en'] == null
             ? null
             : DateTime.parse(json['recordar_en'] as String),
+        recordatorioOffsetMin: (json['recordatorio_offset_min'] as num?)?.toInt(),
         origen: (json['origen'] as String?) ?? 'manual',
         externalId: json['external_id'] as String?,
         googleUpdatedAt: json['google_updated_at'] == null

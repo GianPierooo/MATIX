@@ -4,6 +4,7 @@ import '../../../api/matix_client.dart';
 import '../../../core/notif_id.dart';
 import '../../../core/notificaciones_service.dart';
 import '../domain/evento.dart';
+import '../domain/recordatorio_evento.dart';
 
 /// Wrapper sobre `/api/v1/eventos`. Mantiene sincronizadas las
 /// notificaciones locales con `recordar_en` (mismo patrón que
@@ -44,8 +45,11 @@ class EventosRepository {
     String? cursoId,
     String? proyectoId,
     String? color,
-    DateTime? recordarEn,
+    int? recordatorioOffsetMin,
   }) async {
+    // El offset es la fuente de verdad; `recordar_en` se deriva como
+    // espejo absoluto (inicia − offset) para lectores legados.
+    final recordarEn = momentoRecordatorio(iniciaEn, recordatorioOffsetMin);
     final body = <String, dynamic>{
       'titulo': titulo,
       'inicia_en': iniciaEn.toUtc().toIso8601String(),
@@ -58,6 +62,8 @@ class EventosRepository {
       if (cursoId != null) 'curso_id': cursoId,
       if (proyectoId != null) 'proyecto_id': proyectoId,
       if (color != null) 'color': color,
+      if (recordatorioOffsetMin != null)
+        'recordatorio_offset_min': recordatorioOffsetMin,
       if (recordarEn != null)
         'recordar_en': recordarEn.toUtc().toIso8601String(),
     };
@@ -95,14 +101,20 @@ class EventosRepository {
   Future<void> _reprogramarRecordatorio(Evento e) async {
     final nid = notifIdDe(e.id);
     await _notif.cancelar(nid);
-    final r = e.recordarEn;
-    if (r == null) return;
+    // El offset manda: si el evento (o su recordatorio) ya pasó,
+    // `momentoRecordatorio` da un instante pasado y `programar` no agenda.
+    final cuando = momentoRecordatorio(e.iniciaEn.toLocal(), e.recordatorioOffsetMin);
+    if (cuando == null) return;
     await _notif.pedirPermisos();
     await _notif.programar(
       id: nid,
       titulo: e.titulo,
-      cuerpo: e.ubicacion ?? 'Evento próximo',
-      cuando: r.toLocal(),
+      cuerpo: e.ubicacion?.isNotEmpty == true
+          ? e.ubicacion!
+          : 'Tu evento está por empezar.',
+      cuando: cuando,
+      exacto: true,
+      payload: 'evento:${e.id}',
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'dart:io' show Platform;
 
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
@@ -78,8 +79,26 @@ class NotificacionesService {
     return granted ?? false;
   }
 
+  /// Pide el permiso de alarmas exactas (Android 12+). Sin él, las
+  /// notificaciones `exacto: true` caen al modo inexacto. Abre la
+  /// pantalla del sistema; en Android 13+ con `USE_EXACT_ALARM` el
+  /// permiso ya viene concedido y esto suele ser innecesario.
+  Future<bool> pedirPermisoAlarmasExactas() async {
+    if (!Platform.isAndroid) return true;
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (android == null) return false;
+    final granted = await android.requestExactAlarmsPermission();
+    return granted ?? false;
+  }
+
   /// Programa una notificación que dispara en `cuando` (zona del
   /// usuario). Si ya existía una con el mismo `id`, la reemplaza.
+  ///
+  /// `exacto`: usa `exactAllowWhileIdle` para que dispare al minuto. Si
+  /// el sistema rechaza la alarma exacta (permiso revocado en Android
+  /// 12), reintenta en modo inexacto en vez de propagar el error.
+  /// `payload`: string que recibe el handler de tap (deep link).
   ///
   /// Devuelve `true` si se programó. Si `cuando` ya pasó, devuelve
   /// `false` y no programa nada (no tiene sentido recordar algo que
@@ -89,6 +108,8 @@ class NotificacionesService {
     required String titulo,
     required String cuerpo,
     required DateTime cuando,
+    bool exacto = false,
+    String? payload,
   }) async {
     if (!_inicializado) await inicializar();
     final ahora = tz.TZDateTime.now(tz.local);
@@ -105,26 +126,36 @@ class NotificacionesService {
       ),
     );
 
-    await _plugin.zonedSchedule(
-      id,
-      titulo,
-      cuerpo,
-      zoned,
-      detalles,
-      // `inexactAllowWhileIdle` evita pedir permiso de alarmas exactas
-      // (Android 12+). Si el usuario quiere precisión al minuto, se
-      // cambia a `exactAllowWhileIdle` y se gestiona el permiso aparte.
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      // El parámetro es requerido por el API aunque solo aplica a iOS
-      // antes de iOS 10 (legacy). Como solo apuntamos Android, da
-      // igual el valor — usamos el equivalente al reloj del sistema.
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-      // Sin `matchDateTimeComponents` — la repetición no se gestiona
-      // aquí (la repetición de tareas la maneja el cerebro creando una
-      // nueva fila al completar; este servicio solo programa instantes
-      // puntuales).
-    );
+    Future<void> agendar(AndroidScheduleMode modo) => _plugin.zonedSchedule(
+          id,
+          titulo,
+          cuerpo,
+          zoned,
+          detalles,
+          androidScheduleMode: modo,
+          // El parámetro es requerido por el API aunque solo aplica a iOS
+          // antes de iOS 10 (legacy). Como solo apuntamos Android, da
+          // igual el valor — usamos el equivalente al reloj del sistema.
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
+          payload: payload,
+          // Sin `matchDateTimeComponents` — la repetición no se gestiona
+          // aquí (la repetición de tareas la maneja el cerebro creando una
+          // nueva fila al completar; este servicio solo programa instantes
+          // puntuales).
+        );
+
+    final modo = exacto
+        ? AndroidScheduleMode.exactAllowWhileIdle
+        : AndroidScheduleMode.inexactAllowWhileIdle;
+    try {
+      await agendar(modo);
+    } on PlatformException {
+      // El permiso de alarma exacta puede estar revocado: degradamos a
+      // inexacta para que el aviso igual llegue (con menos precisión).
+      if (!exacto) rethrow;
+      await agendar(AndroidScheduleMode.inexactAllowWhileIdle);
+    }
     return true;
   }
 

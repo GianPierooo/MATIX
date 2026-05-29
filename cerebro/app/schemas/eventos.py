@@ -17,6 +17,10 @@ class EventoCreate(BaseModel):
     proyecto_id: UUID | None = None
     color: str | None = None
     recordar_en: datetime | None = None
+    # Recordatorio como offset en minutos antes del inicio (NULL = sin
+    # recordatorio, 0 = a la hora). La app lo usa para reprogramar la
+    # notificación local; `recordar_en` queda como espejo derivado.
+    recordatorio_offset_min: int | None = None
 
 
 class EventoUpdate(BaseModel):
@@ -30,6 +34,7 @@ class EventoUpdate(BaseModel):
     proyecto_id: UUID | None = None
     color: str | None = None
     recordar_en: datetime | None = None
+    recordatorio_offset_min: int | None = None
 
 
 class EventoRead(BaseModel):
@@ -44,6 +49,7 @@ class EventoRead(BaseModel):
     proyecto_id: UUID | None = None
     color: str | None = None
     recordar_en: datetime | None = None
+    recordatorio_offset_min: int | None = None
     eliminado_en: datetime | None = None
     # Capa 4 Paso 1: origen del evento. "manual" para los creados
     # desde la app, "google" para los sync-eados.

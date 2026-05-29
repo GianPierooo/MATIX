@@ -7,6 +7,7 @@ import '../../../theme/matix_colors.dart';
 import '../../cursos/domain/curso.dart';
 import '../../universidad/providers/universidad_providers.dart';
 import '../domain/evento.dart';
+import '../domain/recordatorio_evento.dart';
 import '../providers/eventos_providers.dart';
 
 /// Alta y edición de un evento del calendario nativo.
@@ -30,7 +31,7 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
   late final TextEditingController _ubicacion;
   late DateTime _inicia;
   DateTime? _termina;
-  DateTime? _recordar;
+  int? _recordatorioOffsetMin;
   bool _todoElDia = false;
   String? _cursoId;
   bool _guardando = false;
@@ -48,7 +49,7 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
     _inicia =
         e?.iniciaEn.toLocal() ?? DateTime.now().add(const Duration(hours: 1));
     _termina = e?.terminaEn?.toLocal();
-    _recordar = e?.recordarEn?.toLocal();
+    _recordatorioOffsetMin = e?.recordatorioOffsetMin;
     _todoElDia = e?.todoElDia ?? false;
     _cursoId = e?.cursoId;
   }
@@ -87,6 +88,9 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
         _ubicacion.text.trim().isEmpty ? null : _ubicacion.text.trim();
     try {
       if (_editando) {
+        // El offset manda; `recordar_en` se deriva (null lo limpia).
+        final recordarEn =
+            momentoRecordatorio(_inicia, _recordatorioOffsetMin);
         await repo.actualizar(widget.evento!.id, {
           'titulo': _titulo.text.trim(),
           'inicia_en': _inicia.toUtc().toIso8601String(),
@@ -94,7 +98,8 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
           'todo_el_dia': _todoElDia,
           'ubicacion': ubic,
           'curso_id': _cursoId,
-          'recordar_en': _recordar?.toUtc().toIso8601String(),
+          'recordatorio_offset_min': _recordatorioOffsetMin,
+          'recordar_en': recordarEn?.toUtc().toIso8601String(),
         });
       } else {
         await repo.crear(
@@ -104,7 +109,7 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
           todoElDia: _todoElDia,
           ubicacion: ubic,
           cursoId: _cursoId,
-          recordarEn: _recordar,
+          recordatorioOffsetMin: _recordatorioOffsetMin,
         );
       }
       ref.invalidate(eventosProvider);
@@ -221,19 +226,11 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
                     ? null
                     : () => setState(() => _termina = null),
               ),
-              _Pick(
-                label: 'Recordatorio',
-                value: _recordar == null
-                    ? 'Sin recordatorio'
-                    : DateFormat("EEE d MMM HH:mm", 'es').format(_recordar!),
-                onTap: () async {
-                  final d = await _pickDateTime(
-                      _recordar ?? _inicia.subtract(const Duration(minutes: 15)));
-                  if (d != null) setState(() => _recordar = d);
-                },
-                onClear: _recordar == null
-                    ? null
-                    : () => setState(() => _recordar = null),
+              const SizedBox(height: 12),
+              _SelectorRecordatorio(
+                offsetMin: _recordatorioOffsetMin,
+                onChanged: (v) =>
+                    setState(() => _recordatorioOffsetMin = v),
               ),
               const SizedBox(height: 12),
               _SelectorCurso(
@@ -308,6 +305,43 @@ class _SelectorCurso extends StatelessWidget {
           DropdownMenuItem<String?>(
             value: c.id,
             child: Text(c.nombre, overflow: TextOverflow.ellipsis),
+          ),
+      ],
+      onChanged: onChanged,
+    );
+  }
+}
+
+/// Desplegable del recordatorio como offset antes del inicio. El valor
+/// elegido es a la vez el control de edición y el "detalle" que se ve
+/// del recordatorio del evento.
+class _SelectorRecordatorio extends StatelessWidget {
+  const _SelectorRecordatorio({
+    required this.offsetMin,
+    required this.onChanged,
+  });
+  final int? offsetMin;
+  final ValueChanged<int?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final esPreset = presetsRecordatorio.any((p) => p.offsetMin == offsetMin);
+    return DropdownButtonFormField<int?>(
+      initialValue: offsetMin,
+      isExpanded: true,
+      decoration: const InputDecoration(labelText: 'Recordatorio'),
+      items: [
+        for (final p in presetsRecordatorio)
+          DropdownMenuItem<int?>(
+            value: p.offsetMin,
+            child: Text(p.etiqueta),
+          ),
+        // Offset que no es uno de los presets (p.ej. de un valor legado):
+        // se ofrece como opción extra para no perderlo al editar.
+        if (!esPreset && offsetMin != null)
+          DropdownMenuItem<int?>(
+            value: offsetMin,
+            child: Text(etiquetaRecordatorio(offsetMin)),
           ),
       ],
       onChanged: onChanged,
