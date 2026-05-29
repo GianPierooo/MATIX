@@ -50,5 +50,9 @@ class EventoRead(BaseModel):
     origen: str = "manual"
     external_id: str | None = None
     external_account: str | None = None
+    # Capa 4 Paso 2: timestamp del último estado conocido en Google.
+    # NULL para eventos manuales que aún no se empujaron. La app lo
+    # usa solo para decidir si pintar el chip "Sincronizado".
+    google_updated_at: datetime | None = None
     creado_en: datetime
     actualizado_en: datetime

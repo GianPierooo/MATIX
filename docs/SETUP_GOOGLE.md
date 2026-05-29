@@ -185,3 +185,68 @@ desde cero).
   por ahora.
 - Para revocar el grant del lado de Google:
   https://myaccount.google.com/permissions → buscás "Matix" → quitar acceso.
+
+---
+
+## 8. Habilitar escritura (Capa 4 Paso 2)
+
+El Paso 1 te conectó con scope **`calendar.readonly`** — Matix solo
+lee tus eventos. El Paso 2 sumó **push** (lo que creás en Matix
+sube a tu Google Calendar). Para eso hace falta el scope
+**`calendar`** (full).
+
+Si Matix detecta que tu conexión actual es la del Paso 1, en
+Ajustes → Conexiones → Google Calendar te aparece un banner ámbar:
+**"Sincronización bidireccional · Reconectar para conceder
+escritura"**. El proceso lleva 1 minuto y es lo mismo que la primera
+vez, solo que ahora vas a ver más checkboxes en la pantalla de
+consentimiento.
+
+### 8.1 Sumar el scope en Cloud Console
+
+(Si ya está, salteá al 8.2.)
+
+1. Cloud Console → **APIs y servicios** → **Pantalla de
+   consentimiento de OAuth** → tab **Data Access** → botón
+   **"Add or Remove Scopes"**.
+2. En "Manually add scopes" (abajo), pegá:
+   ```
+   https://www.googleapis.com/auth/calendar
+   ```
+3. Tocá **"Add to Table"** → **"Update"** → **"Save"**.
+
+Ahora la pantalla de consentimiento incluye permiso de lectura +
+escritura en Calendar.
+
+### 8.2 Reconectar desde la app
+
+1. Ajustes → Conexiones → Google Calendar → tocá **"Reconectar
+   para bidireccional"** (botón ámbar del banner).
+2. Se abre Chrome con la misma pantalla de la primera vez, pero
+   ahora vas a ver dos permisos:
+   - "Ver tu email" (igual).
+   - **"Ver, editar y borrar eventos de tus calendarios"** (nuevo).
+3. Aceptás. Google redirige al cerebro como siempre, muestra
+   "Listo".
+4. Volvés a Matix. El banner ámbar desaparece y todo evento manual
+   nuevo va a empujarse al Google Calendar.
+
+### 8.3 ¿Qué pasa con los eventos manuales que creaste antes?
+
+Al primer sync después de reconectar (botón "Sincronizar" en Ajustes
+o auto-disparado al abrir el calendario), el cerebro hace un
+**backfill**: busca todos los eventos manuales del hub sin
+`external_id` y los empuja a Google. En el resumen del sync vas a
+ver "+N subidos a Google". A partir de ahí están unidos.
+
+Si alguno falla el push (Google rebota, lo que sea), queda local y
+se reintenta al siguiente sync.
+
+### 8.4 Editar eventos importados de Google
+
+Después del Paso 2 podés editar/borrar los eventos `origen='google'`
+directamente desde Matix. El cerebro intenta el cambio en Google
+primero — si Google acepta, también se aplica en el hub; si Google
+rebota (típicamente por no ser organizador, ej. una clase a la que
+estás invitado), Matix te muestra "Google rechazó la edición" y el
+evento queda como estaba.

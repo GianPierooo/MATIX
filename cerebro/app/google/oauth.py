@@ -29,16 +29,46 @@ logger = logging.getLogger("matix.google.oauth")
 _AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
 _TOKEN_URI = "https://oauth2.googleapis.com/token"
 
-# Scope del Paso 1: solo lectura del calendario. Si en futuros pasos
-# necesitamos más, se suman acá y el usuario re-autoriza.
-SCOPES_PASO_1 = [
-    "https://www.googleapis.com/auth/calendar.readonly",
-    # Estos dos son automáticos cuando se pide algo de Google; los
-    # listamos para que el `scope` que devuelva Google incluya el
-    # email del usuario, que usamos como clave primaria.
+# Scopes de Calendar.
+#
+# Paso 2 reemplazó `calendar.readonly` por `calendar` full (lectura +
+# escritura + gestión de calendarios). El usuario reautoriza una vez
+# al actualizar a Paso 2 — ver `docs/Plan_Capa4.md` · Scope OAuth.
+#
+# El campo `email`/`openid` viene "gratis" como parte del consent y
+# nos permite identificar la cuenta conectada (PK de oauth_google).
+SCOPES_PASO_2 = [
+    "https://www.googleapis.com/auth/calendar",
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
 ]
+
+# Alias para compatibilidad con código existente que aún referencia
+# `SCOPES_PASO_1`. Mantenemos una sola lista de scopes activos.
+SCOPES_PASO_1 = SCOPES_PASO_2
+
+
+# Scope mínimo que tiene que estar presente para que el push
+# bidireccional funcione. Si los scopes guardados no lo incluyen,
+# la app pinta el banner "Reconectar para sincronización bidireccional".
+SCOPE_ESCRITURA_CALENDAR = "https://www.googleapis.com/auth/calendar"
+
+
+def tiene_escritura_calendar(scopes: list[str] | None) -> bool:
+    """True si los scopes guardados incluyen permiso de escritura
+    en Calendar. Vale `calendar` (full) o `calendar.events` (más
+    granular, por si en el futuro bajamos). Ojo: `calendar.readonly`
+    NO alcanza."""
+    if not scopes:
+        return False
+    return any(
+        s
+        in (
+            "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/calendar.events",
+        )
+        for s in scopes
+    )
 
 
 def _build_flow(state: str | None = None) -> Flow:
@@ -227,9 +257,11 @@ async def cuenta_conectada(db: Postgrest) -> dict | None:
     if not filas:
         return None
     f = filas[0]
+    scopes = f.get("scopes") or []
     return {
         "email": f["email"],
-        "scopes": f.get("scopes") or [],
+        "scopes": scopes,
+        "tiene_escritura": tiene_escritura_calendar(scopes),
         "conectado_en": f["conectado_en"],
         "ultimo_sync_en": f.get("ultimo_sync_en"),
     }

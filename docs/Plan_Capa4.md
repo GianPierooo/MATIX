@@ -90,8 +90,8 @@ Cada paso suma el scope necesario, ni uno más. La pantalla de
 consentimiento de Google muestra los scopes que el usuario aprueba.
 
 - **Paso 1**: `https://www.googleapis.com/auth/calendar.readonly`
-- **Paso 2**: + `https://www.googleapis.com/auth/calendar.events`
-- **Paso 3**: + `https://www.googleapis.com/auth/tasks.readonly`
+- **Paso 2**: reemplaza el anterior por `https://www.googleapis.com/auth/calendar` (full — lectura + escritura + gestión de calendarios).
+- **Paso 3**: + `https://www.googleapis.com/auth/tasks` (full por la misma razón que Paso 2).
 - **Paso 4**: + `https://www.googleapis.com/auth/gmail.readonly`
 
 Cada salto requiere reautorización del usuario.
@@ -136,18 +136,141 @@ Establece toda la maquinaria OAuth y trae el primer dato real.
   Google Cloud, pantalla de consentimiento OAuth, descargar las
   credenciales y configurar los secrets.
 
-### Paso 2 — Escribir al Calendar
+### Paso 2 — Escribir al Calendar (bidireccional)
 
-Una vez que la lectura funciona y los eventos de Google se ven en
-el hub, sumamos:
+Cierra el círculo: lo que pasa en el hub se refleja en el Google
+Calendar del usuario, y lo que pasa en Google se sigue trayendo
+al hub. Sin loops ni duplicados.
 
-- Scope nuevo: `calendar.events` (lectura + escritura).
-- Cuando Matix llame a `crear_evento` / `editar_evento` /
-  `eliminar_evento` y el usuario lo pida explícitamente para
-  Google (o si el evento ya tiene `origen='google'`), propagamos
-  al Calendar API además de a Supabase.
-- Sin sobrescribir invitaciones de eventos del trabajo / clase
-  donde Gian Piero NO es organizador — solo edita los suyos.
+#### Qué se sincroniza
+
+- **Solo eventos**. Tareas se quedan para Paso 3 (con scope `tasks`).
+- **Solo el calendario primario** del usuario (sin selector multi-calendario).
+- Crear, editar y borrar — los tres se propagan en ambas direcciones.
+
+#### Quién puede editar qué
+
+Decisión: **máxima libertad**. El hub trata todos los eventos como
+editables — los `origen='manual'` (creados en Matix) y los
+`origen='google'` (importados). La diferencia es solo el orden
+de las operaciones:
+
+| origen | flujo de edición/borrado |
+|---|---|
+| `manual` | Hub primero, push a Google después (best-effort). Si Google falla, el cambio queda local y el próximo sync lo reintenta. |
+| `google` | Push a Google primero. Si Google rebota (403 porque no sos organizador, 410 si el evento ya fue borrado, etc.), el hub NO aplica el cambio y propaga el error al cliente. Evita desync. |
+
+Para crear, no aplica esa distinción — todo evento nuevo nace
+`origen='manual'`, lo guarda el hub y dispara el push.
+
+#### Loop prevention y dedup
+
+El loop natural sería: hub crea → push → Google → pull → hub crea
+otro duplicado. Lo cortamos con dos llaves:
+
+1. **`external_id` en eventos manuales**. Después del primer push,
+   guardamos el `id` que devolvió Google en la misma fila del hub,
+   manteniendo `origen='manual'`. El próximo pull encuentra la fila
+   por `(external_account, external_id)` y la trata como existente.
+   No duplica. No degrada el origen.
+2. **UNIQUE `(external_account, external_id)`** (sin filtrar por
+   origen, distinto al Paso 1) — la BD garantiza la unicidad
+   transversal a los orígenes.
+
+Importante: el `_actualizar` del sync **no toca la columna `origen`**.
+Si el evento empezó como manual y fue pusheado, sigue siendo
+manual aunque el pull lo vuelva a tocar.
+
+#### Conflictos: última escritura gana
+
+Sumamos `eventos.google_updated_at` (timestamptz) — guarda el
+`updated` que Google reporta cada vez que ve el evento (sea por pull
+o por respuesta a push). Es nuestro reloj canónico del lado Google.
+
+Reglas:
+
+- **Pull (Google → hub)**: aplico el evento al hub solo si
+  `google_updated > hub.actualizado_en + 2s`. Si el hub es más
+  reciente (porque el usuario acaba de editar local), skipeo.
+- **Push (hub → Google)**: tras el ack, guardo el nuevo
+  `google_updated_at` que devuelve Google. El próximo pull verá
+  que `google_updated == google_updated_at` (mismo estado) y no
+  hace nada.
+- **Epsilon de 2s** para tolerar drift entre relojes y el lag
+  Supabase ↔ Google.
+
+Trade-off documentado: si editás en Google web Y en el hub entre
+dos syncs, la edición más vieja se pierde silenciosa. Con polling
+razonable (al abrir el calendario / al tocar Sync) es rarísimo.
+Si en el futuro necesitamos resolución de conflictos con UI, suma
+una columna `pendiente_revision` y un endpoint dedicado — fuera
+del alcance del Paso 2.
+
+#### Backfill al conectar Google
+
+Los eventos manuales creados ANTES de conectar Google (o mientras
+Google estaba caído) no tienen `external_id`. Antes de cada pull,
+el `sincronizar` corre un sweep:
+
+```
+para cada evento WHERE origen='manual' AND external_id IS NULL
+                AND eliminado_en IS NULL:
+    pushear a Google → guardar external_id + google_updated_at
+```
+
+Esto cubre dos casos:
+1. El usuario conectó Google después de haber creado N eventos.
+2. Un push inline falló (Google estaba caído / rate-limit) y nadie
+   reintentó.
+
+Si el sweep tropieza con un evento que Google rechaza, lo loggeamos
+y seguimos con el resto. El evento queda local hasta que el usuario
+lo arregle (o el caso se autorresuelva).
+
+#### Scope OAuth
+
+Paso 1 era `calendar.readonly`. Paso 2 lo reemplaza por **`calendar`
+(full)** — incluye lectura, creación, edición y borrado de eventos
+y gestión de calendarios. El usuario reautoriza una vez para
+conceder el scope nuevo.
+
+Detección desde la app: si `oauth_google.scopes` no incluye
+`calendar` (o `calendar.events`), la pantalla de Ajustes → Google
+muestra un banner ámbar con CTA "Reconectar para sincronización
+bidireccional". El CTA invoca el mismo flujo OAuth que ya existe.
+
+Cloud Console: hay que sumar el scope a la pantalla de
+consentimiento (Data Access → Add scopes). Documentado en
+`SETUP_GOOGLE.md`.
+
+#### Restaurar y borrado permanente
+
+- DELETE en el hub sobre un evento con `external_id`:
+  - `origen='manual'`: soft-delete local + `events().delete()` en
+    Google (best-effort; si Google da 404 ya estaba borrado allá,
+    seguimos).
+  - `origen='google'`: tiene que aceptar Google primero (mismo
+    patrón que la edición). Si rebota, no soft-delete.
+- **Restaurar** desde papelera de hub: INSERT nuevo en Google →
+  nuevo `external_id`. El ID original se pierde — aceptable porque
+  restauraciones son raras.
+- DELETE permanente (`/permanente`): solo BD, no toca Google.
+  El evento ya no existía en Google (porque el soft-delete lo
+  borró). Si por alguna razón sigue en Google, el próximo pull
+  lo re-importará — el usuario lo borra de nuevo.
+
+#### Lo que NO entra en Paso 2
+
+- **Adopción** de un `origen='google'` para "hacerlo mío" (cambiar
+  el origen). Trabajamos con todos editables sin convertir.
+- **Selector de calendarios** (siempre `primary`).
+- **Multi-cuenta** Google.
+- **Webhooks `watch`** de Google para push instantáneo. Polling +
+  sweep alcanza.
+- **Recurrencias creadas desde el hub** — Matix sigue creando solo
+  eventos puntuales; las recurrencias vienen de Google y se
+  expanden a singleEvents al pull.
+- **UI de resolución de conflictos**. Last-write-wins en silencio.
 
 ### Paso 3 — Google Tasks
 

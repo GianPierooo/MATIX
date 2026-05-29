@@ -183,6 +183,11 @@ class _ConexionGoogleTileState extends ConsumerState<ConexionGoogleTile> {
               ],
             ),
             const SizedBox(height: 8),
+            if (s.conectado && !s.tieneEscritura)
+              _BannerReconectarParaEscritura(
+                abriendoOAuth: _abriendoOAuth,
+                onReconectar: _conectar,
+              ),
             if (s.conectado)
               _ConectadoBody(
                 status: s,
@@ -419,7 +424,8 @@ class _ConectadoBody extends StatelessWidget {
           Text(
             'Últimas: +${resumen!.creados} nuevos, '
             '${resumen!.actualizados} actualizados, '
-            '${resumen!.mandadosAPapelera} a papelera.',
+            '${resumen!.mandadosAPapelera} a papelera'
+            '${resumen!.empujadosAGoogle > 0 ? ", ${resumen!.empujadosAGoogle} subidos a Google" : ""}.',
             style: const TextStyle(
               fontSize: 11.5,
               color: MatixColors.muted,
@@ -464,6 +470,97 @@ class _ConectadoBody extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// Banner ámbar que aparece cuando el usuario está conectado a Google
+/// pero con el scope viejo (Paso 1, solo lectura). El push bidireccional
+/// del Paso 2 necesita el scope `calendar` — para concederlo hay que
+/// reautorizar una vez. El CTA reusa el mismo flujo OAuth.
+class _BannerReconectarParaEscritura extends StatelessWidget {
+  const _BannerReconectarParaEscritura({
+    required this.abriendoOAuth,
+    required this.onReconectar,
+  });
+  final bool abriendoOAuth;
+  final VoidCallback onReconectar;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: MatixColors.amber.withValues(alpha: 0.12),
+        border: Border.all(color: MatixColors.amber.withValues(alpha: 0.45)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.sync_alt,
+                color: MatixColors.amber,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Sincronización bidireccional',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: MatixColors.amber,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Tu conexión actual solo permite leer Google Calendar. '
+            'Para que los eventos que crees en Matix también suban a '
+            'Google, reconectá una vez para conceder el permiso de '
+            'escritura.',
+            style: TextStyle(
+              fontSize: 11.5,
+              color: MatixColors.muted,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: abriendoOAuth ? null : onReconectar,
+              icon: abriendoOAuth
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: MatixColors.amber,
+                      ),
+                    )
+                  : const Icon(Icons.refresh, size: 18),
+              label: Text(
+                abriendoOAuth
+                    ? 'Abriendo navegador…'
+                    : 'Reconectar para bidireccional',
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: MatixColors.amber,
+                side: BorderSide(
+                  color: MatixColors.amber.withValues(alpha: 0.5),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

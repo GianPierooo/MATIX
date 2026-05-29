@@ -7,6 +7,7 @@ class GoogleStatus {
     required this.conectado,
     this.email,
     this.scopes = const [],
+    this.tieneEscritura = false,
     this.conectadoEn,
     this.ultimoSyncEn,
   });
@@ -14,6 +15,14 @@ class GoogleStatus {
   final bool conectado;
   final String? email;
   final List<String> scopes;
+
+  /// `true` si la cuenta autorizó el scope `calendar` (o
+  /// `calendar.events`) en el flujo OAuth. Capa 4 Paso 2 lo agregó
+  /// para el push bidireccional. Si la conexión es vieja (solo
+  /// `calendar.readonly` del Paso 1), este flag viene en false y
+  /// la UI muestra un banner pidiendo reconectar.
+  final bool tieneEscritura;
+
   final DateTime? conectadoEn;
   final DateTime? ultimoSyncEn;
 
@@ -23,6 +32,7 @@ class GoogleStatus {
         scopes: ((j['scopes'] as List?) ?? const [])
             .map((e) => e.toString())
             .toList(growable: false),
+        tieneEscritura: j['tiene_escritura'] as bool? ?? false,
         conectadoEn: _parseTs(j['conectado_en']),
         ultimoSyncEn: _parseTs(j['ultimo_sync_en']),
       );
@@ -35,6 +45,7 @@ class GoogleSyncResumen {
     required this.actualizados,
     required this.mandadosAPapelera,
     required this.totalRemoto,
+    this.empujadosAGoogle = 0,
   });
 
   final String email;
@@ -43,6 +54,10 @@ class GoogleSyncResumen {
   final int mandadosAPapelera;
   final int totalRemoto;
 
+  /// Capa 4 Paso 2: cuántos eventos manuales del hub se pushearon
+  /// a Google durante este sync (backfill).
+  final int empujadosAGoogle;
+
   factory GoogleSyncResumen.fromJson(Map<String, dynamic> j) =>
       GoogleSyncResumen(
         email: j['email'] as String,
@@ -50,6 +65,7 @@ class GoogleSyncResumen {
         actualizados: (j['actualizados'] as num).toInt(),
         mandadosAPapelera: (j['mandados_a_papelera'] as num).toInt(),
         totalRemoto: (j['total_remoto'] as num).toInt(),
+        empujadosAGoogle: ((j['empujados_a_google'] as num?) ?? 0).toInt(),
       );
 }
 
