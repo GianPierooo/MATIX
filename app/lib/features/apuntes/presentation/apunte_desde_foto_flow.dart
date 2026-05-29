@@ -4,31 +4,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../../../api/matix_client.dart';
 import '../../../theme/matix_colors.dart';
-import '../data/apuntes_foto_repository.dart';
-import '../providers/apuntes_providers.dart';
-import 'editor_apunte_screen.dart';
+import '../../captura_camara/application/captura_controller.dart';
+import '../../captura_camara/presentation/resultado_ocr_screen.dart';
 
-/// Orquesta el flujo completo "apunte desde foto" (Capa 7 · Paso 1):
+/// Orquesta el flujo "apunte desde foto" (Capa 7 · unificado a OCR
+/// on-device):
 ///
 /// 1. Sheet de origen: cámara o galería.
 /// 2. `ImagePicker` levanta la foto.
-/// 3. Pantalla intermedia con stepper (Subiendo → Extrayendo).
-/// 4. POST al cerebro vía `ApuntesFotoRepository`.
-/// 5. Navegamos al editor del apunte recién creado. Si OCR falló,
-///    el editor pinta un banner ámbar (lo lee del state inicial).
+/// 3. Pantalla intermedia: ML Kit extrae el texto **en el teléfono**
+///    (mismo `OcrService` que el flujo de tareas — la imagen NO sale
+///    del dispositivo).
+/// 4. Pantalla editable (`ResultadoOcrScreen`, destino apunte) para
+///    corregir lo que el OCR haya errado.
+/// 5. Al confirmar, el TEXTO va a `/matix/capturar-apunte`, que lo
+///    clasifica en proyecto / curso / general como cualquier otro
+///    apunte (reusa el flujo del Paso C).
 ///
-/// Punto de entrada único: `iniciar(context, ref, ...)`. Cualquier
-/// pantalla que quiera disparar el flujo lo invoca con sus
-/// metadatos opcionales (curso_id típicamente).
+/// Punto de entrada único: `iniciarFlujoApunteDesdeFoto(context, ref)`.
 Future<void> iniciarFlujoApunteDesdeFoto(
   BuildContext context,
-  WidgetRef ref, {
-  String? cursoId,
-  String? proyectoId,
-  String? cuadernoId,
-}) async {
+  WidgetRef ref,
+) async {
   final origen = await _mostrarSheetOrigen(context);
   if (origen == null) return;
 
@@ -37,7 +35,8 @@ Future<void> iniciarFlujoApunteDesdeFoto(
   try {
     picked = await picker.pickImage(
       source: origen,
-      // Comprimimos un poco para no mandar 8 MB cuando no hace falta.
+      // Comprimimos un poco: ML Kit no necesita la foto a resolución
+      // completa para leer texto, y así el archivo temporal pesa menos.
       imageQuality: 85,
       maxWidth: 2400,
       maxHeight: 2400,
@@ -53,16 +52,11 @@ Future<void> iniciarFlujoApunteDesdeFoto(
   if (picked == null) return; // usuario canceló
 
   if (!context.mounted) return;
-  // Pantalla con stepper que hace el upload + navega al editor.
+  // Pantalla que corre el OCR on-device y navega al texto editable.
   await Navigator.of(context).push(
     MaterialPageRoute(
       fullscreenDialog: true,
-      builder: (_) => _ProgresoApunteDesdeFoto(
-        imagen: File(picked!.path),
-        cursoId: cursoId,
-        proyectoId: proyectoId,
-        cuadernoId: cuadernoId,
-      ),
+      builder: (_) => _ProgresoApunteDesdeFoto(imagen: File(picked!.path)),
     ),
   );
 }
@@ -128,19 +122,9 @@ Future<ImageSource?> _mostrarSheetOrigen(BuildContext context) {
   );
 }
 
-enum _Fase { subiendo, extrayendo, error }
-
 class _ProgresoApunteDesdeFoto extends ConsumerStatefulWidget {
-  const _ProgresoApunteDesdeFoto({
-    required this.imagen,
-    this.cursoId,
-    this.proyectoId,
-    this.cuadernoId,
-  });
+  const _ProgresoApunteDesdeFoto({required this.imagen});
   final File imagen;
-  final String? cursoId;
-  final String? proyectoId;
-  final String? cuadernoId;
 
   @override
   ConsumerState<_ProgresoApunteDesdeFoto> createState() =>
@@ -149,68 +133,47 @@ class _ProgresoApunteDesdeFoto extends ConsumerStatefulWidget {
 
 class _ProgresoApunteDesdeFotoState
     extends ConsumerState<_ProgresoApunteDesdeFoto> {
-  _Fase _fase = _Fase.subiendo;
-  String? _error;
-  late final ApuntesFotoRepository _repo;
+  bool _error = false;
+  String? _mensaje;
 
   @override
   void initState() {
     super.initState();
-    _repo = ApuntesFotoRepository();
-    // Disparamos el upload en cuanto se monta la pantalla.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _ejecutar());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _extraer());
   }
 
-  @override
-  void dispose() {
-    _repo.close();
-    super.dispose();
-  }
-
-  Future<void> _ejecutar() async {
+  Future<void> _extraer() async {
     setState(() {
-      _fase = _Fase.subiendo;
-      _error = null;
+      _error = false;
+      _mensaje = null;
     });
     try {
-      // El backend hace upload + OCR seguidos sin streamear estados
-      // intermedios; aproximamos la transición a "extrayendo" con un
-      // tick visual antes del await del response. Es honesto: la
-      // espera del await mayoritariamente es OCR.
-      await Future<void>.delayed(const Duration(milliseconds: 400));
-      if (mounted) setState(() => _fase = _Fase.extrayendo);
+      // OCR on-device con ML Kit: la imagen nunca sale del teléfono.
+      final texto =
+          await ref.read(ocrServiceProvider).extraerTexto(widget.imagen.path);
+      // La foto ya cumplió su rol; la borramos del temporal. Si el
+      // borrado falla no es crítico (el SO limpia la cache).
+      try {
+        await widget.imagen.delete();
+      } catch (_) {}
 
-      final resultado = await _repo.subir(
-        widget.imagen,
-        cursoId: widget.cursoId,
-        proyectoId: widget.proyectoId,
-        cuadernoId: widget.cuadernoId,
-      );
       if (!mounted) return;
-
-      // Refrescamos la lista y abrimos el editor del nuevo apunte.
-      ref.invalidate(apuntesListProvider);
-
-      // Cerramos esta pantalla y empujamos el editor.
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => EditorApunteScreen(
-            apunteId: resultado.apunte.id,
-            avisoOcr: resultado.ocrOk ? null : resultado.mensajeOcr,
+          builder: (_) => ResultadoOcrScreen(
+            destino: DestinoOcr.apunte,
+            textoInicial: texto,
+            aviso: texto.isEmpty
+                ? 'No detecté texto en la foto. Escríbelo a mano.'
+                : null,
           ),
         ),
       );
-    } on MatixApiException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _fase = _Fase.error;
-        _error = 'Error ${e.statusCode}: ${e.message}';
-      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _fase = _Fase.error;
-        _error = 'No pude completar el apunte: $e';
+        _error = true;
+        _mensaje = 'No pude leer el texto de la foto: $e';
       });
     }
   }
@@ -230,8 +193,7 @@ class _ProgresoApunteDesdeFotoState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Preview de la foto que está subiendo, para que el
-            // usuario tenga referencia visual.
+            // Preview de la foto que se está leyendo, como referencia.
             Center(
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
@@ -244,18 +206,11 @@ class _ProgresoApunteDesdeFotoState
             ),
             const SizedBox(height: 24),
             _Paso(
-              activo: _fase == _Fase.subiendo,
-              completado: _fase != _Fase.subiendo && _fase != _Fase.error,
-              texto: 'Subiendo foto al cerebro…',
-            ),
-            const SizedBox(height: 12),
-            _Paso(
-              activo: _fase == _Fase.extrayendo,
-              completado: false,
-              texto: 'Extrayendo texto con OpenAI vision…',
+              activo: !_error,
+              texto: 'Leyendo el texto en el teléfono…',
             ),
             const SizedBox(height: 24),
-            if (_fase == _Fase.error) ...[
+            if (_error) ...[
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -266,7 +221,7 @@ class _ProgresoApunteDesdeFotoState
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  _error ?? 'Algo falló.',
+                  _mensaje ?? 'Algo falló.',
                   style: const TextStyle(
                     color: MatixColors.text,
                     fontSize: 13,
@@ -275,7 +230,7 @@ class _ProgresoApunteDesdeFotoState
               ),
               const SizedBox(height: 12),
               FilledButton.icon(
-                onPressed: _ejecutar,
+                onPressed: _extraer,
                 icon: const Icon(Icons.refresh, size: 18),
                 label: const Text('Reintentar'),
                 style: FilledButton.styleFrom(
@@ -292,50 +247,37 @@ class _ProgresoApunteDesdeFotoState
 }
 
 class _Paso extends StatelessWidget {
-  const _Paso({
-    required this.activo,
-    required this.completado,
-    required this.texto,
-  });
+  const _Paso({required this.activo, required this.texto});
   final bool activo;
-  final bool completado;
   final String texto;
 
   @override
   Widget build(BuildContext context) {
-    Widget icono;
-    if (completado) {
-      icono = const Icon(Icons.check_circle, color: MatixColors.green, size: 22);
-    } else if (activo) {
-      icono = const SizedBox(
-        width: 22,
-        height: 22,
-        child: CircularProgressIndicator(
-          strokeWidth: 2.4,
-          color: MatixColors.accent,
-        ),
-      );
-    } else {
-      icono = const Icon(
-        Icons.radio_button_unchecked,
-        color: MatixColors.muted,
-        size: 22,
-      );
-    }
     return Row(
       children: [
-        icono,
+        if (activo)
+          const SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.4,
+              color: MatixColors.accent,
+            ),
+          )
+        else
+          const Icon(
+            Icons.radio_button_unchecked,
+            color: MatixColors.muted,
+            size: 22,
+          ),
         const SizedBox(width: 12),
         Expanded(
           child: Text(
             texto,
             style: TextStyle(
               fontSize: 14,
-              color: activo || completado
-                  ? MatixColors.text
-                  : MatixColors.muted,
-              fontWeight:
-                  activo ? FontWeight.w600 : FontWeight.w400,
+              color: activo ? MatixColors.text : MatixColors.muted,
+              fontWeight: activo ? FontWeight.w600 : FontWeight.w400,
             ),
           ),
         ),

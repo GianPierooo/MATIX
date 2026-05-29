@@ -5,8 +5,8 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 /// Envuelve el `TextRecognizer` de ML Kit para que el resto de la
 /// feature no dependa del SDK directamente. El reconocimiento corre
 /// **local en el teléfono** con el modelo latino empaquetado: la
-/// imagen nunca sale del dispositivo. Es el flujo nuevo y aparte del
-/// de foto→apunte, que sí manda la imagen a OpenAI.
+/// imagen nunca sale del dispositivo. Es el único OCR de la app: lo
+/// usan tanto el flujo de tareas (7-A/B) como el de foto→apunte.
 ///
 /// El `TextRecognizer` reserva recursos nativos; hay que cerrarlo con
 /// [dispose] cuando ya no se usa (lo hace el provider vía `onDispose`).

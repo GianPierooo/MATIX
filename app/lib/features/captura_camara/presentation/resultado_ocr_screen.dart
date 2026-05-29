@@ -4,14 +4,27 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../theme/matix_colors.dart';
 import '../../../theme/matix_spacing.dart';
 import '../../../theme/matix_typography.dart';
+import '../../apuntes/application/guardar_apunte_controller.dart';
+import '../../apuntes/presentation/editor_apunte_screen.dart';
 import '../application/extraccion_tareas_controller.dart';
 import 'captura_camara_screen.dart';
 import 'revision_tareas_screen.dart';
 
+/// A qué se convierte el texto OCR tras corregirlo.
+///
+/// El OCR on-device (ML Kit, Capa 7-A) es el mismo para los dos
+/// caminos; solo cambia el destino: las tareas pasan por la hoja de
+/// revisión (7-B) y los apuntes se guardan clasificados reusando el
+/// flujo del Paso C (`/matix/capturar-apunte`). En ambos, la imagen
+/// se quedó en el teléfono: solo viaja el texto.
+enum DestinoOcr { tareas, apunte }
+
 /// Muestra el texto que extrajo el OCR en un campo **editable**, para
 /// que el usuario corrija lo que ML Kit haya errado (Capa 7-A) y, con
-/// el botón "Convertir en tareas", lo mande al cerebro para extraer
-/// tareas que revisa y crea (Capa 7-B).
+/// el botón de acción, lo convierta según [destino]:
+///
+/// - [DestinoOcr.tareas]: "Convertir en tareas" → hoja de revisión (7-B).
+/// - [DestinoOcr.apunte]: "Guardar como apunte" → apunte clasificado.
 ///
 /// La edición vive acá como estado local del `TextEditingController`.
 /// SOLO el texto (ya corregido) viaja al cerebro: la imagen se quedó
@@ -25,10 +38,12 @@ class ResultadoOcrScreen extends ConsumerStatefulWidget {
     super.key,
     required this.textoInicial,
     this.aviso,
+    this.destino = DestinoOcr.tareas,
   });
 
   final String textoInicial;
   final String? aviso;
+  final DestinoOcr destino;
 
   @override
   ConsumerState<ResultadoOcrScreen> createState() =>
@@ -38,15 +53,21 @@ class ResultadoOcrScreen extends ConsumerStatefulWidget {
 class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
   late final TextEditingController _texto;
 
+  bool get _esApunte => widget.destino == DestinoOcr.apunte;
+
   @override
   void initState() {
     super.initState();
     _texto = TextEditingController(text: widget.textoInicial);
-    // Arrancamos el flujo de extracción limpio: si quedó estado de una
-    // captura anterior, lo reseteamos para que el `ref.listen` no
-    // dispare una navegación fantasma al montar.
+    // Arrancamos el flujo limpio: si quedó estado de una captura
+    // anterior, lo reseteamos para que el `ref.listen` no dispare una
+    // navegación fantasma al montar.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(extraccionTareasControllerProvider.notifier).reiniciar();
+      if (_esApunte) {
+        ref.read(guardarApunteControllerProvider.notifier).reiniciar();
+      } else {
+        ref.read(extraccionTareasControllerProvider.notifier).reiniciar();
+      }
     });
   }
 
@@ -62,35 +83,24 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
     );
   }
 
-  void _convertir() {
-    ref
-        .read(extraccionTareasControllerProvider.notifier)
-        .interpretar(_texto.text);
+  void _accion() {
+    if (_esApunte) {
+      ref.read(guardarApunteControllerProvider.notifier).guardar(_texto.text);
+    } else {
+      ref
+          .read(extraccionTareasControllerProvider.notifier)
+          .interpretar(_texto.text);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Cuando el cerebro responde, saltamos a la hoja de revisión. Si
-    // falla, mostramos el error y dejamos reintentar (el botón sigue).
-    ref.listen<EstadoExtraccion>(extraccionTareasControllerProvider,
-        (prev, next) {
-      if (prev?.fase == next.fase) return;
-      if (next.fase == FaseExtraccion.revision) {
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const RevisionTareasScreen()),
-        );
-      } else if (next.fase == FaseExtraccion.error) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(next.error ?? 'No pude convertir el texto.'),
-            action: SnackBarAction(label: 'Reintentar', onPressed: _convertir),
-          ),
-        );
-      }
-    });
+    _esApunte ? _escucharApunte() : _escucharTareas();
 
-    final interpretando =
-        ref.watch(extraccionTareasControllerProvider).fase ==
+    final ocupado = _esApunte
+        ? ref.watch(guardarApunteControllerProvider).fase ==
+            FaseGuardarApunte.guardando
+        : ref.watch(extraccionTareasControllerProvider).fase ==
             FaseExtraccion.interpretando;
 
     return Scaffold(
@@ -138,17 +148,21 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
               ),
               const SizedBox(height: MatixSpacing.l),
               FilledButton.icon(
-                onPressed: interpretando ? null : _convertir,
-                icon: interpretando
+                onPressed: ocupado ? null : _accion,
+                icon: ocupado
                     ? const SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(
                             strokeWidth: 2.2, color: Colors.white),
                       )
-                    : const Icon(Icons.checklist_outlined, size: 18),
-                label: Text(
-                    interpretando ? 'Convirtiendo…' : 'Convertir en tareas'),
+                    : Icon(
+                        _esApunte
+                            ? Icons.note_add_outlined
+                            : Icons.checklist_outlined,
+                        size: 18,
+                      ),
+                label: Text(_etiquetaBoton(ocupado)),
                 style: FilledButton.styleFrom(
                   backgroundColor: MatixColors.accent,
                   foregroundColor: Colors.white,
@@ -157,7 +171,7 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
               ),
               const SizedBox(height: MatixSpacing.m),
               OutlinedButton.icon(
-                onPressed: interpretando ? null : _capturarOtra,
+                onPressed: ocupado ? null : _capturarOtra,
                 icon: const Icon(Icons.camera_alt_outlined, size: 18),
                 label: const Text('Capturar otra'),
                 style: OutlinedButton.styleFrom(
@@ -171,6 +185,62 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
         ),
       ),
     );
+  }
+
+  String _etiquetaBoton(bool ocupado) {
+    if (_esApunte) return ocupado ? 'Guardando…' : 'Guardar como apunte';
+    return ocupado ? 'Convirtiendo…' : 'Convertir en tareas';
+  }
+
+  // ─── Camino tareas (Capa 7-B) ─────────────────────────────────────
+  void _escucharTareas() {
+    // Cuando el cerebro responde, saltamos a la hoja de revisión. Si
+    // falla, mostramos el error y dejamos reintentar (el botón sigue).
+    ref.listen<EstadoExtraccion>(extraccionTareasControllerProvider,
+        (prev, next) {
+      if (prev?.fase == next.fase) return;
+      if (next.fase == FaseExtraccion.revision) {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const RevisionTareasScreen()),
+        );
+      } else if (next.fase == FaseExtraccion.error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(next.error ?? 'No pude convertir el texto.'),
+            action: SnackBarAction(label: 'Reintentar', onPressed: _accion),
+          ),
+        );
+      }
+    });
+  }
+
+  // ─── Camino apunte (Paso C — clasificación) ───────────────────────
+  void _escucharApunte() {
+    ref.listen<EstadoGuardarApunte>(guardarApunteControllerProvider,
+        (prev, next) {
+      if (prev?.fase == next.fase) return;
+      if (next.fase == FaseGuardarApunte.guardado && next.resultado != null) {
+        final apunte = next.resultado!;
+        // Confirmamos dónde quedó archivado y abrimos el editor para
+        // afinar el apunte recién creado (reemplaza esta pantalla para
+        // no dejar la captura en el back stack).
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(apunte.destinoLabel)),
+        );
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => EditorApunteScreen(apunteId: apunte.id),
+          ),
+        );
+      } else if (next.fase == FaseGuardarApunte.error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(next.error ?? 'No pude guardar el apunte.'),
+            action: SnackBarAction(label: 'Reintentar', onPressed: _accion),
+          ),
+        );
+      }
+    });
   }
 }
 
