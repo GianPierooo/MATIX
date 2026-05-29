@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../../api/matix_client.dart';
 import '../../../core/undo_snackbar.dart';
+import '../../../core/urgencia.dart';
 import '../../../theme/matix_colors.dart';
 import '../domain/selectores.dart';
 import '../domain/tarea.dart';
@@ -240,6 +241,16 @@ class _NuevaTareaScreenState extends ConsumerState<NuevaTareaScreen> {
                           onClear: () => setState(() => _venceEn = null),
                           placeholder: 'Sin fecha',
                         ),
+                        // Cuenta regresiva viva: la presión se ve en el
+                        // detalle, no se grita.
+                        if (_venceEn != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8, left: 2),
+                            child: ContadorUrgencia(
+                              objetivo: _venceEn!,
+                              fondo: true,
+                            ),
+                          ),
 
                         const _SeccionTitulo('Recordatorio'),
                         _DateTimeRow(

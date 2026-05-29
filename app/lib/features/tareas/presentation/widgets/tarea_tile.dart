@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../../core/urgencia.dart';
 import '../../../../theme/matix_colors.dart';
 import '../../domain/tarea.dart';
 
@@ -196,7 +197,11 @@ class _VenceLabel extends StatelessWidget {
     } else {
       texto = DateFormat('d MMM · HH:mm', 'es').format(local);
     }
-    final color = tarea.estaVencida ? MatixColors.red : MatixColors.muted;
+    // Escala de color por cercanía (tranquilo → ámbar → rojo), donde el
+    // usuario ya mira sus tareas. Sin cuenta regresiva viva acá para no
+    // poner un timer por fila; el contador vivo está en "Hoy" y en el
+    // detalle.
+    final color = colorUrgencia(nivelUrgencia(v, DateTime.now()));
     return Row(
       children: [
         Icon(Icons.schedule, size: 12, color: color),

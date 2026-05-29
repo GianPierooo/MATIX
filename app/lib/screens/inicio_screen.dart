@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 
 import '../api/matix_client.dart';
 import '../config.dart';
+import '../core/urgencia.dart';
 import '../features/apuntes/domain/apunte.dart';
 import '../features/apuntes/presentation/apuntes_list_screen.dart';
 import '../features/apuntes/presentation/editor_apunte_screen.dart';
@@ -742,6 +743,12 @@ class _EventoMini extends StatelessWidget {
                     ),
                   ),
                 ),
+                // Cuenta regresiva viva para los eventos con hora (los de
+                // todo el día no tienen un instante al que correr).
+                if (!e.todoElDia) ...[
+                  const SizedBox(width: 8),
+                  ContadorUrgencia(objetivo: e.iniciaEn, fondo: true),
+                ],
                 if (MatixConfig.googleVisible && e.esDeGoogle) ...[
                   const SizedBox(width: 8),
                   const Icon(Icons.sync, size: 14, color: MatixColors.muted),
@@ -760,9 +767,6 @@ class _TareaMini extends ConsumerWidget {
   final Tarea t;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final hora = t.venceEn == null
-        ? '—'
-        : DateFormat.Hm().format(t.venceEn!.toLocal());
     final repo = ref.read(tareasRepositoryProvider);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 3, 16, 3),
@@ -810,18 +814,15 @@ class _TareaMini extends ConsumerWidget {
                     ),
                   ),
                 ),
-                Text(
-                  hora,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: t.estaVencida
-                        ? MatixColors.red
-                        : MatixColors.muted,
-                    fontWeight: t.estaVencida
-                        ? FontWeight.w700
-                        : FontWeight.w500,
+                // Cuenta regresiva viva + escala de color por cercanía.
+                // En "Hoy" toda tarea tiene fecha (vence hoy o ya venció).
+                if (t.venceEn != null)
+                  ContadorUrgencia(objetivo: t.venceEn!, fondo: true)
+                else
+                  const Text(
+                    '—',
+                    style: TextStyle(fontSize: 12, color: MatixColors.muted),
                   ),
-                ),
               ],
             ),
           ),

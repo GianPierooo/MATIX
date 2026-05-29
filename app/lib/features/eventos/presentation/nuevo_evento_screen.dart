@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../api/matix_client.dart';
+import '../../../core/urgencia.dart';
 import '../../../theme/matix_colors.dart';
 import '../../cursos/domain/curso.dart';
 import '../../universidad/providers/universidad_providers.dart';
@@ -417,6 +418,13 @@ class _NuevoEventoScreenState extends ConsumerState<NuevoEventoScreen> {
                   if (d != null) setState(() => _inicia = d);
                 },
               ),
+              // Cuenta regresiva viva hacia el inicio (los de todo el día
+              // no corren a una hora puntual).
+              if (!_todoElDia)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, bottom: 4, left: 2),
+                  child: ContadorUrgencia(objetivo: _inicia, fondo: true),
+                ),
               _Pick(
                 label: 'Termina (opcional)',
                 value: _termina == null
