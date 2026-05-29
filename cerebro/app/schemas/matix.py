@@ -111,6 +111,38 @@ class ExtraerTareasResponse(BaseModel):
     tareas: list[TareaPropuesta] = Field(default_factory=list)
 
 
+class TareaParaEstimar(BaseModel):
+    """Una tarea que el planificador necesita dimensionar."""
+
+    id: str
+    titulo: str = Field(min_length=1)
+
+
+class EstimarDuracionesRequest(BaseModel):
+    """Cuerpo de `/matix/estimar-duraciones` (Urgencia-3).
+
+    La app manda las tareas pendientes (id + título) que quiere
+    planificar hoy; el cerebro estima cuántos minutos toma cada una.
+    El encaje en los huecos del día lo hace la app de forma
+    determinística — esto solo aporta la duración.
+    """
+
+    tareas: list[TareaParaEstimar] = Field(default_factory=list)
+
+
+class DuracionEstimada(BaseModel):
+    tarea_id: str
+    minutos: int
+
+
+class EstimarDuracionesResponse(BaseModel):
+    """Respuesta de `/matix/estimar-duraciones`. Una entrada por tarea
+    estimada; las que el modelo no pudo dimensionar se omiten y la app
+    les aplica un default."""
+
+    duraciones: list[DuracionEstimada] = Field(default_factory=list)
+
+
 class ChatResponse(BaseModel):
     """Respuesta del endpoint `/matix/chat`.
 

@@ -223,6 +223,80 @@ async def extraer_tareas_json(
     return tareas
 
 
+async def estimar_duraciones_json(
+    tareas: list[dict],
+    *,
+    model: str = "gpt-4o-mini",
+) -> dict[str, int]:
+    """Estima cuántos minutos toma cada tarea, por su título (Urgencia-3).
+
+    Se usa al planificar el día: el planificador necesita una duración
+    por tarea para encajarla en los huecos reales. Si la app no la
+    tiene, Matix la estima acá.
+
+    `tareas` es una lista de dicts `{"id": str, "titulo": str}`. Devuelve
+    un dict `{tarea_id: minutos}` con un entero de minutos por tarea
+    (múltiplos de 15, entre 15 y 180). El que NO se pueda estimar se
+    omite — el caller aplica un default razonable. Función pura respecto
+    al reloj: misma entrada, misma salida (mockeable en tests).
+    """
+    items = [
+        {"id": str(t["id"]), "titulo": str(t["titulo"]).strip()}
+        for t in tareas
+        if t.get("id") and str(t.get("titulo", "")).strip()
+    ]
+    if not items:
+        return {}
+
+    client = _get_client()
+    system = (
+        "Eres un planificador. Recibes una lista de tareas (id + título) "
+        "y estimas cuánto tiempo de trabajo enfocado toma cada una.\n\n"
+        "Reglas:\n"
+        "- Devuelve minutos como entero, múltiplo de 15, entre 15 y 180.\n"
+        "- Sé realista: una tarea breve ('responder correo') ~15-30 min; "
+        "una mediana ('redactar resumen') ~45-60; uno grande ('estudiar "
+        "para el examen') ~90-120.\n"
+        "- Estima por el título nomás; no inventes contexto.\n\n"
+        'Responde SOLO un objeto JSON con esta forma exacta:\n'
+        '{"duraciones": [{"tarea_id": "...", "minutos": 45}]}'
+    )
+    user = json.dumps({"tareas": items}, ensure_ascii=False)
+    resp = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.2,
+        response_format={"type": "json_object"},
+    )
+    medidor.registrar_chat(resp.usage)
+
+    contenido = resp.choices[0].message.content or "{}"
+    try:
+        datos = json.loads(contenido)
+    except json.JSONDecodeError:
+        return {}
+    crudas = datos.get("duraciones") if isinstance(datos, dict) else None
+    if not isinstance(crudas, list):
+        return {}
+
+    out: dict[str, int] = {}
+    for item in crudas:
+        if not isinstance(item, dict):
+            continue
+        tid = item.get("tarea_id")
+        minutos = item.get("minutos")
+        if not isinstance(tid, str) or not isinstance(minutos, int):
+            continue
+        # Acota al rango razonable y redondea a múltiplos de 15.
+        m = max(15, min(180, minutos))
+        m = round(m / 15) * 15
+        out[tid] = m
+    return out
+
+
 async def transcribir(
     audio_bytes: bytes,
     *,

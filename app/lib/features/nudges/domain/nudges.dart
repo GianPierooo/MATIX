@@ -175,7 +175,9 @@ List<PlanNudge> planNudges(
   bool silenciada = false,
 }) {
   if (t.completada || silenciada) return const [];
-  final v = t.venceEn;
+  // El plazo efectivo: el bloque planificado (Urgencia-3) si lo hay, si
+  // no el vencimiento real. Así los nudges escalan hacia el bloque.
+  final v = t.plazoEfectivo;
   if (v == null) return const [];
   final puntos = calendarioNudges(
     v.toLocal(),

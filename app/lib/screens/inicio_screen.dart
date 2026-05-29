@@ -25,6 +25,7 @@ import '../features/matix/data/grabacion_voz_service.dart';
 import '../features/matix/data/matix_transcribir_repository.dart';
 import '../features/matix/presentation/manos_libres_screen.dart';
 import '../features/matix/providers/captura_apunte_providers.dart';
+import '../features/planificador/presentation/planificar_dia_screen.dart';
 import '../features/proyectos/domain/proyecto.dart';
 import '../features/proyectos/presentation/detalle_proyecto_screen.dart';
 import '../features/proyectos/providers/proyectos_providers.dart';
@@ -49,16 +50,27 @@ import 'universidad_screen.dart';
 /// que lee `DateTime.now()` internamente) para que la función sea
 /// determinística en tests.
 List<Tarea> tareasDeHoy(List<Tarea> todas, DateTime ahora) {
-  bool vencida(Tarea t) => t.venceEn != null && t.venceEn!.isBefore(ahora);
+  // Usa el plazo EFECTIVO (el bloque planificado si lo hay, si no el
+  // vencimiento real), así una tarea con bloque para hoy aparece en Hoy.
+  bool esHoy(DateTime? d) {
+    if (d == null) return false;
+    final l = d.toLocal();
+    return l.year == ahora.year && l.month == ahora.month && l.day == ahora.day;
+  }
+
+  bool vencida(DateTime? d) => d != null && d.isBefore(ahora);
+
   final out = todas
-      .where((t) => !t.completada && (t.venceHoy(ahora) || vencida(t)))
+      .where((t) =>
+          !t.completada &&
+          (esHoy(t.plazoEfectivo) || vencida(t.plazoEfectivo)))
       .toList()
     ..sort((a, b) {
-      final av = vencida(a) ? 0 : 1;
-      final bv = vencida(b) ? 0 : 1;
+      final av = vencida(a.plazoEfectivo) ? 0 : 1;
+      final bv = vencida(b.plazoEfectivo) ? 0 : 1;
       if (av != bv) return av - bv;
-      final ae = a.venceEn;
-      final be = b.venceEn;
+      final ae = a.plazoEfectivo;
+      final be = b.plazoEfectivo;
       if (ae == null && be == null) return 0;
       if (ae == null) return 1;
       if (be == null) return -1;
@@ -672,7 +684,14 @@ class _BloqueHoy extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionLabel(label: 'Hoy', count: total == 0 ? null : total),
+        _SectionLabel(
+          label: 'Hoy',
+          count: total == 0 ? null : total,
+          accionLabel: 'Planificar',
+          onAccion: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const PlanificarDiaScreen()),
+          ),
+        ),
         if (cargando && total == 0)
           const _LoaderLinea()
         else if (total == 0)
@@ -815,9 +834,9 @@ class _TareaMini extends ConsumerWidget {
                   ),
                 ),
                 // Cuenta regresiva viva + escala de color por cercanía.
-                // En "Hoy" toda tarea tiene fecha (vence hoy o ya venció).
-                if (t.venceEn != null)
-                  ContadorUrgencia(objetivo: t.venceEn!, fondo: true)
+                // Usa el plazo efectivo (bloque planificado o vencimiento).
+                if (t.plazoEfectivo != null)
+                  ContadorUrgencia(objetivo: t.plazoEfectivo!, fondo: true)
                 else
                   const Text(
                     '—',

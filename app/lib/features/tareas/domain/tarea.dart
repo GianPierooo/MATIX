@@ -61,6 +61,8 @@ class Tarea {
     this.completadaEn,
     required this.creadaEn,
     required this.actualizadaEn,
+    this.bloqueInicio,
+    this.bloqueFin,
   });
 
   final String id;
@@ -77,6 +79,17 @@ class Tarea {
   final DateTime? completadaEn;
   final DateTime creadaEn;
   final DateTime actualizadaEn;
+
+  /// Urgencia-3: bloque de tiempo asignado al planificar el día.
+  /// `bloqueInicio` cuándo empezarla; `bloqueFin` cuándo debería estar
+  /// hecha. No pisan `venceEn` (el plazo real de entrega).
+  final DateTime? bloqueInicio;
+  final DateTime? bloqueFin;
+
+  /// El plazo que manda para la urgencia: el bloque planificado si lo
+  /// hay (es un "plazo propio"), si no el vencimiento real. Lo usan los
+  /// contadores (Urgencia-1) y los nudges (Urgencia-2).
+  DateTime? get plazoEfectivo => bloqueFin ?? venceEn;
 
   /// `true` si tiene fecha de vencimiento y ya pasó (y no está completada).
   bool get estaVencida =>
@@ -109,6 +122,8 @@ class Tarea {
         completadaEn: _parseTs(json['completada_en']),
         creadaEn: DateTime.parse(json['creada_en'] as String),
         actualizadaEn: DateTime.parse(json['actualizada_en'] as String),
+        bloqueInicio: _parseTs(json['bloque_inicio']),
+        bloqueFin: _parseTs(json['bloque_fin']),
       );
 }
 

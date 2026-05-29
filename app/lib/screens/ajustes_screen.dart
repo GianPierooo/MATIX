@@ -19,6 +19,7 @@ import '../features/google/presentation/conexion_google_tile.dart';
 import '../features/nudges/domain/nudges.dart';
 import '../features/nudges/providers/nudges_providers.dart';
 import '../features/papelera/presentation/papelera_screen.dart';
+import '../features/planificador/application/plan_dia_controller.dart';
 import '../theme/matix_colors.dart';
 
 /// Pantalla de Ajustes — informativa en Capa 1.
@@ -215,6 +216,9 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
 
           const _Seccion('Nudges de urgencia'),
           const _NudgesTile(),
+
+          const _Seccion('Planificar el día'),
+          const _VentanaTrabajoTile(),
 
           const _Seccion('Rituales'),
           Container(
@@ -923,6 +927,79 @@ class _DiagnosticoFila extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Ventana de trabajo para "Planifica mi día" (Urgencia-3): entre qué
+/// horas Matix encaja los bloques. Respeta además las horas de silencio.
+class _VentanaTrabajoTile extends ConsumerWidget {
+  const _VentanaTrabajoTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final v = ref.watch(ventanaTrabajoProvider);
+    final ctrl = ref.read(ventanaTrabajoProvider.notifier);
+    String hh(int h) => '${h.toString().padLeft(2, '0')}:00';
+
+    Future<void> elegir(bool inicio) async {
+      final actual = inicio ? v.inicio : v.fin;
+      final picked = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay(hour: actual, minute: 0),
+        helpText: inicio ? 'Empezar el día a las' : 'Terminar el día a las',
+      );
+      if (picked == null) return;
+      if (inicio) {
+        await ctrl.cambiar(picked.hour, v.fin);
+      } else {
+        await ctrl.cambiar(v.inicio, picked.hour);
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: MatixColors.card,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Ventana de trabajo',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: MatixColors.text,
+            ),
+          ),
+          const SizedBox(height: 2),
+          const Text(
+            'Entre estas horas Matix encaja tus tareas al planificar.',
+            style: TextStyle(fontSize: 12, color: MatixColors.muted),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => elegir(true),
+                  child: Text('Desde ${hh(v.inicio)}'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => elegir(false),
+                  child: Text('Hasta ${hh(v.fin)}'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

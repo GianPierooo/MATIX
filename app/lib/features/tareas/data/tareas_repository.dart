@@ -158,7 +158,7 @@ class TareasRepository {
   /// apagados — y `programar` ignora puntos en el pasado.
   Future<void> _reprogramarNudges(Tarea t) async {
     await _cancelarNudges(t.id);
-    if (t.completada || t.venceEn == null) return;
+    if (t.completada || t.plazoEfectivo == null) return;
     final cfg = await _nudgesPrefs.leerConfig();
     final silenciada = await _nudgesPrefs.estaSilenciada(t.id);
     final plan = planNudges(

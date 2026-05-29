@@ -27,6 +27,8 @@ from ..schemas.matix import (
     CapturaApunteResponse,
     ChatRequest,
     ChatResponse,
+    EstimarDuracionesRequest,
+    EstimarDuracionesResponse,
     ExtraerTareasRequest,
     ExtraerTareasResponse,
     TranscripcionResponse,
@@ -155,6 +157,39 @@ async def extraer_tareas(body: ExtraerTareasRequest) -> dict:
         ) from e
 
     return {"tareas": tareas}
+
+
+@router.post("/estimar-duraciones", response_model=EstimarDuracionesResponse)
+async def estimar_duraciones(body: EstimarDuracionesRequest) -> dict:
+    """Estima la duración (minutos) de cada tarea para planificar el día
+    (Urgencia-3). No persiste nada ni encaja bloques — solo dimensiona.
+    La app arma el plan determinístico con estas duraciones.
+
+    Si no hay tareas, devuelve lista vacía sin llamar al modelo. Si el
+    modelo falla, propaga el error para que la app aplique su default y
+    siga (nunca se queda muda)."""
+    tareas = [{"id": t.id, "titulo": t.titulo} for t in body.tareas]
+    if not tareas:
+        return {"duraciones": []}
+
+    try:
+        duraciones = await llm.estimar_duraciones_json(tareas)
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error llamando al modelo: {e}",
+        ) from e
+
+    return {
+        "duraciones": [
+            {"tarea_id": tid, "minutos": m} for tid, m in duraciones.items()
+        ]
+    }
 
 
 @router.post("/transcribir", response_model=TranscripcionResponse)

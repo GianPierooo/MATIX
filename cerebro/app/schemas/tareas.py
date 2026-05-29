@@ -36,6 +36,9 @@ class TareaUpdate(BaseModel):
     recordar_en: datetime | None = None
     completada: bool | None = None
     completada_en: datetime | None = None
+    # Urgencia-3: bloque de tiempo asignado al planificar el día.
+    bloque_inicio: datetime | None = None
+    bloque_fin: datetime | None = None
 
 
 class TareaRead(BaseModel):
@@ -52,6 +55,9 @@ class TareaRead(BaseModel):
     completada: bool
     completada_en: datetime | None = None
     eliminado_en: datetime | None = None
+    # Urgencia-3: bloque de tiempo asignado al planificar el día.
+    bloque_inicio: datetime | None = None
+    bloque_fin: datetime | None = None
     creada_en: datetime
     actualizada_en: datetime
 
