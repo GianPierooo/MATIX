@@ -167,8 +167,8 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
       case _Fase.listo:
         return Text(
           'Te abro el navegador para que bajes el APK. Cuando termine '
-          'la descarga, tocá el archivo (o la notificación de descarga) '
-          'para instalar. Si Android lo pide, permití instalar desde '
+          'la descarga, toca el archivo (o la notificación de descarga) '
+          'para instalar. Si Android lo pide, permite instalar desde '
           'el navegador.',
           style: MatixText.small.copyWith(color: MatixColors.muted, height: 1.4),
         );
@@ -207,9 +207,9 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
               ),
               const SizedBox(height: MatixSpacing.s),
               Text(
-                '1. Esperá a que el navegador termine de bajar el APK.\n'
-                '2. Tocá el archivo descargado (o la notificación).\n'
-                '3. Si Android lo pide, permití instalar desde esa app.',
+                '1. Espera a que el navegador termine de bajar el APK.\n'
+                '2. Toca el archivo descargado (o la notificación).\n'
+                '3. Si Android lo pide, permite instalar desde esa app.',
                 style: MatixText.small.copyWith(height: 1.5),
               ),
               if (_copiado) ...[

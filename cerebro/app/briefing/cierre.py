@@ -148,19 +148,19 @@ def _frase_de_cierre(*, n_hechas: int, n_pendientes: int) -> str:
     adapta al volumen del día sin culpabilizar lo que quedó."""
     if n_hechas > 0 and n_pendientes == 0:
         return (
-            "Cerraste todo lo que vencía hoy. Soltá el día y descansá."
+            "Cerraste todo lo que vencía hoy. Suelta el día y descansa."
         )
     if n_hechas > 0 and n_pendientes > 0:
         return (
             "Avanzaste hoy. Lo que quedó no se va a ningún lado — "
-            "mañana seguís con la cabeza fresca."
+            "mañana sigues con la cabeza fresca."
         )
     if n_hechas == 0 and n_pendientes > 0:
         return (
             "Hoy no marcaste tareas y está perfecto. Mañana es otra "
-            "oportunidad; por ahora, descansá."
+            "oportunidad; por ahora, descansa."
         )
-    return "Día tranquilo. Dejá ir lo que no dependía de vos y descansá."
+    return "Día tranquilo. Deja ir lo que no dependía de ti y descansa."
 
 
 def _resumen_corto_cierre(

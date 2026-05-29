@@ -30,7 +30,7 @@ class UniversidadScreen extends ConsumerWidget {
                 builder: (_) => const ManosLibresScreen(
                   seedMensaje:
                       'Quiero una sesión de estudio. Pregúntame de qué '
-                      'apunte querés tomarme examen.',
+                      'apunte quieres tomarme examen.',
                 ),
               ),
             ),

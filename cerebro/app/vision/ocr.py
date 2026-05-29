@@ -30,11 +30,11 @@ _MODELO_DEFAULT = "gpt-4o-mini"
 # adornos, sin comentar la foto. La idea es que el output sea
 # pegado tal cual al apunte.
 _SYSTEM = (
-    "Sos un OCR. Te paso una imagen y devolvés el texto que aparece "
+    "Eres un OCR. Te paso una imagen y devuelves el texto que aparece "
     "en ella, lo más fielmente posible. Sin comentarios tuyos, sin "
     "describir la imagen, sin envoltorios tipo 'el texto dice'. "
-    "Si hay fórmulas, transcribilas como texto plano (no LaTeX). "
-    "Si no hay texto visible o no podés extraerlo, respondé "
+    "Si hay fórmulas, transcríbelas como texto plano (no LaTeX). "
+    "Si no hay texto visible o no puedes extraerlo, responde "
     "exactamente la cadena <SIN_TEXTO>."
 )
 

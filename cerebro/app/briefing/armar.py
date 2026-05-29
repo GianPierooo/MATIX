@@ -294,7 +294,7 @@ def _armar_texto_voz(
     frases.append(f"{saludo}. Hoy es {fecha_es}.")
 
     if not eventos and not tareas_hoy and not alertas:
-        frases.append("Tenés la agenda libre.")
+        frases.append("Tienes la agenda libre.")
         if vencidas_resumen["total"]:
             n = vencidas_resumen["total"]
             d = vencidas_resumen["mas_antigua_dias"]
@@ -309,13 +309,13 @@ def _armar_texto_voz(
         if cuenta == 1:
             ev = eventos[0]
             if ev["todo_el_dia"]:
-                frases.append(f"Tenés un evento todo el día: {ev['titulo']}.")
+                frases.append(f"Tienes un evento todo el día: {ev['titulo']}.")
             else:
                 frases.append(
-                    f"Tenés un evento a las {ev['hora']}: {ev['titulo']}."
+                    f"Tienes un evento a las {ev['hora']}: {ev['titulo']}."
                 )
         else:
-            frases.append(f"Tenés {cuenta} eventos en agenda.")
+            frases.append(f"Tienes {cuenta} eventos en agenda.")
             for ev in eventos:
                 if ev["todo_el_dia"]:
                     frases.append(f"Todo el día: {ev['titulo']}.")
@@ -338,10 +338,10 @@ def _armar_texto_voz(
         n = vencidas_resumen["total"]
         d = vencidas_resumen["mas_antigua_dias"]
         if n == 1:
-            frases.append(f"Y arrastrás 1 tarea vencida hace {d} días.")
+            frases.append(f"Y arrastras 1 tarea vencida hace {d} días.")
         else:
             frases.append(
-                f"Y arrastrás {n} tareas vencidas, la más antigua hace "
+                f"Y arrastras {n} tareas vencidas, la más antigua hace "
                 f"{d} {'día' if d == 1 else 'días'}."
             )
 

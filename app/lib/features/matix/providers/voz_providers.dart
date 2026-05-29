@@ -90,8 +90,8 @@ class VozNotifier extends AutoDisposeNotifier<EstadoVoz> {
       state = EstadoVoz(
         fase: FaseVoz.error,
         error: e.permanente
-            ? 'No puedo usar el micrófono. Concedeme el permiso desde '
-                'los ajustes del sistema y volvé a intentar.'
+            ? 'No puedo usar el micrófono. Concédeme el permiso desde '
+                'los ajustes del sistema y vuelve a intentar.'
             : 'Necesito permiso del micrófono para grabar.',
       );
     } catch (e) {

@@ -99,7 +99,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "name": "crear_tarea",
             "description": (
                 "Crea una tarea en el hub. Úsala cuando el usuario "
-                "pida 'agendá', 'apuntá', 'agregá una tarea' o "
+                "pida 'agenda', 'apunta', 'agrega una tarea' o "
                 "equivalente. Si la tarea pertenece a un proyecto, "
                 "pasa el `proyecto_id` del contexto. Si es para un "
                 "curso, pasa el `curso_id`."
@@ -199,7 +199,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "name": "crear_apunte",
             "description": (
                 "Crea un apunte (nota). Úsalo cuando el usuario pida "
-                "'apuntá', 'anotá esto', 'guardame esto', o dicte una "
+                "'apunta', 'anota esto', 'guárdame esto', o dicte una "
                 "idea para registrar. El contenido puede tener saltos "
                 "de línea. Si la idea encaja CLARAMENTE con un proyecto "
                 "activo o un curso que YA existe en el contexto vivo, "
@@ -264,8 +264,8 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "description": (
                 "Reabre una tarea que estaba marcada como completada — "
                 "la vuelve a pendiente. Es el inverso de "
-                "`completar_tarea`. Usalo cuando el usuario diga "
-                "«reabrí», «deshacé», «marcá X como pendiente otra "
+                "`completar_tarea`. Úsalo cuando el usuario diga "
+                "«reabre», «deshaz», «marca X como pendiente otra "
                 "vez» o equivalente — típicamente después de un "
                 "completar_tarea accidental (por ejemplo por una "
                 "transcripción de voz mal entendida)."
@@ -293,8 +293,8 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "name": "marcar_accion_siguiente_hecha",
             "description": (
                 "Cuando el usuario diga «ya hice la acción siguiente "
-                "de X» o equivalente, marcá esa tarea como completada "
-                "y limpiá la acción siguiente del proyecto (queda "
+                "de X» o equivalente, marca esa tarea como completada "
+                "y limpia la acción siguiente del proyecto (queda "
                 "vacía hasta que se defina una nueva)."
             ),
             "parameters": {
@@ -313,7 +313,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "name": "registrar_cierre",
             "description": (
                 "Registra el cierre del día (ritual nocturno). "
-                "Si la fecha ya tiene cierre, se actualiza. Pasale "
+                "Si la fecha ya tiene cierre, se actualiza. Pásale "
                 "las 3 cosas que sí hizo + nota opcional. Por "
                 "defecto, fecha de hoy."
             ),
@@ -350,12 +350,12 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "editar_tarea",
             "description": (
-                "Edita campos de una tarea existente. Pasale el "
-                "`tarea_id` y SOLO los campos que querés cambiar. Si "
+                "Edita campos de una tarea existente. Pásale el "
+                "`tarea_id` y SOLO los campos que quieres cambiar. Si "
                 "el usuario pide reagendar, cambiar prioridad, mover "
                 "a otro proyecto/curso, agregar o quitar una nota — "
-                "es esta. Para completar/reabrir tenés tools "
-                "dedicadas; no las uses acá."
+                "es esta. Para completar/reabrir tienes tools "
+                "dedicadas; no las uses aquí."
             ),
             "parameters": {
                 "type": "object",
@@ -382,7 +382,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "description": (
                 "Manda una tarea a la papelera. Es reversible: el "
                 "usuario puede restaurar desde la app. Úsala cuando "
-                "diga «borrá esa tarea», «sacala», «eliminala». "
+                "diga «borra esa tarea», «sácala», «elimínala». "
                 "No es destructivo."
             ),
             "parameters": {
@@ -398,7 +398,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "editar_evento",
             "description": (
-                "Edita campos de un evento existente. Pasale el "
+                "Edita campos de un evento existente. Pásale el "
                 "`evento_id` y SOLO los campos que cambian. Útil para "
                 "reagendar o renombrar."
             ),
@@ -441,7 +441,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "editar_apunte",
             "description": (
-                "Edita un apunte existente. Pasale el `apunte_id` y "
+                "Edita un apunte existente. Pásale el `apunte_id` y "
                 "los campos que cambian. Útil para anexar contenido, "
                 "renombrar, mover a otro cuaderno, ajustar etiquetas."
             ),
@@ -486,9 +486,9 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "description": (
                 "Crea un proyecto. Por defecto entra como `activo`. "
                 "Si ya hay 3 activos, la operación falla con un "
-                "mensaje que tenés que traducir al usuario: «ya tenés "
-                "3 proyectos activos, aparcá o terminá uno primero». "
-                "Para crear directo como aparcado o terminado, pasá "
+                "mensaje que tienes que traducir al usuario: «ya tienes "
+                "3 proyectos activos, aparca o termina uno primero». "
+                "Para crear directo como aparcado o terminado, pasa "
                 "`estado` correspondiente."
             ),
             "parameters": {
@@ -519,9 +519,9 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "editar_proyecto",
             "description": (
-                "Edita campos de un proyecto existente. Pasale el "
+                "Edita campos de un proyecto existente. Pásale el "
                 "`proyecto_id` y los campos que cambian. NO cambies "
-                "`estado` por acá — usá `aparcar_proyecto`, "
+                "`estado` por aquí — usa `aparcar_proyecto`, "
                 "`terminar_proyecto` o `reactivar_proyecto` que tienen "
                 "la lógica del tope de 3."
             ),
@@ -577,8 +577,8 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "name": "reactivar_proyecto",
             "description": (
                 "Vuelve el proyecto al estado `activo`. Si ya hay 3 "
-                "activos, falla — traducí el mensaje al usuario "
-                "(«ya tenés 3 activos, aparcá o terminá uno antes»)."
+                "activos, falla — traduce el mensaje al usuario "
+                "(«ya tienes 3 activos, aparca o termina uno antes»)."
             ),
             "parameters": {
                 "type": "object",
@@ -594,12 +594,12 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "name": "buscar_apuntes",
             "description": (
                 "Busca en los apuntes del usuario por SIGNIFICADO "
-                "semántico (RAG). Usala cuando el usuario pregunte "
+                "semántico (RAG). Úsala cuando el usuario pregunte "
                 "por algo que podría estar en sus notas: «¿qué "
                 "anoté sobre X?», «búscame mi resumen de Y», "
-                "«contame qué decía mi apunte de Z». Devuelve los "
+                "«cuéntame qué decía mi apunte de Z». Devuelve los "
                 "apuntes más relevantes con título y un fragmento. "
-                "Si la búsqueda no devuelve nada, decílo: NO "
+                "Si la búsqueda no devuelve nada, dilo: NO "
                 "inventes contenido."
             ),
             "parameters": {
@@ -609,7 +609,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": (
                             "Lo que se está buscando, en lenguaje "
-                            "natural. Podés expandir la pregunta "
+                            "natural. Puedes expandir la pregunta "
                             "del usuario si lo ayuda, pero no la "
                             "reformules en tecnicismos — la "
                             "búsqueda semántica funciona mejor con "
@@ -620,7 +620,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         "type": "integer",
                         "description": (
                             "Cuántos apuntes traer (1 a 10). "
-                            "Default 5. Subílo solo si el usuario "
+                            "Default 5. Súbelo solo si el usuario "
                             "pide explorar varios."
                         ),
                     },
@@ -636,12 +636,12 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "name": "leer_apunte",
             "description": (
                 "Trae el contenido COMPLETO de un apunte por id. "
-                "Usala después de `buscar_apuntes` cuando necesites "
+                "Úsala después de `buscar_apuntes` cuando necesites "
                 "el texto entero para resumir, generar preguntas o "
                 "explicar — `buscar_apuntes` devuelve solo un "
                 "fragmento (600 chars), `leer_apunte` te da todo. "
                 "Si el usuario te da el nombre del apunte y no el id, "
-                "primero buscalo con `buscar_apuntes` y después leelo."
+                "primero búscalo con `buscar_apuntes` y después léelo."
             ),
             "parameters": {
                 "type": "object",
@@ -712,8 +712,8 @@ def _err_validacion(e: ValidationError) -> dict[str, Any]:
             "validacion",
             f"Campo «{campo}» no es válido: {msg}.",
             sugerencia=(
-                "Revisá el formato (fechas en ISO 8601, ids como UUID) "
-                "y volvé a llamarme."
+                "Revisa el formato (fechas en ISO 8601, ids como UUID) "
+                "y vuelve a llamarme."
             ),
         )
     return _error("validacion", "Hay un campo con valor inválido.")
@@ -832,7 +832,7 @@ async def _completar_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
         return _error(
             "validacion",
             "Falta el `tarea_id`.",
-            sugerencia="Mirá el contexto vivo y volvé a llamarme con el id.",
+            sugerencia="Mira el contexto vivo y vuelve a llamarme con el id.",
         )
     try:
         tarea_id = str(UUID(str(raw_id)))
@@ -847,7 +847,7 @@ async def _completar_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
         return _error(
             "no_existe",
             "Esa tarea ya no está en el hub (puede que la borraran).",
-            sugerencia="Revisá la lista actualizada y volvé a intentar.",
+            sugerencia="Revisa la lista actualizada y vuelve a intentar.",
         )
     if actual.get("completada"):
         return _ok(
@@ -892,8 +892,8 @@ async def _reabrir_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
             "validacion",
             "Falta el `tarea_id`.",
             sugerencia=(
-                "Buscá la tarea en «Tareas completadas hoy» del "
-                "contexto y volvé a llamarme con su id."
+                "Busca la tarea en «Tareas completadas hoy» del "
+                "contexto y vuelve a llamarme con su id."
             ),
         )
     try:
@@ -963,7 +963,7 @@ async def _marcar_accion_siguiente_hecha(
                 "acción siguiente definida ahora mismo."
             ),
             sugerencia=(
-                "Decile al usuario que defina la próxima acción "
+                "Dile al usuario que defina la próxima acción "
                 "siguiente desde la app (Detalle del proyecto)."
             ),
         )
@@ -984,7 +984,7 @@ async def _marcar_accion_siguiente_hecha(
             "inconsistencia",
             (
                 "La acción siguiente apuntaba a una tarea que ya no "
-                "existe. Limpié la referencia. Decile al usuario "
+                "existe. Limpié la referencia. Dile al usuario "
                 "que defina una nueva."
             ),
         )
@@ -1096,7 +1096,7 @@ async def _editar_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
         return _error(
             "validacion",
             "No me pasaste qué campo cambiar.",
-            sugerencia="Volvé a llamarme con al menos un campo además del id.",
+            sugerencia="Vuelve a llamarme con al menos un campo además del id.",
         )
     try:
         body = TareaUpdate(**campos)
@@ -1235,8 +1235,8 @@ async def _eliminar_apunte(db: Postgrest, args: dict) -> dict[str, Any]:
 
 _TOPE_PROYECTOS_ACTIVOS = 3
 _MSG_TOPE = (
-    f"Ya hay {_TOPE_PROYECTOS_ACTIVOS} proyectos activos. Aparcá o "
-    "terminá uno primero."
+    f"Ya hay {_TOPE_PROYECTOS_ACTIVOS} proyectos activos. Aparca o "
+    "termina uno primero."
 )
 
 
@@ -1262,8 +1262,8 @@ async def _crear_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
                 "tope_proyectos",
                 _MSG_TOPE,
                 sugerencia=(
-                    "Sugerí al usuario que aparque o termine alguno, "
-                    "y volvé a llamarme. O creá el nuevo como "
+                    "Sugiere al usuario que aparque o termine alguno, "
+                    "y vuelve a llamarme. O crea el nuevo como "
                     "`aparcado` para guardarlo sin activarlo."
                 ),
             )
@@ -1290,7 +1290,7 @@ async def _editar_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
     if "estado" in campos:
         return _error(
             "validacion",
-            "Para cambiar el estado del proyecto usá "
+            "Para cambiar el estado del proyecto usa "
             "`aparcar_proyecto`, `terminar_proyecto` o "
             "`reactivar_proyecto`.",
         )
@@ -1350,7 +1350,7 @@ async def _cambiar_estado_proyecto(
                 "tope_proyectos",
                 _MSG_TOPE,
                 sugerencia=(
-                    "Sugerí al usuario que aparque o termine otro "
+                    "Sugiere al usuario que aparque o termine otro "
                     "antes de reactivar este."
                 ),
             )
@@ -1418,7 +1418,7 @@ async def _buscar_apuntes(db: Postgrest, args: dict) -> dict[str, Any]:
             # alta (>1.0), probablemente no hay un apunte relevante.
             "nota": (
                 "Si todos los resultados tienen distancia > 1.0, "
-                "el match es débil — decile al usuario que no "
+                "el match es débil — dile al usuario que no "
                 "encontraste nada claro en lugar de inventar."
             ),
         }
@@ -1447,7 +1447,7 @@ async def _leer_apunte(db: Postgrest, args: dict) -> dict[str, Any]:
             "Ese apunte no está en el hub.",
             sugerencia=(
                 "Si llegaste a este id desde `buscar_apuntes`, "
-                "puede que mientras tanto se haya borrado. Volvé "
+                "puede que mientras tanto se haya borrado. Vuelve "
                 "a buscar."
             ),
         )
@@ -1619,7 +1619,7 @@ async def ejecutar_tool(
             "interno",
             f"Algo falló al ejecutar «{name}» ({type(e).__name__}).",
             sugerencia=(
-                "Decile al usuario que algo se rompió en el cerebro "
+                "Dile al usuario que algo se rompió en el cerebro "
                 "y que reintente en un momento."
             ),
         )

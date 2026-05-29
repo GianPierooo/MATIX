@@ -108,7 +108,7 @@ class _ConexionGoogleTileState extends ConsumerState<ConexionGoogleTile> {
         content: const Text(
           'Voy a borrar el acceso del cerebro a tu Google Calendar. '
           'Los eventos ya sincronizados se quedan en el hub.\n\n'
-          'Para que Google también olvide el permiso, andá a '
+          'Para que Google también olvide el permiso, ve a '
           'myaccount.google.com/permissions.',
         ),
         actions: [
@@ -140,7 +140,7 @@ class _ConexionGoogleTileState extends ConsumerState<ConexionGoogleTile> {
       return 'OAuth Google no habilitado en el cerebro (faltan vars).';
     }
     if (e.statusCode == 401) {
-      return 'Tu acceso a Google expiró. Reconectá.';
+      return 'Tu acceso a Google expiró. Reconecta.';
     }
     return 'Error ${e.statusCode}: ${e.message}';
   }
@@ -303,8 +303,8 @@ class _NoConectadoBody extends StatelessWidget {
         Text(
           esperandoCallback
               ? 'Te abrí Chrome para que autorices. Cuando termines, '
-                  'volvé acá y tocá "Ya autoricé".'
-              : 'Conectá tu cuenta para ver tus eventos del Google '
+                  'vuelve aquí y toca "Ya autoricé".'
+              : 'Conecta tu cuenta para ver tus eventos del Google '
                   'Calendar en el hub.',
           style: const TextStyle(
             fontSize: 12.5,
@@ -523,7 +523,7 @@ class _BannerReconectarParaEscritura extends StatelessWidget {
           const Text(
             'Tu conexión actual solo permite leer Google Calendar. '
             'Para que los eventos que crees en Matix también suban a '
-            'Google, reconectá una vez para conceder el permiso de '
+            'Google, reconecta una vez para conceder el permiso de '
             'escritura.',
             style: TextStyle(
               fontSize: 11.5,

@@ -209,10 +209,10 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
         state = state.copyWith(
           fase: FaseManosLibres.error,
           error: e.permanente
-              ? 'No tengo permiso de micrófono. Concedelo desde los '
-                  'ajustes del sistema y volvé a entrar al modo.'
-              : 'Necesito permiso del micrófono. Aceptá el permiso y '
-                  'volvé a entrar.',
+              ? 'No tengo permiso de micrófono. Concédelo desde los '
+                  'ajustes del sistema y vuelve a entrar al modo.'
+              : 'Necesito permiso del micrófono. Acepta el permiso y '
+                  'vuelve a entrar.',
         );
         return;
       } on _AbortoUsuario {
