@@ -68,15 +68,21 @@ dependencies:
   firebase_core: ^3.8.0
 
   # Auto-actualización (Infra · Capa 2 / Capa 3).
-  # - package_info_plus: leer versión + build_number locales.
-  # - ota_update: descargar e instalar el APK con barra de progreso
-  #   y lanzar el instalador del sistema.
+  # El APK se baja desde el navegador del sistema (url_launcher, más
+  # abajo). Antes usábamos `ota_update` para instalar in-app, pero su
+  # instalador crasheaba de forma nativa en el Huawei sin Google Play
+  # Services: invoca un FileProvider que ni el plugin ni la app
+  # declaran, y la `IllegalArgumentException` resultante (no atrapada,
+  # en el main looper) mataba el proceso. La vía del navegador es la
+  # probada en ese device. `package_info_plus` queda por si más
+  # adelante se necesita leer la versión local (hoy el build viene por
+  # --dart-define, ver lib/config.dart).
   package_info_plus: ^8.1.2
-  ota_update: ^7.0.0
 
-  # OAuth Google (Capa 4 Paso 1): abrimos la URL de consentimiento
-  # en el navegador del sistema. Suficiente para el flujo — el
-  # callback vuelve al cerebro y el usuario vuelve a la app a mano.
+  # OAuth Google (Capa 4 Paso 1) + descarga del APK de actualización:
+  # abrimos URLs en el navegador del sistema. El callback de OAuth
+  # vuelve al cerebro y el usuario vuelve a la app a mano; el APK se
+  # baja y se instala desde el navegador (fuente de instalación).
   url_launcher: ^6.3.1
 
   # Capa 8 reducida Paso 1: preferencia local del briefing matutino
@@ -102,6 +108,14 @@ dependency_overrides:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
+  # Para testear el diálogo de auto-actualización: el test sustituye
+  # `UrlLauncherPlatform.instance` por un fake que registra la URL y
+  # el modo de lanzamiento, sin tocar el method channel. Son deps
+  # transitivas de url_launcher; las declaramos directas solo para
+  # el test (evita el lint depend_on_referenced_packages).
+  url_launcher_platform_interface: ^2.3.2
+  plugin_platform_interface: ^2.1.8
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

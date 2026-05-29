@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:ota_update/ota_update.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../theme/matix_colors.dart';
 import '../../../theme/matix_spacing.dart';
@@ -9,23 +9,26 @@ import '../data/update_service.dart';
 
 /// Diálogo modal de auto-actualización.
 ///
-/// Flujo de instalación (lo que antes fallaba silenciosamente):
+/// Por qué abre el navegador en vez de instalar in-app:
 ///
-/// 1. Chequeamos `Permission.requestInstallPackages` ANTES de
-///    descargar. Si no está concedido, mostramos un paso intermedio
-///    explicando lo que pasa y un CTA que abre Settings de Android
-///    en la pantalla correcta (`openAppSettings()` lleva a la app,
-///    de ahí el usuario toca "Permitir instalar fuentes desconocidas").
-/// 2. Después de descargar, `ota_update` invoca el instalador del
-///    sistema. Si falla, capturamos el `OtaStatus` exacto y lo
-///    traducimos a un mensaje legible.
+/// Antes usábamos `ota_update`, que descargaba el APK y lanzaba el
+/// instalador del sistema con `Intent.ACTION_INSTALL_PACKAGE` sobre
+/// una URI `content://` de un `FileProvider`. Ese plugin invoca
+/// `FileProvider.getUriForFile(context, "<pkg>.ota_update_provider", …)`
+/// pero NO declara el `<provider>` en su manifest, y la app tampoco
+/// lo declaraba. Resultado: `getUriForFile` lanzaba
+/// `IllegalArgumentException` dentro de un `Handler.post(...)` en el
+/// main looper de Android, SIN try/catch. Una excepción no atrapada
+/// en el main looper mata el proceso de forma nativa — por eso la
+/// app "se cerraba sola al instalar" y el error nunca llegaba al
+/// `onError` de Dart (el crash es nativo, no un error del stream).
 ///
-/// Causas típicas que cubrimos:
-/// - Permiso no concedido → CTA "Abrir Ajustes".
-/// - Firma mismatch (versión anterior firmada distinto) → mensaje
-///   "Reinstalación necesaria: desinstalá Matix y abrí este APK
-///   desde Archivos. Pasa solo una vez."
-/// - Error de red durante la descarga → mensaje del status.
+/// En el Huawei sin Google Play Services el handoff del instalador
+/// es además frágil. La vía probada que SÍ funciona en ese device
+/// es bajar el APK desde el navegador y tocar el archivo: el
+/// instalador del sistema se abre con el navegador como fuente. Eso
+/// es lo que hace este diálogo ahora — cero superficie de crash
+/// nativo, una vía confiable.
 Future<void> mostrarUpdateDialog(
   BuildContext context, {
   required UpdateDisponible info,
@@ -52,126 +55,57 @@ class _UpdateDialogContent extends StatefulWidget {
 
 enum _Fase {
   listo,
-  pidiendoPermiso, // sin REQUEST_INSTALL_PACKAGES; CTA Ajustes
-  descargando,
-  instalando,
-  error,
+  abierto, // navegador lanzado; instrucciones para terminar la instalación
+  error, // no se pudo abrir el navegador; enlace copiable como respaldo
 }
 
 class _UpdateDialogContentState extends State<_UpdateDialogContent> {
   _Fase _fase = _Fase.listo;
-  double? _progreso;
   String? _error;
-  String? _consejo; // tip accionable bajo el error (ej. "desinstalá y reinstalá")
+  bool _copiado = false;
 
-  Future<void> _iniciar() async {
+  Future<void> _abrir() async {
     setState(() {
       _error = null;
-      _consejo = null;
+      _copiado = false;
     });
 
-    // 1) Pre-check del permiso REQUEST_INSTALL_PACKAGES. Sin esto,
-    // Android 8+ rechaza la invocación al instalador y la app
-    // muere silenciosa (lo que veía Gian Piero al 99%).
-    final permiso = await Permission.requestInstallPackages.status;
-    if (!permiso.isGranted) {
-      final resultado = await Permission.requestInstallPackages.request();
-      if (!resultado.isGranted) {
-        if (!mounted) return;
-        setState(() {
-          _fase = _Fase.pidiendoPermiso;
-        });
-        return;
-      }
-    }
-
-    // 2) Descargar e instalar.
-    setState(() {
-      _fase = _Fase.descargando;
-      _progreso = 0;
-    });
-    try {
-      OtaUpdate()
-          .execute(
-            widget.info.apkUrl,
-            destinationFilename: 'matix-${widget.info.buildNumber}.apk',
-          )
-          .listen(
-        (event) {
-          switch (event.status) {
-            case OtaStatus.DOWNLOADING:
-              final pct = double.tryParse(event.value ?? '');
-              setState(() {
-                _fase = _Fase.descargando;
-                _progreso = pct != null ? pct / 100.0 : null;
-              });
-            case OtaStatus.INSTALLING:
-            case OtaStatus.INSTALLATION_DONE:
-              setState(() {
-                _fase = _Fase.instalando;
-                _progreso = null;
-              });
-            case OtaStatus.PERMISSION_NOT_GRANTED_ERROR:
-              setState(() {
-                _fase = _Fase.pidiendoPermiso;
-              });
-            case OtaStatus.INSTALLATION_ERROR:
-              setState(() {
-                _fase = _Fase.error;
-                _error = _mensajeDeStatus(event.status, event.value);
-                _consejo =
-                    'Esto suele pasar cuando la versión actual fue '
-                    'firmada distinto al APK nuevo (típico la primera '
-                    'vez tras cambiar a llave de release estable). '
-                    '**Desinstalá Matix** y volvé a abrir esta '
-                    'actualización desde el navegador: el APK se '
-                    'instala limpio. De ahí en adelante, las próximas '
-                    'OTA fluyen solas.';
-              });
-            case OtaStatus.ALREADY_RUNNING_ERROR:
-            case OtaStatus.INTERNAL_ERROR:
-            case OtaStatus.DOWNLOAD_ERROR:
-            case OtaStatus.CHECKSUM_ERROR:
-              setState(() {
-                _fase = _Fase.error;
-                _error = _mensajeDeStatus(event.status, event.value);
-              });
-            case OtaStatus.CANCELED:
-              if (mounted) Navigator.of(context).pop();
-          }
-        },
-        onError: (e) {
-          setState(() {
-            _fase = _Fase.error;
-            _error = 'Error inesperado: $e';
-          });
-        },
-      );
-    } catch (e) {
+    final uri = Uri.tryParse(widget.info.apkUrl);
+    if (uri == null) {
       setState(() {
         _fase = _Fase.error;
-        _error = 'No pude lanzar la descarga: $e';
+        _error = 'El enlace del APK no es válido: ${widget.info.apkUrl}';
+      });
+      return;
+    }
+
+    try {
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!mounted) return;
+      if (ok) {
+        setState(() => _fase = _Fase.abierto);
+      } else {
+        setState(() {
+          _fase = _Fase.error;
+          _error =
+              'No pude abrir el navegador en este teléfono. Copiá el '
+              'enlace de abajo y pegalo a mano en tu navegador para '
+              'bajar el APK.';
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _fase = _Fase.error;
+        _error = 'No pude abrir el navegador: $e';
       });
     }
   }
 
-  String _mensajeDeStatus(OtaStatus s, String? valor) {
-    switch (s) {
-      case OtaStatus.PERMISSION_NOT_GRANTED_ERROR:
-        return 'Falta el permiso de instalación.';
-      case OtaStatus.INSTALLATION_ERROR:
-        return 'Android rechazó la instalación del APK.';
-      case OtaStatus.ALREADY_RUNNING_ERROR:
-        return 'Ya hay una actualización en curso.';
-      case OtaStatus.INTERNAL_ERROR:
-        return 'Error interno del actualizador: ${valor ?? "sin detalle"}';
-      case OtaStatus.DOWNLOAD_ERROR:
-        return 'Falló la descarga: ${valor ?? "sin detalle"}';
-      case OtaStatus.CHECKSUM_ERROR:
-        return 'El APK descargado está corrupto. Reintentá.';
-      default:
-        return valor ?? s.toString();
-    }
+  Future<void> _copiarEnlace() async {
+    await Clipboard.setData(ClipboardData(text: widget.info.apkUrl));
+    if (!mounted) return;
+    setState(() => _copiado = true);
   }
 
   @override
@@ -231,15 +165,21 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
   Widget _contenidoSegunFase() {
     switch (_fase) {
       case _Fase.listo:
-        return const SizedBox.shrink();
+        return Text(
+          'Te abro el navegador para que bajes el APK. Cuando termine '
+          'la descarga, tocá el archivo (o la notificación de descarga) '
+          'para instalar. Si Android lo pide, permití instalar desde '
+          'el navegador.',
+          style: MatixText.small.copyWith(color: MatixColors.muted, height: 1.4),
+        );
 
-      case _Fase.pidiendoPermiso:
+      case _Fase.abierto:
         return Container(
           padding: const EdgeInsets.all(MatixSpacing.l),
           decoration: BoxDecoration(
-            color: MatixColors.amber.withValues(alpha: 0.12),
+            color: MatixColors.accent.withValues(alpha: 0.12),
             border: Border.all(
-              color: MatixColors.amber.withValues(alpha: 0.45),
+              color: MatixColors.accent.withValues(alpha: 0.45),
             ),
             borderRadius: BorderRadius.circular(10),
           ),
@@ -249,75 +189,35 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
               Row(
                 children: [
                   const Icon(
-                    Icons.lock_outline,
-                    color: MatixColors.amber,
+                    Icons.open_in_browser,
+                    color: MatixColors.accent,
                     size: 18,
                   ),
                   const SizedBox(width: MatixSpacing.s),
-                  Text(
-                    'Falta permiso de instalación',
-                    style: MatixText.body.copyWith(
-                      color: MatixColors.amber,
-                      fontWeight: FontWeight.w600,
+                  Expanded(
+                    child: Text(
+                      'Descarga abierta en el navegador',
+                      style: MatixText.body.copyWith(
+                        color: MatixColors.accent,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: MatixSpacing.s),
               Text(
-                'Android exige que habilites "Instalar apps '
-                'desconocidas" para Matix antes de poder actualizar. '
-                'Tocá "Abrir Ajustes" → activá el toggle → volvé '
-                'acá y tocá "Continuar".',
-                style: MatixText.small,
+                '1. Esperá a que el navegador termine de bajar el APK.\n'
+                '2. Tocá el archivo descargado (o la notificación).\n'
+                '3. Si Android lo pide, permití instalar desde esa app.',
+                style: MatixText.small.copyWith(height: 1.5),
               ),
+              if (_copiado) ...[
+                const SizedBox(height: MatixSpacing.s),
+                _enlaceCopiado(),
+              ],
             ],
           ),
-        );
-
-      case _Fase.descargando:
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _progreso == null
-                  ? 'Descargando…'
-                  : 'Descargando · ${(_progreso! * 100).toInt()}%',
-              style: MatixText.small,
-            ),
-            const SizedBox(height: MatixSpacing.s),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: LinearProgressIndicator(
-                value: _progreso,
-                color: MatixColors.accent,
-                backgroundColor: MatixColors.cardHi,
-                minHeight: 5,
-              ),
-            ),
-          ],
-        );
-
-      case _Fase.instalando:
-        return Row(
-          children: [
-            const SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: MatixColors.accent,
-              ),
-            ),
-            const SizedBox(width: MatixSpacing.l),
-            Expanded(
-              child: Text(
-                'Abriendo el instalador del sistema… '
-                'Confirmá en el diálogo de Android.',
-                style: MatixText.small,
-              ),
-            ),
-          ],
         );
 
       case _Fase.error:
@@ -334,23 +234,38 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                _error ?? 'Algo falló al actualizar.',
+                _error ?? 'No pude abrir el navegador.',
                 style: MatixText.small.copyWith(color: MatixColors.text),
               ),
-              if (_consejo != null) ...[
-                const SizedBox(height: MatixSpacing.m),
-                Text(
-                  _consejo!,
-                  style: MatixText.small.copyWith(
-                    color: MatixColors.muted,
-                    height: 1.4,
-                  ),
+              const SizedBox(height: MatixSpacing.m),
+              SelectableText(
+                widget.info.apkUrl,
+                style: MatixText.small.copyWith(
+                  color: MatixColors.muted,
+                  fontFamily: 'monospace',
                 ),
+              ),
+              if (_copiado) ...[
+                const SizedBox(height: MatixSpacing.s),
+                _enlaceCopiado(),
               ],
             ],
           ),
         );
     }
+  }
+
+  Widget _enlaceCopiado() {
+    return Row(
+      children: [
+        const Icon(Icons.check_circle, color: MatixColors.green, size: 16),
+        const SizedBox(width: MatixSpacing.s),
+        Text(
+          'Enlace copiado al portapapeles',
+          style: MatixText.small.copyWith(color: MatixColors.green),
+        ),
+      ],
+    );
   }
 
   List<Widget> _accionesSegunFase() {
@@ -362,7 +277,7 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
             child: const Text('Más tarde'),
           ),
           FilledButton.icon(
-            onPressed: _iniciar,
+            onPressed: _abrir,
             icon: const Icon(Icons.download_rounded, size: 18),
             label: const Text('Descargar e instalar'),
             style: FilledButton.styleFrom(
@@ -372,35 +287,30 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
           ),
         ];
 
-      case _Fase.pidiendoPermiso:
+      case _Fase.abierto:
         return [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancelar'),
-          ),
-          OutlinedButton.icon(
-            onPressed: () => openAppSettings(),
-            icon: const Icon(Icons.settings, size: 18),
-            label: const Text('Abrir Ajustes'),
+            onPressed: _copiarEnlace,
+            child: const Text('Copiar enlace'),
           ),
           FilledButton(
-            onPressed: _iniciar,
-            child: const Text('Continuar'),
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Listo'),
           ),
         ];
 
-      case _Fase.descargando:
-      case _Fase.instalando:
-        return const [];
-
       case _Fase.error:
         return [
+          TextButton(
+            onPressed: _copiarEnlace,
+            child: const Text('Copiar enlace'),
+          ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Cerrar'),
           ),
           FilledButton(
-            onPressed: _iniciar,
+            onPressed: _abrir,
             child: const Text('Reintentar'),
           ),
         ];

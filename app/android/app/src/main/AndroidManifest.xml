@@ -24,12 +24,12 @@
          empezar la grabación. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 
-    <!-- Auto-actualización in-app (ota_update). REQUEST_INSTALL_PACKAGES
-         deja a la app pedirle al sistema que abra el instalador
-         de APKs (Android 8+ requiere además que el usuario habilite
-         "Instalar apps desconocidas" para Matix la primera vez —
-         lo manejamos en el flujo de descarga). -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- Auto-actualización: el APK se baja y se instala desde el
+         navegador del sistema (url_launcher), no in-app. Por eso
+         Matix NO declara REQUEST_INSTALL_PACKAGES — la fuente de
+         instalación es el navegador, que pide su propio permiso de
+         "instalar apps desconocidas". El instalador in-app de
+         ota_update crasheaba de forma nativa en el Huawei sin GPS. -->
 
     <!-- Capa 7 Paso 1: apunte desde foto. CAMERA habilita
          `ImageSource.camera` de image_picker. Para galería NO
