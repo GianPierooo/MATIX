@@ -51,6 +51,20 @@ class ApuntesRepository {
     return Apunte.fromJson(j);
   }
 
+  /// Reflote (Capa 7): archiva el apunte para que deje de reflotarse en
+  /// Inicio. No lo borra — sigue en la lista de Apuntes.
+  Future<Apunte> archivar(String id) async {
+    final j = await _client.post('/api/v1/apuntes/$id/archivar', const {});
+    return Apunte.fromJson(j);
+  }
+
+  /// Reflote (Capa 7): marca el apunte como tocado para que salga del
+  /// reflote (vuelve a dormirse y reflotará tras ~14 días sin actividad).
+  Future<Apunte> retomar(String id) async {
+    final j = await _client.post('/api/v1/apuntes/$id/retomar', const {});
+    return Apunte.fromJson(j);
+  }
+
   /// Soft delete (Capa 2 Paso 5): manda a la papelera.
   Future<void> borrar(String id) => _client.delete('/api/v1/apuntes/$id');
 

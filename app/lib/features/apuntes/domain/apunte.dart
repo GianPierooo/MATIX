@@ -12,6 +12,7 @@ class Apunte {
     this.etiquetas = const [],
     required this.creadoEn,
     required this.actualizadoEn,
+    this.archivadoEn,
   });
 
   final String id;
@@ -24,6 +25,10 @@ class Apunte {
   final DateTime creadoEn;
   final DateTime actualizadoEn;
 
+  /// Reflote (Capa 7): si está seteado, el apunte fue archivado y ya no
+  /// vuelve a reflotarse en Inicio. No implica borrado.
+  final DateTime? archivadoEn;
+
   factory Apunte.fromJson(Map<String, dynamic> j) => Apunte(
         id: j['id'] as String,
         titulo: j['titulo'] as String,
@@ -35,5 +40,8 @@ class Apunte {
             (j['etiquetas'] as List?)?.cast<String>() ?? const <String>[],
         creadoEn: DateTime.parse(j['creado_en'] as String),
         actualizadoEn: DateTime.parse(j['actualizado_en'] as String),
+        archivadoEn: j['archivado_en'] != null
+            ? DateTime.parse(j['archivado_en'] as String)
+            : null,
       );
 }

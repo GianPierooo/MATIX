@@ -134,6 +134,34 @@ async def restaurar(
     return row
 
 
+@router.post("/{apunte_id}/archivar", response_model=ApunteRead)
+async def archivar(apunte_id: UUID, db: Postgrest = Depends(get_db)) -> dict:
+    """Reflote (Capa 7): archiva el apunte para que NO vuelva a
+    reflotarse en Inicio. No lo borra ni lo manda a la papelera — sigue
+    en la lista de Apuntes; solo deja de ser candidato a reflote."""
+    row = await db.update(TABLE, str(apunte_id), {"archivado_en": _ahora_iso()})
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Apunte no encontrado"
+        )
+    return row
+
+
+@router.post("/{apunte_id}/retomar", response_model=ApunteRead)
+async def retomar(apunte_id: UUID, db: Postgrest = Depends(get_db)) -> dict:
+    """Reflote (Capa 7): marca el apunte como tocado para que salga del
+    reflote (vuelve a dormirse y reflotará otra vez tras ~14 días sin
+    actividad). 'Tocar' = cualquier update: el trigger
+    `tocar_actualizado` pone `actualizado_en = now()`, que es la marca de
+    'última vez tocada' que usa el reflote."""
+    row = await db.update(TABLE, str(apunte_id), {"actualizado_en": _ahora_iso()})
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Apunte no encontrado"
+        )
+    return row
+
+
 @router.delete(
     "/{apunte_id}/permanente", status_code=status.HTTP_204_NO_CONTENT
 )

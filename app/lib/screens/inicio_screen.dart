@@ -73,6 +73,33 @@ List<Apunte> apuntesRecientes(List<Apunte> todos, {int max = 5}) {
   return out.take(max).toList();
 }
 
+/// Ideas dormidas candidatas a reflote (Capa 7): apuntes GENERALES (sin
+/// proyecto, curso ni cuaderno — las ideas sueltas), no archivados, que
+/// llevan [dias]+ días sin tocarse. Las más viejas primero; como mucho
+/// [max] para no abrumar. `ahora` se pasa para que sea determinística.
+///
+/// "Sin tocarse" se mide con `actualizadoEn`, que el cerebro bumpea en
+/// cada update: por eso "retomar" (que toca el apunte) lo saca de esta
+/// lista, y "archivar" (que setea `archivadoEn`) lo saca para siempre.
+List<Apunte> ideasParaReflotar(
+  List<Apunte> todos,
+  DateTime ahora, {
+  int dias = 14,
+  int max = 3,
+}) {
+  final umbral = ahora.subtract(Duration(days: dias));
+  final out = todos
+      .where((a) =>
+          a.archivadoEn == null &&
+          a.proyectoId == null &&
+          a.cursoId == null &&
+          a.cuadernoId == null &&
+          !a.actualizadoEn.isAfter(umbral))
+      .toList()
+    ..sort((a, b) => a.actualizadoEn.compareTo(b.actualizadoEn));
+  return out.take(max).toList();
+}
+
 /// Un ítem próximo de Universidad: o una clase recurrente, o una
 /// entrega/examen. `cuando` es el instante en que ocurre.
 @immutable
@@ -228,6 +255,7 @@ class InicioScreen extends ConsumerWidget {
             _CapturaApunte(),
             _BloqueHoy(),
             _BloqueApuntesRecientes(),
+            _BloqueReflote(),
             _BloqueProyectosActivos(),
             _BloqueUniversidad(),
           ],
@@ -936,6 +964,232 @@ class _ApunteMini extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ─── Bloque: Reflote de ideas dormidas ──────────────────────────
+//
+// "Ideas que dejaste pausadas": apuntes generales que llevan rato sin
+// tocarse. Sección silenciosa — solo aparece si hay candidatas. Cada
+// idea se puede retomar (con opción de pasarla a tarea) o archivar (deja
+// de reflotarse para siempre).
+class _BloqueReflote extends ConsumerWidget {
+  const _BloqueReflote();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ideas = ref.watch(apuntesListProvider).maybeWhen(
+          data: (lista) => ideasParaReflotar(lista, DateTime.now()),
+          orElse: () => const <Apunte>[],
+        );
+    if (ideas.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionLabel(label: 'Ideas que dejaste pausadas'),
+        for (final a in ideas) _IdeaReflote(idea: a),
+      ],
+    );
+  }
+}
+
+class _IdeaReflote extends ConsumerWidget {
+  const _IdeaReflote({required this.idea});
+  final Apunte idea;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dias = DateTime.now().difference(idea.actualizadoEn).inDays;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 3, 16, 3),
+      child: Material(
+        color: MatixColors.card,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 8, 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => EditorApunteScreen(apunteId: idea.id),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      idea.titulo,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: MatixColors.text,
+                      ),
+                    ),
+                    if (idea.contenido.trim().isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        idea.contenido,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: MatixColors.muted,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 4),
+                    Text(
+                      dias <= 0
+                          ? 'Pausada hace poco'
+                          : 'Pausada hace $dias ${dias == 1 ? "día" : "días"}',
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        color: MatixColors.muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: () => _retomar(context, ref),
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: const Text('Retomar'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: MatixColors.accent,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(0, 36),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: () => _archivar(context, ref),
+                    icon: const Icon(Icons.inventory_2_outlined, size: 16),
+                    label: const Text('Archivar'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: MatixColors.muted,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(0, 36),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// "Retomar": abre una hoja con la opción de convertir en tarea o solo
+  /// quitarla del reflote. Ambas marcan el apunte como tocado.
+  Future<void> _retomar(BuildContext context, WidgetRef ref) async {
+    final opcion = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: MatixColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            ListTile(
+              leading: const Icon(Icons.checklist_outlined,
+                  color: MatixColors.accent),
+              title: const Text('Convertir en tarea'),
+              subtitle: const Text('La paso a tu lista de tareas'),
+              onTap: () => Navigator.pop(ctx, 'tarea'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.check_circle_outline,
+                  color: MatixColors.accent),
+              title: const Text('Solo quitarla del reflote'),
+              subtitle: const Text('La marco como vista; vuelve si la dejas '
+                  'dormir otra vez'),
+              onTap: () => Navigator.pop(ctx, 'tocar'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (opcion == null || !context.mounted) return;
+    if (opcion == 'tarea') {
+      await _convertirEnTarea(context, ref);
+    } else {
+      await _soloRetomar(context, ref);
+    }
+  }
+
+  Future<void> _soloRetomar(BuildContext context, WidgetRef ref) async {
+    try {
+      await ref.read(apuntesRepoProvider).retomar(idea.id);
+      ref.invalidate(apuntesListProvider);
+      if (context.mounted) {
+        _mostrar(context, 'Listo, la quitamos del reflote por ahora.');
+      }
+    } catch (e) {
+      if (context.mounted) _mostrar(context, 'No pude retomarla: $e');
+    }
+  }
+
+  Future<void> _convertirEnTarea(BuildContext context, WidgetRef ref) async {
+    try {
+      final tarea =
+          await ref.read(tareasRepositoryProvider).crear(titulo: idea.titulo);
+      // Convertir cuenta como retomar: la idea sale del reflote.
+      await ref.read(apuntesRepoProvider).retomar(idea.id);
+      ref.invalidate(tareasProvider);
+      ref.invalidate(apuntesListProvider);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: const Text('Tarea creada.'),
+            action: SnackBarAction(
+              label: 'Editar',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => NuevaTareaScreen(tareaId: tarea.id),
+                ),
+              ),
+            ),
+          ),
+        );
+    } catch (e) {
+      if (context.mounted) _mostrar(context, 'No pude crear la tarea: $e');
+    }
+  }
+
+  Future<void> _archivar(BuildContext context, WidgetRef ref) async {
+    try {
+      await ref.read(apuntesRepoProvider).archivar(idea.id);
+      ref.invalidate(apuntesListProvider);
+      if (context.mounted) {
+        _mostrar(context, 'Archivada. No volverá a aparecer.');
+      }
+    } catch (e) {
+      if (context.mounted) _mostrar(context, 'No pude archivar: $e');
+    }
+  }
+
+  void _mostrar(BuildContext context, String mensaje) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(mensaje)));
   }
 }
 

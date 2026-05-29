@@ -37,5 +37,7 @@ class ApunteRead(BaseModel):
     etiquetas: list[str]
     adjuntos: list[dict[str, Any]]
     eliminado_en: datetime | None = None
+    # Reflote (Capa 7): si está seteado, el apunte ya no se reflota.
+    archivado_en: datetime | None = None
     creado_en: datetime
     actualizado_en: datetime

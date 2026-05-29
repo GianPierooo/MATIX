@@ -249,4 +249,93 @@ void main() {
       expect(out.cuando, DateTime(2026, 6, 4, 8, 0));
     });
   });
+
+  group('ideasParaReflotar', () {
+    final ahora = DateTime(2026, 5, 28, 12, 0);
+
+    test('incluye apuntes generales viejos (14+ días) y excluye recientes',
+        () {
+      final vieja = _idea('vieja', DateTime(2026, 5, 1)); // 27 días
+      final justo = _idea('justo', DateTime(2026, 5, 14)); // 14 días exactos
+      final reciente = _idea('reciente', DateTime(2026, 5, 20)); // 8 días
+
+      final out = ideasParaReflotar([reciente, vieja, justo], ahora);
+
+      // Solo las que pasan el umbral de 14 días; más viejas primero.
+      expect(out.map((a) => a.id), ['vieja', 'justo']);
+    });
+
+    test('excluye archivadas (no vuelven nunca)', () {
+      final archivada = _idea('arch', DateTime(2026, 5, 1),
+          archivadoEn: DateTime(2026, 5, 10));
+      final viva = _idea('viva', DateTime(2026, 5, 1));
+
+      final out = ideasParaReflotar([archivada, viva], ahora);
+
+      expect(out.map((a) => a.id), ['viva']);
+    });
+
+    test('retomar (tocar) la saca: una actualizada hoy no es candidata', () {
+      final dormida = _idea('dormida', DateTime(2026, 5, 1));
+      // Tras "retomar", el cerebro bumpea actualizadoEn a ahora.
+      final retomada = _idea('retomada', ahora);
+
+      final out = ideasParaReflotar([dormida, retomada], ahora);
+
+      expect(out.map((a) => a.id), ['dormida']);
+    });
+
+    test('solo apuntes generales: excluye los de proyecto/curso/cuaderno', () {
+      final general = _idea('general', DateTime(2026, 5, 1));
+      final deProyecto =
+          _idea('proj', DateTime(2026, 5, 1), proyectoId: 'p1');
+      final deCurso = _idea('curso', DateTime(2026, 5, 1), cursoId: 'c1');
+      final deCuaderno =
+          _idea('cuad', DateTime(2026, 5, 1), cuadernoId: 'q1');
+
+      final out = ideasParaReflotar(
+        [general, deProyecto, deCurso, deCuaderno],
+        ahora,
+      );
+
+      expect(out.map((a) => a.id), ['general']);
+    });
+
+    test('corta en max y muestra las más viejas primero', () {
+      final ideas = [
+        _idea('a', DateTime(2026, 5, 1)),
+        _idea('b', DateTime(2026, 4, 1)),
+        _idea('c', DateTime(2026, 3, 1)),
+        _idea('d', DateTime(2026, 2, 1)),
+      ];
+
+      final out = ideasParaReflotar(ideas, ahora, max: 2);
+
+      // Las dos más viejas: 'd' (feb) y 'c' (mar).
+      expect(out.map((a) => a.id), ['d', 'c']);
+    });
+
+    test('lista vacía → vacío', () {
+      expect(ideasParaReflotar([], ahora), isEmpty);
+    });
+  });
 }
+
+Apunte _idea(
+  String id,
+  DateTime actualizado, {
+  DateTime? archivadoEn,
+  String? proyectoId,
+  String? cursoId,
+  String? cuadernoId,
+}) =>
+    Apunte(
+      id: id,
+      titulo: id,
+      creadoEn: actualizado,
+      actualizadoEn: actualizado,
+      archivadoEn: archivadoEn,
+      proyectoId: proyectoId,
+      cursoId: cursoId,
+      cuadernoId: cuadernoId,
+    );
