@@ -41,6 +41,39 @@ class VozRequest(BaseModel):
     voz: str = "onyx"
 
 
+class CapturaApunteRequest(BaseModel):
+    """Cuerpo del endpoint `/matix/capturar-apunte`.
+
+    `texto` es la idea ya transcrita (Whisper) que se dictó desde la
+    barra "Anota algo…" de Inicio. NO es conversación: el cerebro la
+    guarda como apunte clasificado en una sola pasada.
+    """
+
+    texto: str = Field(min_length=1)
+
+
+class CapturaApunteResponse(BaseModel):
+    """Respuesta del endpoint `/matix/capturar-apunte`.
+
+    Devuelve el apunte recién creado con su clasificación resuelta
+    (Paso C): `proyecto_nombre` / `curso_nombre` cuando encajó en uno
+    existente, o `general=True` si quedó suelto. La app arma con esto
+    el snackbar de una línea ("Guardado en proyecto Tesis" / "Guardado
+    como apunte general") y usa `id` para abrir/corregir el apunte.
+
+    `tablas_cambiadas` siempre incluye `"apuntes"` para que la app
+    invalide la lista de "Apuntes recientes" al instante.
+    """
+
+    id: str
+    titulo: str
+    etiquetas: list[str] = Field(default_factory=list)
+    proyecto_nombre: str | None = None
+    curso_nombre: str | None = None
+    general: bool = True
+    tablas_cambiadas: list[str] = Field(default_factory=lambda: ["apuntes"])
+
+
 class ChatResponse(BaseModel):
     """Respuesta del endpoint `/matix/chat`.
 

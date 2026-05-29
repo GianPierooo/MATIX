@@ -1,5 +1,7 @@
 // ignore_for_file: use_null_aware_elements
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -16,7 +18,11 @@ import '../features/evaluaciones/domain/evaluacion.dart';
 import '../features/eventos/domain/evento.dart';
 import '../features/eventos/presentation/calendario_screen.dart';
 import '../features/eventos/providers/eventos_providers.dart';
+import '../features/matix/data/captura_apunte_repository.dart';
+import '../features/matix/data/grabacion_voz_service.dart';
+import '../features/matix/data/matix_transcribir_repository.dart';
 import '../features/matix/presentation/manos_libres_screen.dart';
+import '../features/matix/providers/captura_apunte_providers.dart';
 import '../features/proyectos/domain/proyecto.dart';
 import '../features/proyectos/presentation/detalle_proyecto_screen.dart';
 import '../features/proyectos/providers/proyectos_providers.dart';
@@ -348,10 +354,18 @@ class _BotonRitual extends StatelessWidget {
 
 // ─── Captura de apunte: "Anota algo…" ───────────────────────────
 //
-// Captura sin fricción (principio #1 del hub): el texto que escribes
-// se vuelve el título de un apunte general (sin curso). El modelo ya
-// admite apuntes sin curso, así que no hace falta migrar nada. Solo
-// texto en este paso; la voz llega aparte.
+// Captura sin fricción (principio #1 del hub). Dos puertas de entrada:
+//
+// 1. Texto: lo que escribes se vuelve el título de un apunte general
+//    (sin curso). El modelo admite apuntes sin curso, no migra nada.
+//
+// 2. Voz (Paso C2): tocas el micrófono, dictas, y el cerebro
+//    transcribe (Whisper) y guarda el apunte YA CLASIFICADO contra
+//    los proyectos/cursos existentes — sin abrir el chat de Matix.
+//    El snackbar confirma dónde quedó y deja abrirlo para corregir.
+//    Es captura rápida: nada de loop de voz ni TTS.
+enum _EstadoCaptura { idle, grabando, procesando }
+
 class _CapturaApunte extends ConsumerStatefulWidget {
   const _CapturaApunte();
 
@@ -361,92 +375,247 @@ class _CapturaApunte extends ConsumerStatefulWidget {
 
 class _CapturaApunteState extends ConsumerState<_CapturaApunte> {
   final _ctrl = TextEditingController();
-  bool _guardando = false;
+  _EstadoCaptura _estado = _EstadoCaptura.idle;
+
+  // Servicios propios (no compartimos el `vozNotifierProvider` del
+  // chat: es autoDispose y ambas pantallas viven a la vez en el
+  // IndexedStack, así que reusarlo cruzaría estados).
+  late final GrabacionVozService _voz;
+  late final MatixTranscribirRepository _transcribir;
+
+  @override
+  void initState() {
+    super.initState();
+    _voz = GrabacionVozService();
+    _transcribir = MatixTranscribirRepository();
+  }
 
   @override
   void dispose() {
     _ctrl.dispose();
+    _voz.dispose();
+    _transcribir.close();
     super.dispose();
   }
 
-  Future<void> _guardar() async {
+  // ── Texto: apunte general, vía rápida sin clasificar ──
+  Future<void> _guardarTexto() async {
     final texto = _ctrl.text.trim();
-    if (texto.isEmpty || _guardando) return;
-    setState(() => _guardando = true);
+    if (texto.isEmpty || _estado != _EstadoCaptura.idle) return;
+    setState(() => _estado = _EstadoCaptura.procesando);
     try {
       await ref.read(apuntesRepoProvider).crear(titulo: texto);
       _ctrl.clear();
       ref.invalidate(apuntesListProvider);
       if (!mounted) return;
       FocusScope.of(context).unfocus();
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('Apunte guardado')));
+      _mostrar('Apunte guardado');
     } on MatixApiException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No pude guardar: ${e.message}')),
-      );
+      _mostrar('No pude guardar: ${e.message}');
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No pude guardar: $e')),
-      );
+      _mostrar('No pude guardar: $e');
     } finally {
-      if (mounted) setState(() => _guardando = false);
+      _aIdle();
     }
+  }
+
+  // ── Voz: graba → transcribe → captura clasificada ──
+  Future<void> _toggleMic() async {
+    if (_estado == _EstadoCaptura.procesando) return;
+    if (_estado == _EstadoCaptura.grabando) {
+      await _detenerYCapturar();
+    } else {
+      await _empezarAGrabar();
+    }
+  }
+
+  Future<void> _empezarAGrabar() async {
+    try {
+      await _voz.iniciar();
+      if (!mounted) return;
+      FocusScope.of(context).unfocus();
+      setState(() => _estado = _EstadoCaptura.grabando);
+    } on PermisoMicDenegado catch (e) {
+      _mostrar(e.permanente
+          ? 'Necesito el micrófono. Concédelo desde los ajustes del '
+              'sistema y vuelve a intentar.'
+          : 'Necesito permiso del micrófono para grabar.');
+    } catch (e) {
+      _mostrar('No pude empezar a grabar: $e');
+    }
+  }
+
+  Future<void> _detenerYCapturar() async {
+    setState(() => _estado = _EstadoCaptura.procesando);
+
+    GrabacionResultado? grab;
+    try {
+      grab = await _voz.detener();
+    } catch (_) {
+      grab = null;
+    }
+    if (grab == null) {
+      _aIdle();
+      _mostrar('No quedó nada grabado. Intenta de nuevo.');
+      return;
+    }
+    // Tap accidental: audio muy corto. No gastamos Whisper en silencio.
+    if (grab.duracion < const Duration(milliseconds: 400)) {
+      await _borrar(grab.archivo);
+      _aIdle();
+      _mostrar('Muy corto. Mantén el micrófono un instante más.');
+      return;
+    }
+
+    // 1) Transcribir.
+    final String texto;
+    try {
+      texto = await _transcribir.transcribir(grab.archivo);
+    } on MatixApiException catch (e) {
+      _aIdle();
+      _mostrar('No pude transcribir: ${e.message}');
+      return;
+    } catch (e) {
+      _aIdle();
+      _mostrar('No pude transcribir: $e');
+      return;
+    } finally {
+      await _borrar(grab.archivo);
+    }
+
+    // Whisper devuelve vacío si no escuchó voz real → NO creamos un
+    // apunte huérfano; mostramos el problema.
+    if (texto.trim().isEmpty) {
+      _aIdle();
+      _mostrar('No te escuché bien. Intenta de nuevo.');
+      return;
+    }
+
+    // 2) Capturar clasificado (mismo flujo crear_apunte del Paso C).
+    try {
+      final apunte =
+          await ref.read(capturaApunteRepoProvider).capturar(texto.trim());
+      ref.invalidate(apuntesListProvider);
+      _aIdle();
+      _mostrarGuardado(apunte);
+    } on MatixApiException catch (e) {
+      _aIdle();
+      _mostrar('No pude guardar el apunte: ${e.message}');
+    } catch (e) {
+      _aIdle();
+      _mostrar('No pude guardar el apunte: $e');
+    }
+  }
+
+  Future<void> _borrar(File archivo) async {
+    try {
+      await archivo.delete();
+    } catch (_) {
+      // No crítico: los temporales se limpian solos.
+    }
+  }
+
+  void _aIdle() {
+    if (mounted) setState(() => _estado = _EstadoCaptura.idle);
+  }
+
+  void _mostrar(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  void _mostrarGuardado(ApunteCapturado a) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(a.destinoLabel),
+          action: SnackBarAction(
+            label: 'Abrir',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => EditorApunteScreen(apunteId: a.id),
+              ),
+            ),
+          ),
+        ),
+      );
   }
 
   @override
   Widget build(BuildContext context) {
+    final grabando = _estado == _EstadoCaptura.grabando;
+    final procesando = _estado == _EstadoCaptura.procesando;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
       child: Container(
         decoration: BoxDecoration(
           color: MatixColors.card,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: MatixColors.hairline),
+          border: Border.all(
+            color: grabando ? MatixColors.red : MatixColors.hairline,
+          ),
         ),
         padding: const EdgeInsets.fromLTRB(14, 0, 4, 0),
         child: Row(
           children: [
-            const Icon(Icons.edit_note, color: MatixColors.muted, size: 22),
+            Icon(
+              grabando ? Icons.fiber_manual_record : Icons.edit_note,
+              color: grabando ? MatixColors.red : MatixColors.muted,
+              size: grabando ? 14 : 22,
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: TextField(
                 controller: _ctrl,
-                enabled: !_guardando,
+                enabled: _estado == _EstadoCaptura.idle,
                 textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _guardar(),
+                onSubmitted: (_) => _guardarTexto(),
                 style: const TextStyle(color: MatixColors.text, fontSize: 14),
-                decoration: const InputDecoration(
-                  hintText: 'Anota algo…',
-                  hintStyle:
-                      TextStyle(color: MatixColors.muted, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: grabando
+                      ? 'Escuchando… toca para terminar'
+                      : 'Anota algo…',
+                  hintStyle: TextStyle(
+                    color: grabando ? MatixColors.red : MatixColors.muted,
+                    fontSize: 14,
+                  ),
                   border: InputBorder.none,
                   isCollapsed: true,
-                  contentPadding: EdgeInsets.symmetric(vertical: 15),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 15),
                 ),
               ),
             ),
-            _guardando
-                ? const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        color: MatixColors.accent,
-                      ),
-                    ),
-                  )
-                : IconButton(
-                    tooltip: 'Guardar apunte',
-                    icon: const Icon(Icons.arrow_upward_rounded),
+            if (procesando)
+              const Padding(
+                padding: EdgeInsets.all(12),
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
                     color: MatixColors.accent,
-                    onPressed: _guardar,
                   ),
+                ),
+              )
+            else ...[
+              IconButton(
+                tooltip: grabando ? 'Terminar y guardar' : 'Dictar apunte',
+                icon: Icon(grabando ? Icons.stop_rounded : Icons.mic_none),
+                color: grabando ? MatixColors.red : MatixColors.muted,
+                onPressed: _toggleMic,
+              ),
+              if (!grabando)
+                IconButton(
+                  tooltip: 'Guardar apunte',
+                  icon: const Icon(Icons.arrow_upward_rounded),
+                  color: MatixColors.accent,
+                  onPressed: _guardarTexto,
+                ),
+            ],
           ],
         ),
       ),

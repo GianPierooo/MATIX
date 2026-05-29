@@ -18,9 +18,11 @@ from fastapi.responses import Response
 
 from ..db import Postgrest, get_db
 from ..matix import llm
-from ..matix.chat import conversar
+from ..matix.chat import capturar_apunte, conversar
 from ..matix.uso import medidor
 from ..schemas.matix import (
+    CapturaApunteRequest,
+    CapturaApunteResponse,
     ChatRequest,
     ChatResponse,
     TranscripcionResponse,
@@ -60,6 +62,52 @@ async def chat(body: ChatRequest, db: Postgrest = Depends(get_db)) -> dict:
             detail=f"Error llamando al modelo: {e}",
         ) from e
     return resultado
+
+
+@router.post("/capturar-apunte", response_model=CapturaApunteResponse)
+async def capturar(
+    body: CapturaApunteRequest, db: Postgrest = Depends(get_db)
+) -> dict:
+    """Captura rápida desde Inicio: guarda `texto` como apunte ya
+    clasificado (Paso C2). NO abre conversación ni narra — fuerza
+    `crear_apunte` una sola vez y devuelve dónde quedó archivado.
+
+    La app llama a esto tras transcribir la voz con Whisper. Con la
+    respuesta arma el snackbar de una línea y permite abrir/corregir
+    el apunte recién creado.
+    """
+    try:
+        resultado = await capturar_apunte(db, texto=body.texto)
+    except RuntimeError as e:
+        # OPENAI_API_KEY ausente, o el modelo no generó la captura.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error llamando al modelo: {e}",
+        ) from e
+
+    if not resultado.get("ok"):
+        # La tool falló (validación, BD…). No dejamos un apunte
+        # huérfano: devolvemos el error para que la app lo muestre.
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=resultado.get("mensaje", "No se pudo guardar el apunte."),
+        )
+
+    datos = resultado["datos"]
+    return {
+        "id": str(datos["id"]),
+        "titulo": datos["titulo"],
+        "etiquetas": datos.get("etiquetas", []),
+        "proyecto_nombre": datos.get("proyecto_nombre"),
+        "curso_nombre": datos.get("curso_nombre"),
+        "general": datos.get("general", True),
+        "tablas_cambiadas": ["apuntes"],
+    }
 
 
 @router.post("/transcribir", response_model=TranscripcionResponse)

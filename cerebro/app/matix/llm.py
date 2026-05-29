@@ -62,10 +62,17 @@ async def responder_con_tools(
     *,
     model: str = "gpt-4o-mini",
     temperature: float = 0.6,
+    tool_choice: Any = "auto",
 ) -> dict[str, Any]:
     """Llama al modelo dándole acceso a `tools` (lista de schemas
     OpenAI). Devuelve un dict neutro que `chat.py` puede consumir sin
     importar `openai`:
+
+    `tool_choice` por defecto `"auto"` (el modelo decide). Para forzar
+    una herramienta concreta se pasa
+    `{"type": "function", "function": {"name": "crear_apunte"}}` —
+    así la captura rápida de Inicio garantiza que el modelo guarde el
+    apunte en vez de ponerse a conversar.
 
         {
             "tipo": "texto",
@@ -95,7 +102,7 @@ async def responder_con_tools(
         messages=messages,  # type: ignore[arg-type]
         temperature=temperature,
         tools=tools,  # type: ignore[arg-type]
-        tool_choice="auto",
+        tool_choice=tool_choice,  # type: ignore[arg-type]
     )
     medidor.registrar_chat(resp.usage)
     msg = resp.choices[0].message

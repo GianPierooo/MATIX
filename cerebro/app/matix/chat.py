@@ -124,3 +124,64 @@ async def conversar(
         "tools_usadas": tools_usadas,
         "tablas_cambiadas": tablas_cambiadas,
     }
+
+
+# Forzamos esta tool concreta: la captura rápida de Inicio no es una
+# conversación, su único trabajo es guardar el apunte clasificado.
+_TOOL_CHOICE_CREAR_APUNTE = {
+    "type": "function",
+    "function": {"name": "crear_apunte"},
+}
+
+
+async def capturar_apunte(db: Postgrest, *, texto: str) -> dict[str, Any]:
+    """Captura rápida de un apunte dictado desde Inicio.
+
+    Reusa las piezas del Paso C: el system prompt fijo (que ya lleva
+    las reglas de clasificación), el contexto vivo (proyectos/cursos
+    EXISTENTES con sus ids) y la tool `crear_apunte` (que indexa para
+    el RAG y reporta dónde quedó archivado). No es conversación: una
+    sola llamada forzada a `crear_apunte`, sin narración ni loop.
+
+    Devuelve el resultado crudo de la tool:
+    `{"ok": True, "datos": {...}}` o `{"ok": False, ...}`. El router
+    lo traduce a la respuesta HTTP.
+    """
+    fijo = system_prompt_fijo()
+    contexto = await contexto_vivo(db)
+
+    instruccion = (
+        "El usuario acaba de dictar una idea para anotar (captura "
+        "rápida desde la pantalla Inicio — NO es una conversación). "
+        "Tu única tarea es guardarla llamando `crear_apunte` una vez: "
+        "un título corto, el contenido con la idea, y la clasificación "
+        "a un proyecto activo o curso que YA exista en el contexto "
+        "vivo solo si encaja claro; ante la duda, déjalo general. No "
+        "inventes proyectos ni cursos.\n\nIdea dictada:\n" + texto
+    )
+
+    mensajes: list[dict] = [
+        {"role": "system", "content": fijo},
+        {"role": "system", "content": contexto},
+        {"role": "user", "content": instruccion},
+    ]
+
+    salida = await llm.responder_con_tools(
+        mensajes,
+        TOOL_DEFINITIONS,
+        tool_choice=_TOOL_CHOICE_CREAR_APUNTE,
+    )
+
+    if salida["tipo"] != "tool_calls":
+        # Forzamos la tool, así que esto no debería pasar; si el modelo
+        # devolvió texto igual, lo tratamos como fallo claro.
+        raise RuntimeError("El modelo no generó la captura del apunte.")
+
+    call = next(
+        (c for c in salida["tool_calls"] if c["nombre"] == "crear_apunte"),
+        None,
+    )
+    if call is None:
+        raise RuntimeError("El modelo no llamó a crear_apunte.")
+
+    return await ejecutar_tool(db, "crear_apunte", call["args"])
