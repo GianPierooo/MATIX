@@ -6,18 +6,19 @@ import '../../../theme/matix_spacing.dart';
 import '../../../theme/matix_typography.dart';
 import '../../apuntes/application/guardar_apunte_controller.dart';
 import '../../apuntes/presentation/editor_apunte_screen.dart';
+import '../application/extraccion_eventos_controller.dart';
 import '../application/extraccion_tareas_controller.dart';
 import 'captura_camara_screen.dart';
+import 'revision_eventos_screen.dart';
 import 'revision_tareas_screen.dart';
 
 /// A qué se convierte el texto OCR tras corregirlo.
 ///
-/// El OCR on-device (ML Kit, Capa 7-A) es el mismo para los dos
-/// caminos; solo cambia el destino: las tareas pasan por la hoja de
-/// revisión (7-B) y los apuntes se guardan clasificados reusando el
-/// flujo del Paso C (`/matix/capturar-apunte`). En ambos, la imagen
-/// se quedó en el teléfono: solo viaja el texto.
-enum DestinoOcr { tareas, apunte }
+/// El OCR on-device (ML Kit, Capa 7-A) es el mismo para todos los
+/// caminos; solo cambia el destino: las tareas y los eventos pasan por
+/// su hoja de revisión, y los apuntes se guardan clasificados (Paso C).
+/// En todos, la imagen se quedó en el teléfono: solo viaja el texto.
+enum DestinoOcr { tareas, apunte, eventos }
 
 /// Muestra el texto que extrajo el OCR en un campo **editable**, para
 /// que el usuario corrija lo que ML Kit haya errado (Capa 7-A) y, con
@@ -53,7 +54,7 @@ class ResultadoOcrScreen extends ConsumerStatefulWidget {
 class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
   late final TextEditingController _texto;
 
-  bool get _esApunte => widget.destino == DestinoOcr.apunte;
+  DestinoOcr get _destino => widget.destino;
 
   @override
   void initState() {
@@ -63,10 +64,13 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
     // anterior, lo reseteamos para que el `ref.listen` no dispare una
     // navegación fantasma al montar.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_esApunte) {
-        ref.read(guardarApunteControllerProvider.notifier).reiniciar();
-      } else {
-        ref.read(extraccionTareasControllerProvider.notifier).reiniciar();
+      switch (_destino) {
+        case DestinoOcr.apunte:
+          ref.read(guardarApunteControllerProvider.notifier).reiniciar();
+        case DestinoOcr.eventos:
+          ref.read(extraccionEventosControllerProvider.notifier).reiniciar();
+        case DestinoOcr.tareas:
+          ref.read(extraccionTareasControllerProvider.notifier).reiniciar();
       }
     });
   }
@@ -84,24 +88,40 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
   }
 
   void _accion() {
-    if (_esApunte) {
-      ref.read(guardarApunteControllerProvider.notifier).guardar(_texto.text);
-    } else {
-      ref
-          .read(extraccionTareasControllerProvider.notifier)
-          .interpretar(_texto.text);
+    switch (_destino) {
+      case DestinoOcr.apunte:
+        ref.read(guardarApunteControllerProvider.notifier).guardar(_texto.text);
+      case DestinoOcr.eventos:
+        ref
+            .read(extraccionEventosControllerProvider.notifier)
+            .interpretar(_texto.text);
+      case DestinoOcr.tareas:
+        ref
+            .read(extraccionTareasControllerProvider.notifier)
+            .interpretar(_texto.text);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    _esApunte ? _escucharApunte() : _escucharTareas();
+    switch (_destino) {
+      case DestinoOcr.apunte:
+        _escucharApunte();
+      case DestinoOcr.eventos:
+        _escucharEventos();
+      case DestinoOcr.tareas:
+        _escucharTareas();
+    }
 
-    final ocupado = _esApunte
-        ? ref.watch(guardarApunteControllerProvider).fase ==
-            FaseGuardarApunte.guardando
-        : ref.watch(extraccionTareasControllerProvider).fase ==
-            FaseExtraccion.interpretando;
+    final ocupado = switch (_destino) {
+      DestinoOcr.apunte => ref.watch(guardarApunteControllerProvider).fase ==
+          FaseGuardarApunte.guardando,
+      DestinoOcr.eventos =>
+        ref.watch(extraccionEventosControllerProvider).fase ==
+            FaseEventos.interpretando,
+      DestinoOcr.tareas => ref.watch(extraccionTareasControllerProvider).fase ==
+          FaseExtraccion.interpretando,
+    };
 
     return Scaffold(
       appBar: AppBar(
@@ -156,12 +176,7 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
                         child: CircularProgressIndicator(
                             strokeWidth: 2.2, color: Colors.white),
                       )
-                    : Icon(
-                        _esApunte
-                            ? Icons.note_add_outlined
-                            : Icons.checklist_outlined,
-                        size: 18,
-                      ),
+                    : Icon(_iconoBoton(), size: 18),
                 label: Text(_etiquetaBoton(ocupado)),
                 style: FilledButton.styleFrom(
                   backgroundColor: MatixColors.accent,
@@ -187,10 +202,20 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
     );
   }
 
-  String _etiquetaBoton(bool ocupado) {
-    if (_esApunte) return ocupado ? 'Guardando…' : 'Guardar como apunte';
-    return ocupado ? 'Convirtiendo…' : 'Convertir en tareas';
-  }
+  IconData _iconoBoton() => switch (_destino) {
+        DestinoOcr.apunte => Icons.note_add_outlined,
+        DestinoOcr.eventos => Icons.event_outlined,
+        DestinoOcr.tareas => Icons.checklist_outlined,
+      };
+
+  String _etiquetaBoton(bool ocupado) => switch (_destino) {
+        DestinoOcr.apunte =>
+          ocupado ? 'Guardando…' : 'Guardar como apunte',
+        DestinoOcr.eventos =>
+          ocupado ? 'Leyendo…' : 'Convertir en eventos',
+        DestinoOcr.tareas =>
+          ocupado ? 'Convirtiendo…' : 'Convertir en tareas',
+      };
 
   // ─── Camino tareas (Capa 7-B) ─────────────────────────────────────
   void _escucharTareas() {
@@ -207,6 +232,26 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(next.error ?? 'No pude convertir el texto.'),
+            action: SnackBarAction(label: 'Reintentar', onPressed: _accion),
+          ),
+        );
+      }
+    });
+  }
+
+  // ─── Camino eventos (sílabo → eventos) ────────────────────────────
+  void _escucharEventos() {
+    ref.listen<EstadoEventos>(extraccionEventosControllerProvider,
+        (prev, next) {
+      if (prev?.fase == next.fase) return;
+      if (next.fase == FaseEventos.revision) {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const RevisionEventosScreen()),
+        );
+      } else if (next.fase == FaseEventos.error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(next.error ?? 'No pude leer el sílabo.'),
             action: SnackBarAction(label: 'Reintentar', onPressed: _accion),
           ),
         );

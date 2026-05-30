@@ -174,6 +174,37 @@ class DesglosarTareaResponse(BaseModel):
     pasos: list[PasoPropuesto] = Field(default_factory=list)
 
 
+class ExtraerEventosRequest(BaseModel):
+    """Cuerpo de `/matix/extraer-eventos` (Cámara · sílabo).
+
+    `texto` es el OCR de un sílabo u horario (ya corregido por el
+    usuario). SOLO viaja el texto: la imagen se quedó en el teléfono.
+    El cerebro propone eventos; no crea nada.
+    """
+
+    texto: str = Field(min_length=1)
+
+
+class EventoPropuesto(BaseModel):
+    """Un evento candidato. `tipo` distingue clases recurrentes de
+    fechas únicas. Para 'recurrente', `dias_semana` (ISO 1=lun…7=dom) y
+    horas. Para 'unico', `fecha`. Las horas son HH:MM o null."""
+
+    tipo: Literal["recurrente", "unico"]
+    titulo: str
+    dias_semana: list[int] = Field(default_factory=list)
+    hora_inicio: str | None = None
+    hora_fin: str | None = None
+    fecha: date | None = None
+
+
+class ExtraerEventosResponse(BaseModel):
+    """Respuesta de `/matix/extraer-eventos`. `eventos` vacía cuando el
+    texto no tiene nada datable — resultado válido, no error."""
+
+    eventos: list[EventoPropuesto] = Field(default_factory=list)
+
+
 class ChatResponse(BaseModel):
     """Respuesta del endpoint `/matix/chat`.
 

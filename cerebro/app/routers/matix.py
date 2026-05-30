@@ -31,6 +31,8 @@ from ..schemas.matix import (
     DesglosarTareaResponse,
     EstimarDuracionesRequest,
     EstimarDuracionesResponse,
+    ExtraerEventosRequest,
+    ExtraerEventosResponse,
     ExtraerTareasRequest,
     ExtraerTareasResponse,
     TranscripcionResponse,
@@ -159,6 +161,37 @@ async def extraer_tareas(body: ExtraerTareasRequest) -> dict:
         ) from e
 
     return {"tareas": tareas}
+
+
+@router.post("/extraer-eventos", response_model=ExtraerEventosResponse)
+async def extraer_eventos(body: ExtraerEventosRequest) -> dict:
+    """Convierte el texto de un sílabo u horario (OCR ya corregido) en
+    eventos propuestos: clases recurrentes y fechas únicas (Cámara ·
+    sílabo). SOLO viaja el texto. No persiste nada — la app los revisa y
+    crea. Si no hay nada datable, `eventos` viene vacía."""
+    texto = body.texto.strip()
+    if not texto:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El texto está vacío.",
+        )
+    hoy = (
+        datetime.now(timezone.utc)
+        .astimezone(timezone(timedelta(hours=-5)))
+        .strftime("%Y-%m-%d")
+    )
+    try:
+        eventos = await llm.extraer_eventos_json(texto, hoy=hoy)
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error llamando al modelo: {e}",
+        ) from e
+    return {"eventos": eventos}
 
 
 @router.post("/estimar-duraciones", response_model=EstimarDuracionesResponse)

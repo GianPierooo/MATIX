@@ -15,6 +15,7 @@ prompt al inicio y mantenerlo estable.
 from __future__ import annotations
 
 import json
+from datetime import date
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -379,6 +380,142 @@ async def desglosar_tarea_json(
     if not pasos:
         es_atomica = True
     return {"es_atomica": es_atomica, "pasos": pasos}
+
+
+_DIAS_VALIDOS = set(range(1, 8))
+
+
+def _hhmm_valido(v: Any) -> str | None:
+    """Devuelve 'HH:MM' si `v` parece una hora 24h válida, si no None."""
+    if not isinstance(v, str):
+        return None
+    s = v.strip()
+    parts = s.split(":")
+    if len(parts) != 2:
+        return None
+    try:
+        h, m = int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+    if 0 <= h <= 23 and 0 <= m <= 59:
+        return f"{h:02d}:{m:02d}"
+    return None
+
+
+async def extraer_eventos_json(
+    texto: str,
+    *,
+    hoy: str,
+    model: str = "gpt-4o-mini",
+) -> list[dict]:
+    """Extrae eventos del texto de un SÍLABO u HORARIO (Cámara · sílabo).
+
+    Distingue dos tipos:
+    - `recurrente`: clases que se repiten cada semana → `dias_semana`
+      (enteros ISO 1=lun…7=dom) + `hora_inicio`/`hora_fin` (HH:MM).
+    - `unico`: una fecha puntual (parcial, entrega) → `fecha`
+      (YYYY-MM-DD), `hora_inicio`/`hora_fin` opcionales.
+
+    Solo devuelve lo DATABLE: un recurrente necesita días; un único
+    necesita fecha. Si no hay nada datable, lista vacía — no inventa.
+    `hoy` (YYYY-MM-DD, Lima) ancla las fechas relativas; lo pasa el
+    router para que la función sea pura.
+    """
+    client = _get_client()
+    system = (
+        "Eres un extractor de eventos académicos. Recibes el texto (a "
+        "veces de un OCR) de un SÍLABO u HORARIO de curso, ya corregido "
+        f"por el usuario. Hoy es {hoy} (zona horaria de Lima, Perú).\n\n"
+        "Distingue DOS tipos de evento:\n"
+        "- 'recurrente': clases o sesiones que se repiten cada semana "
+        "(p.ej. 'lunes y miércoles 10:00–12:00'). Da `dias_semana` como "
+        "lista de enteros ISO (1=lunes … 7=domingo) y `hora_inicio` en "
+        "HH:MM (24h); `hora_fin` si aparece.\n"
+        "- 'unico': una fecha puntual (un parcial, una entrega: 'parcial "
+        "el 15 de abril'). Da `fecha` en YYYY-MM-DD resolviendo fechas "
+        "relativas con la fecha de hoy; `hora_inicio`/`hora_fin` si "
+        "aparecen.\n\n"
+        "Reglas estrictas:\n"
+        "- Solo lo DATABLE: un recurrente DEBE tener días; un único DEBE "
+        "tener fecha. Si el texto no tiene nada datable, devuelve la "
+        "lista vacía. NO inventes fechas, horas ni eventos.\n"
+        "- Título corto y claro (nombre del curso o de la evaluación).\n\n"
+        "Responde SOLO un objeto JSON con esta forma exacta:\n"
+        '{"eventos": [{"tipo": "recurrente", "titulo": "...", '
+        '"dias_semana": [1, 3], "hora_inicio": "10:00", '
+        '"hora_fin": "12:00"}, {"tipo": "unico", "titulo": "...", '
+        '"fecha": "YYYY-MM-DD", "hora_inicio": null, "hora_fin": null}]}'
+    )
+    resp = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": texto},
+        ],
+        temperature=0.2,
+        response_format={"type": "json_object"},
+    )
+    medidor.registrar_chat(resp.usage)
+
+    contenido = resp.choices[0].message.content or "{}"
+    try:
+        datos = json.loads(contenido)
+    except json.JSONDecodeError:
+        return []
+    crudos = datos.get("eventos") if isinstance(datos, dict) else None
+    if not isinstance(crudos, list):
+        return []
+
+    eventos: list[dict] = []
+    for item in crudos:
+        if not isinstance(item, dict):
+            continue
+        tipo = item.get("tipo")
+        titulo = item.get("titulo")
+        if tipo not in ("recurrente", "unico"):
+            continue
+        if not isinstance(titulo, str) or not titulo.strip():
+            continue
+        hora_inicio = _hhmm_valido(item.get("hora_inicio"))
+        hora_fin = _hhmm_valido(item.get("hora_fin"))
+        if tipo == "recurrente":
+            dias = item.get("dias_semana")
+            if not isinstance(dias, list):
+                continue
+            dias = sorted(
+                {d for d in dias if isinstance(d, int) and d in _DIAS_VALIDOS}
+            )
+            if not dias:
+                continue  # recurrente sin días no es datable
+            eventos.append(
+                {
+                    "tipo": "recurrente",
+                    "titulo": titulo.strip(),
+                    "dias_semana": dias,
+                    "hora_inicio": hora_inicio,
+                    "hora_fin": hora_fin,
+                    "fecha": None,
+                }
+            )
+        else:
+            fecha = item.get("fecha")
+            if not isinstance(fecha, str) or len(fecha.strip()) < 10:
+                continue
+            try:
+                date.fromisoformat(fecha.strip()[:10])
+            except ValueError:
+                continue
+            eventos.append(
+                {
+                    "tipo": "unico",
+                    "titulo": titulo.strip(),
+                    "dias_semana": [],
+                    "hora_inicio": hora_inicio,
+                    "hora_fin": hora_fin,
+                    "fecha": fecha.strip()[:10],
+                }
+            )
+    return eventos
 
 
 async def repaso_semanal_json(
