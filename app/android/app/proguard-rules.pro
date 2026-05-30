@@ -20,19 +20,34 @@
 -dontwarn com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 
 # flutter_local_notifications · persiste las notificaciones PROGRAMADAS en
-# SharedPreferences con Gson, usando un TypeToken genérico
-# (ArrayList<ScheduledNotification>). R8 borra el atributo `Signature` y
-# obfusca las clases del plugin → Gson pierde el parámetro de tipo y
-# revienta con "java.lang.RuntimeException: Missing type parameter." en
-# cualquier llamada que lea esa caché (cancel / zonedSchedule /
-# pendingNotificationRequests). Pasaba al APLICAR el plan del día (cada
-# bloque cancela/reprograma su recordatorio). Estas reglas lo evitan:
-# mantienen las clases del plugin y los genéricos que Gson necesita.
+# SharedPreferences con Gson. Lee la caché con
+#   new TypeToken<ArrayList<NotificationDetails>>() {}.getType()
+# (FlutterLocalNotificationsPlugin.java:508). Si R8 borra la firma
+# genérica de ese TypeToken, Gson revienta con
+# "java.lang.RuntimeException: Missing type parameter." en TODA llamada
+# que lea esa caché (loadScheduledNotifications): cancel / zonedSchedule /
+# pendingNotificationRequests, y también el receiver nativo que dispara la
+# alarma — por eso además NO llegaba ninguna notificación.
+#
+# IMPORTANTE: este proyecto compila con R8 en *full mode* (AGP 8, default).
+# En full mode un `-keep class ... TypeToken` simple NO basta para
+# preservar la firma genérica. Hay que usar EXACTAMENTE las reglas
+# oficiales de Gson (con `allowobfuscation,allowshrinking`), que son las
+# que mantienen `Signature` sobre los TypeToken anónimos. Este era el bug:
+# las reglas anteriores no cubrían full mode.
 -keepattributes Signature
 -keepattributes *Annotation*
--keep class com.dexterous.** { *; }
--keep class com.google.gson.reflect.TypeToken { *; }
--keep class * extends com.google.gson.reflect.TypeToken
+-dontwarn sun.misc.**
+
+# Reglas oficiales de Gson (META-INF/proguard/gson.pro) — válidas en R8
+# full mode.
+-keep,allowobfuscation,allowshrinking class com.google.gson.reflect.TypeToken
+-keep,allowobfuscation,allowshrinking class * extends com.google.gson.reflect.TypeToken
 -keepclassmembers,allowobfuscation class * {
   @com.google.gson.annotations.SerializedName <fields>;
 }
+
+# El plugin y su modelo serializado por Gson (NotificationDetails y el
+# TypeToken anónimo de la línea 508 viven acá): mantenemos clase y campos.
+-keep class com.dexterous.** { *; }
+-keep class com.dexterous.flutterlocalnotifications.models.** { <fields>; }

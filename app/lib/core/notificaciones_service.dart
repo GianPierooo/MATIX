@@ -47,25 +47,46 @@ class NotificacionesService {
 
   Future<void> inicializar() async {
     if (_inicializado) return;
+    try {
+      // 1) Timezone — sin esto, `zonedSchedule` no puede programar.
+      tz_data.initializeTimeZones();
+      // La zona horaria por defecto del usuario es Lima (Documento
+      // Maestro). En Capa 4+ se podría leer la del perfil.
+      tz.setLocalLocation(tz.getLocation('America/Lima'));
 
-    // 1) Timezone — sin esto, `zonedSchedule` no puede programar.
-    tz_data.initializeTimeZones();
-    // La zona horaria por defecto del usuario es Lima (Documento
-    // Maestro). En Capa 4+ se podría leer la del perfil.
-    tz.setLocalLocation(tz.getLocation('America/Lima'));
+      // 2) Plugin — con handler de tap para deep-links (briefing matutino,
+      // futuras notificaciones contextuales).
+      const initAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
+      const settings = InitializationSettings(android: initAndroid);
+      await _plugin.initialize(
+        settings,
+        onDidReceiveNotificationResponse: (resp) {
+          _onTapHandler?.call(resp.payload);
+        },
+      );
 
-    // 2) Plugin — con handler de tap para deep-links (briefing matutino,
-    // futuras notificaciones contextuales).
-    const initAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const settings = InitializationSettings(android: initAndroid);
-    await _plugin.initialize(
-      settings,
-      onDidReceiveNotificationResponse: (resp) {
-        _onTapHandler?.call(resp.payload);
-      },
-    );
-
-    _inicializado = true;
+      // 3) Crear el canal explícitamente. Aunque el plugin lo crea al
+      // primer `zonedSchedule`, hacerlo acá garantiza que exista (si no,
+      // en algunos OEM la notificación no se muestra) y es idempotente.
+      final android = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      await android?.createNotificationChannel(
+        const AndroidNotificationChannel(
+          _canalId,
+          _canalNombre,
+          description: _canalDescripcion,
+          importance: Importance.high,
+        ),
+      );
+    } catch (e) {
+      // Nunca dejamos que un fallo de init (timezone, canal, o una caché
+      // de notificaciones ilegible del plugin) tumbe al caller. La app
+      // sigue; solo puede que no lleguen avisos hasta el próximo arranque.
+      debugPrint('Notif: inicializar falló ($e). Sigo en modo degradado.');
+    } finally {
+      // Marcamos inicializado pase lo que pase: no reintentamos en loop.
+      _inicializado = true;
+    }
   }
 
   /// Pide los permisos relevantes para Android 13+. Devuelve `true` si
@@ -158,7 +179,7 @@ class NotificacionesService {
         if (!exacto) rethrow;
         await agendar(AndroidScheduleMode.inexactAllowWhileIdle);
       }
-    } on PlatformException catch (e) {
+    } catch (e) {
       // Falla de plataforma no recuperable del plugin (p.ej. la caché de
       // notificaciones quedó ilegible: "Missing type parameter"). NO la
       // propagamos: la tarea/bloque que nos llamó debe crearse igual —
@@ -221,7 +242,7 @@ class NotificacionesService {
         matchDateTimeComponents: DateTimeComponents.time,
         payload: payload,
       );
-    } on PlatformException catch (e) {
+    } catch (e) {
       // Igual que `programar`: no abortamos al caller por una falla del
       // plugin (caché ilegible, OEM raro). El ajuste que la disparó
       // (p.ej. el cierre diario) queda guardado igual.
@@ -240,7 +261,7 @@ class NotificacionesService {
     if (!_inicializado) await inicializar();
     try {
       await _plugin.cancel(id);
-    } on PlatformException catch (e) {
+    } catch (e) {
       debugPrint('Notif: no pude cancelar $id ($e). Sigo.');
     }
   }
@@ -251,7 +272,7 @@ class NotificacionesService {
     if (!_inicializado) await inicializar();
     try {
       await _plugin.cancelAll();
-    } on PlatformException catch (e) {
+    } catch (e) {
       debugPrint('Notif: no pude cancelar todo ($e). Sigo.');
     }
   }
@@ -265,7 +286,7 @@ class NotificacionesService {
     try {
       final pend = await _plugin.pendingNotificationRequests();
       return pend.map((p) => p.id).toList(growable: false);
-    } on PlatformException catch (e) {
+    } catch (e) {
       debugPrint('Notif: no pude listar pendientes ($e).');
       return const [];
     }

@@ -1,5 +1,7 @@
 // ignore_for_file: use_null_aware_elements
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../../../api/matix_client.dart';
 import '../../../core/notificaciones_service.dart';
 import '../domain/evento.dart';
@@ -122,39 +124,59 @@ class EventosRepository {
   /// Cancela y reagenda los recordatorios de un evento. Primero limpia la
   /// ventana completa (cubre reglas previas que cambiaron — p. ej. una serie
   /// acortada o vuelta única) y luego agenda los de la ventana actual.
+  ///
+  /// Todo va dentro de `_notifSeguro`: las notificaciones son un efecto
+  /// secundario; si el plugin falla (caché ilegible, OEM raro) NO debe
+  /// tumbar el CRUD de eventos — el evento ya quedó guardado en el cerebro.
   Future<void> _sincronizarRecordatorios(Evento e) async {
-    await _cancelarRecordatorios(e.id);
-    final recordatorios = recordatoriosVentana(
-      eventoId: e.id,
-      regla: e.regla,
-      inicioSerie: e.iniciaEn.toLocal(),
-      offsetMin: e.recordatorioOffsetMin,
-      ahora: DateTime.now(),
-    );
-    if (recordatorios.isEmpty) return;
-    await _notif.pedirPermisos();
-    final cuerpo = e.ubicacion?.isNotEmpty == true
-        ? e.ubicacion!
-        : 'Tu evento está por empezar.';
-    for (final r in recordatorios) {
-      await _notif.programar(
-        id: r.notifId,
-        titulo: e.titulo,
-        cuerpo: cuerpo,
-        cuando: r.cuando,
-        exacto: true,
-        payload: 'evento:${e.id}',
+    await _notifSeguro(() async {
+      await _cancelarRecordatorios(e.id);
+      final recordatorios = recordatoriosVentana(
+        eventoId: e.id,
+        regla: e.regla,
+        inicioSerie: e.iniciaEn.toLocal(),
+        offsetMin: e.recordatorioOffsetMin,
+        ahora: DateTime.now(),
       );
-    }
+      if (recordatorios.isEmpty) return;
+      await _notif.pedirPermisos();
+      final cuerpo = e.ubicacion?.isNotEmpty == true
+          ? e.ubicacion!
+          : 'Tu evento está por empezar.';
+      for (final r in recordatorios) {
+        await _notif.programar(
+          id: r.notifId,
+          titulo: e.titulo,
+          cuerpo: cuerpo,
+          cuando: r.cuando,
+          exacto: true,
+          payload: 'evento:${e.id}',
+        );
+      }
+    });
   }
 
   /// Cancela todos los ids que el evento pudo agendar en la ventana (id base
   /// del evento + un id por día). Determinista por `(id, día)`, así que
   /// limpia ocurrencias de cualquier regla previa sin guardar estado.
   Future<void> _cancelarRecordatorios(String id) async {
-    final ids = idsCancelacionVentana(eventoId: id, ahora: DateTime.now());
-    for (final nid in ids) {
-      await _notif.cancelar(nid);
+    await _notifSeguro(() async {
+      final ids = idsCancelacionVentana(eventoId: id, ahora: DateTime.now());
+      for (final nid in ids) {
+        await _notif.cancelar(nid);
+      }
+    });
+  }
+
+  /// Corre un efecto de notificaciones sin dejar que su error escale. El
+  /// servicio ya traga los fallos del plugin; esto es la red por si algo
+  /// inesperado revienta — crear/editar/borrar un evento debe completarse
+  /// igual. (Anidar `_notifSeguro` es inofensivo: idempotente.)
+  Future<void> _notifSeguro(Future<void> Function() op) async {
+    try {
+      await op();
+    } catch (e) {
+      debugPrint('Notif (eventos): efecto ignorado por error: $e');
     }
   }
 }

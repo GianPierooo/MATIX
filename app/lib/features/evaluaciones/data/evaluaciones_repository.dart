@@ -1,5 +1,7 @@
 // ignore_for_file: use_null_aware_elements
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../../../api/matix_client.dart';
 import '../../../core/notif_id.dart';
 import '../../../core/notificaciones_service.dart';
@@ -56,21 +58,33 @@ class EvaluacionesRepository {
 
   Future<void> borrar(String id) async {
     await _client.delete('/api/v1/evaluaciones/$id');
-    await _notif.cancelar(notifIdDe(id));
+    await _notifSeguro(() => _notif.cancelar(notifIdDe(id)));
   }
 
+  /// Las notificaciones son efecto secundario: si el plugin falla, la
+  /// evaluación se guarda igual.
   Future<void> _reprogramarRecordatorio(Evaluacion ev) async {
-    final nid = notifIdDe(ev.id);
-    await _notif.cancelar(nid);
-    final r = ev.recordarEn;
-    if (r == null) return;
-    if (ev.tieneNota) return; // ya pasó y se calificó
-    await _notif.pedirPermisos();
-    await _notif.programar(
-      id: nid,
-      titulo: ev.titulo,
-      cuerpo: '${ev.tipo.label} próxima',
-      cuando: r.toLocal(),
-    );
+    await _notifSeguro(() async {
+      final nid = notifIdDe(ev.id);
+      await _notif.cancelar(nid);
+      final r = ev.recordarEn;
+      if (r == null) return;
+      if (ev.tieneNota) return; // ya pasó y se calificó
+      await _notif.pedirPermisos();
+      await _notif.programar(
+        id: nid,
+        titulo: ev.titulo,
+        cuerpo: '${ev.tipo.label} próxima',
+        cuando: r.toLocal(),
+      );
+    });
+  }
+
+  Future<void> _notifSeguro(Future<void> Function() op) async {
+    try {
+      await op();
+    } catch (e) {
+      debugPrint('Notif (evaluaciones): efecto ignorado por error: $e');
+    }
   }
 }
