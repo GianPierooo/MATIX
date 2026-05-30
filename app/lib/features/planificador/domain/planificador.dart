@@ -1,6 +1,7 @@
 import '../../eventos/domain/evento.dart';
 import '../../nudges/domain/nudges.dart' show HorasSilencio;
 import '../../tareas/domain/tarea.dart';
+import 'disponibilidad.dart';
 
 /// Planificador del día (Capa 7 · Urgencia-3).
 ///
@@ -105,19 +106,29 @@ List<Intervalo> _restar(Intervalo l, Intervalo o) {
   return res;
 }
 
-/// Huecos libres de hoy: la ventana de trabajo menos el pasado, los
-/// eventos y las horas de silencio. Ordenados por inicio.
-List<Intervalo> huecosLibres({
-  required DateTime ahora,
-  required VentanaTrabajo ventana,
+bool _mismoDia(DateTime a, DateTime b) =>
+    a.year == b.year && a.month == b.month && a.day == b.day;
+
+/// Huecos disponibles de un [dia] (Fase 3): la ventana de disponibilidad
+/// de ese día menos los eventos que lo ocupan y las horas de silencio.
+/// Si [ventana] es null, ese día no hay disponibilidad → sin huecos.
+/// Si se pasa [ahora] y [dia] es hoy, no devuelve huecos en el pasado.
+/// Ordenados por inicio. Es la base que consumirá Fase 4.
+List<Intervalo> huecosDisponibles({
+  required DateTime dia,
+  required VentanaTrabajo? ventana,
   required HorasSilencio silencio,
   required List<Evento> eventos,
+  DateTime? ahora,
 }) {
-  final hoy = DateTime(ahora.year, ahora.month, ahora.day);
-  var inicioDia = DateTime(hoy.year, hoy.month, hoy.day, ventana.inicio);
-  final finDia = DateTime(hoy.year, hoy.month, hoy.day, ventana.fin);
-  // No planificar en el pasado.
-  if (inicioDia.isBefore(ahora)) inicioDia = ahora;
+  if (ventana == null) return const [];
+  final d = DateTime(dia.year, dia.month, dia.day);
+  var inicioDia = DateTime(d.year, d.month, d.day, ventana.inicio);
+  final finDia = DateTime(d.year, d.month, d.day, ventana.fin);
+  // Si `dia` es hoy y la ventana ya arrancó, no planificar el pasado.
+  if (ahora != null && _mismoDia(ahora, d) && inicioDia.isBefore(ahora)) {
+    inicioDia = ahora;
+  }
   if (!inicioDia.isBefore(finDia)) return const [];
 
   final ocupado = <Intervalo>[];
@@ -131,7 +142,7 @@ List<Intervalo> huecosLibres({
         (e.terminaEn ?? e.iniciaEn.add(const Duration(hours: 1))).toLocal();
     ocupado.add(Intervalo(ini, fin));
   }
-  ocupado.addAll(_tramosSilencio(hoy, silencio));
+  ocupado.addAll(_tramosSilencio(d, silencio));
 
   var libres = <Intervalo>[Intervalo(inicioDia, finDia)];
   for (final o in ocupado) {
@@ -156,7 +167,7 @@ ResultadoPlan planificarDia({
   required List<Tarea> tareas,
   required List<Evento> eventos,
   required DateTime ahora,
-  required VentanaTrabajo ventana,
+  required DisponibilidadSemanal disponibilidad,
   required HorasSilencio silencio,
   required Map<String, int> duracionesMin,
   int duracionDefaultMin = 45,
@@ -176,11 +187,12 @@ ResultadoPlan planificarDia({
     });
 
   final disp = [
-    ...huecosLibres(
-      ahora: ahora,
-      ventana: ventana,
+    ...huecosDisponibles(
+      dia: ahora,
+      ventana: disponibilidad.ventanaDe(ahora),
       silencio: silencio,
       eventos: eventos,
+      ahora: ahora,
     )
   ];
   final bloques = <BloquePropuesto>[];

@@ -20,6 +20,7 @@ import '../features/nudges/domain/nudges.dart';
 import '../features/nudges/providers/nudges_providers.dart';
 import '../features/papelera/presentation/papelera_screen.dart';
 import '../features/planificador/application/plan_dia_controller.dart';
+import '../features/planificador/domain/disponibilidad.dart';
 import '../features/repaso/presentation/repaso_semanal_screen.dart';
 import '../theme/matix_colors.dart';
 
@@ -218,8 +219,8 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
           const _Seccion('Nudges de urgencia'),
           const _NudgesTile(),
 
-          const _Seccion('Planificar el día'),
-          const _VentanaTrabajoTile(),
+          const _Seccion('Disponibilidad'),
+          const _DisponibilidadTile(),
 
           const _Seccion('Rituales'),
           Container(
@@ -943,35 +944,19 @@ class _DiagnosticoFila extends StatelessWidget {
   }
 }
 
-/// Ventana de trabajo para "Planifica mi día" (Urgencia-3): entre qué
-/// horas Matix encaja los bloques. Respeta además las horas de silencio.
-class _VentanaTrabajoTile extends ConsumerWidget {
-  const _VentanaTrabajoTile();
+/// Disponibilidad POR DÍA (Fase 3): cuándo estás libre cada día de la
+/// semana. Matix solo planifica en estos huecos, respetando tus eventos
+/// y las horas de silencio. Lo consume el planificador del día hoy y el
+/// de sesiones (Fase 4) mañana.
+class _DisponibilidadTile extends ConsumerWidget {
+  const _DisponibilidadTile();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final v = ref.watch(ventanaTrabajoProvider);
-    final ctrl = ref.read(ventanaTrabajoProvider.notifier);
-    String hh(int h) => '${h.toString().padLeft(2, '0')}:00';
-
-    Future<void> elegir(bool inicio) async {
-      final actual = inicio ? v.inicio : v.fin;
-      final picked = await showTimePicker(
-        context: context,
-        initialTime: TimeOfDay(hour: actual, minute: 0),
-        helpText: inicio ? 'Empezar el día a las' : 'Terminar el día a las',
-      );
-      if (picked == null) return;
-      if (inicio) {
-        await ctrl.cambiar(picked.hour, v.fin);
-      } else {
-        await ctrl.cambiar(v.inicio, picked.hour);
-      }
-    }
-
+    final disp = ref.watch(disponibilidadProvider);
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
       decoration: BoxDecoration(
         color: MatixColors.card,
         borderRadius: BorderRadius.circular(12),
@@ -980,7 +965,7 @@ class _VentanaTrabajoTile extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Ventana de trabajo',
+            'Disponibilidad por día',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -989,27 +974,98 @@ class _VentanaTrabajoTile extends ConsumerWidget {
           ),
           const SizedBox(height: 2),
           const Text(
-            'Entre estas horas Matix encaja tus tareas al planificar.',
+            'Cuándo estás libre. Matix solo planifica en estos huecos: '
+            'respeta tus eventos y las horas de silencio.',
             style: TextStyle(fontSize: 12, color: MatixColors.muted),
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => elegir(true),
-                  child: Text('Desde ${hh(v.inicio)}'),
-                ),
+          const SizedBox(height: 6),
+          for (var d = 1; d <= 7; d++)
+            _FilaDisponibilidad(weekday: d, dia: disp.diaDe(d)),
+        ],
+      ),
+    );
+  }
+}
+
+class _FilaDisponibilidad extends ConsumerWidget {
+  const _FilaDisponibilidad({required this.weekday, required this.dia});
+  final int weekday;
+  final DisponibilidadDia dia;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ctrl = ref.read(disponibilidadProvider.notifier);
+    String hh(int h) => '${h.toString().padLeft(2, '0')}:00';
+
+    Future<void> elegir(bool inicio) async {
+      final picked = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay(hour: inicio ? dia.inicio : dia.fin, minute: 0),
+        helpText: inicio ? 'Libre desde' : 'Libre hasta',
+      );
+      if (picked == null) return;
+      await ctrl.cambiarDia(
+        weekday,
+        inicio ? dia.copyWith(inicio: picked.hour) : dia.copyWith(fin: picked.hour),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 34,
+            child: Text(
+              nombresDiaCorto[weekday - 1],
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: MatixColors.text,
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => elegir(false),
-                  child: Text('Hasta ${hh(v.fin)}'),
-                ),
-              ),
-            ],
+            ),
           ),
+          Switch(
+            value: dia.activo,
+            onChanged: (v) => ctrl.cambiarDia(weekday, dia.copyWith(activo: v)),
+          ),
+          const SizedBox(width: 4),
+          if (dia.activo)
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => elegir(true),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      child: Text(hh(dia.inicio)),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                    child: Text('–', style: TextStyle(color: MatixColors.muted)),
+                  ),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => elegir(false),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      child: Text(hh(dia.fin)),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            const Expanded(
+              child: Text('No disponible',
+                  style: TextStyle(fontSize: 12.5, color: MatixColors.muted)),
+            ),
         ],
       ),
     );

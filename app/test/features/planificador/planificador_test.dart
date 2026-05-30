@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:matix/features/eventos/domain/evento.dart';
 import 'package:matix/features/nudges/domain/nudges.dart' show HorasSilencio;
+import 'package:matix/features/planificador/domain/disponibilidad.dart';
 import 'package:matix/features/planificador/domain/planificador.dart';
 import 'package:matix/features/tareas/domain/tarea.dart';
 
@@ -42,11 +43,13 @@ void main() {
   // Mañana, ventana por defecto 9–21, lejos del silencio nocturno.
   final ahora = DateTime(2026, 6, 10, 9, 0);
   const ventana = VentanaTrabajo(); // 9–21
+  final disponibilidad = DisponibilidadSemanal.uniforme(); // 9–21 todos
   const silencio = HorasSilencio(); // 22–8
 
-  group('huecosLibres', () {
+  group('huecosDisponibles', () {
     test('resta los eventos del día de la ventana', () {
-      final libres = huecosLibres(
+      final libres = huecosDisponibles(
+        dia: ahora,
         ahora: ahora,
         ventana: ventana,
         silencio: silencio,
@@ -70,7 +73,7 @@ void main() {
         tareas: [_t('a'), _t('b')],
         eventos: [_evento(evIni, evFin)],
         ahora: ahora,
-        ventana: ventana,
+        disponibilidad: disponibilidad,
         silencio: silencio,
         duracionesMin: {'a': 60, 'b': 60},
       );
@@ -85,7 +88,7 @@ void main() {
         tareas: [for (var i = 0; i < 5; i++) _t('t$i')],
         eventos: const [],
         ahora: ahora,
-        ventana: ventana,
+        disponibilidad: disponibilidad,
         silencio: silencio,
         duracionesMin: const {},
         duracionDefaultMin: 60,
@@ -104,7 +107,7 @@ void main() {
         tareas: [for (var i = 0; i < 20; i++) _t('t$i')],
         eventos: const [],
         ahora: ahora,
-        ventana: const VentanaTrabajo(inicio: 9, fin: 23),
+        disponibilidad: DisponibilidadSemanal.uniforme(inicio: 9, fin: 23),
         silencio: silencio,
         duracionesMin: const {},
         duracionDefaultMin: 60,
@@ -122,7 +125,7 @@ void main() {
         tareas: [_t('a'), _t('b')],
         eventos: const [],
         ahora: DateTime(2026, 6, 10, 9, 0),
-        ventana: const VentanaTrabajo(inicio: 9, fin: 10),
+        disponibilidad: DisponibilidadSemanal.uniforme(inicio: 9, fin: 10),
         silencio: silencio,
         duracionesMin: {'a': 60, 'b': 60},
       );
@@ -137,7 +140,7 @@ void main() {
         tareas: [_t('a', venceEn: DateTime(2026, 6, 10, 9, 30))],
         eventos: const [],
         ahora: DateTime(2026, 6, 10, 9, 0),
-        ventana: ventana,
+        disponibilidad: disponibilidad,
         silencio: silencio,
         duracionesMin: {'a': 60},
       );
@@ -153,7 +156,7 @@ void main() {
         ],
         eventos: const [],
         ahora: ahora,
-        ventana: ventana,
+        disponibilidad: disponibilidad,
         silencio: silencio,
         duracionesMin: {'lejos': 60, 'cerca': 60},
       );
@@ -165,7 +168,7 @@ void main() {
         tareas: const [],
         eventos: const [],
         ahora: ahora,
-        ventana: ventana,
+        disponibilidad: disponibilidad,
         silencio: silencio,
         duracionesMin: const {},
       );

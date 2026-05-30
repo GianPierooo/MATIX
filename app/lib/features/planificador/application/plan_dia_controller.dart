@@ -10,6 +10,7 @@ import '../../tareas/domain/tarea.dart';
 import '../../tareas/providers/tareas_providers.dart';
 import '../data/duraciones_repository.dart';
 import '../data/planificador_prefs.dart';
+import '../domain/disponibilidad.dart';
 import '../domain/planificador.dart';
 
 final planificadorPrefsProvider = Provider((_) => PlanificadorPrefs());
@@ -63,7 +64,7 @@ class EstadoPlan {
 class PlanDiaController extends Notifier<EstadoPlan> {
   List<Tarea> _tareas = const [];
   List<Evento> _eventos = const [];
-  VentanaTrabajo _ventana = const VentanaTrabajo();
+  DisponibilidadSemanal _disponibilidad = DisponibilidadSemanal.porDefecto;
   HorasSilencio _silencio = const HorasSilencio();
   final Map<String, int> _duraciones = {};
   final Set<String> _excluidas = {};
@@ -86,7 +87,8 @@ class PlanDiaController extends Notifier<EstadoPlan> {
       await ref.read(eventosProvider.future);
       _eventos =
           ref.read(eventosDelDiaProvider(dia)).valueOrNull ?? const <Evento>[];
-      _ventana = await ref.read(planificadorPrefsProvider).leerVentana();
+      _disponibilidad =
+          await ref.read(planificadorPrefsProvider).leerDisponibilidad();
       _silencio = (await ref.read(nudgesPrefsProvider).leerConfig()).silencio;
       _excluidas.clear();
       _duraciones.clear();
@@ -113,7 +115,7 @@ class PlanDiaController extends Notifier<EstadoPlan> {
       tareas: tareas,
       eventos: _eventos,
       ahora: _ahora,
-      ventana: _ventana,
+      disponibilidad: _disponibilidad,
       silencio: _silencio,
       duracionesMin: _duraciones,
     );
@@ -172,10 +174,13 @@ class PlanDiaController extends Notifier<EstadoPlan> {
 final planDiaControllerProvider =
     NotifierProvider<PlanDiaController, EstadoPlan>(PlanDiaController.new);
 
-/// Estado de la ventana de trabajo (ajuste global, Urgencia-3). Lee de
-/// prefs al arrancar y persiste cada cambio.
-class VentanaController extends StateNotifier<VentanaTrabajo> {
-  VentanaController(this._prefs) : super(const VentanaTrabajo()) {
+/// Estado de la disponibilidad por día (Fase 3). Lee de prefs al
+/// arrancar y persiste cada cambio. Lo consume el ajuste de
+/// disponibilidad y, hoy, el planificador del día (Urgencia-3); mañana,
+/// el planificador de sesiones (Fase 4).
+class DisponibilidadController extends StateNotifier<DisponibilidadSemanal> {
+  DisponibilidadController(this._prefs)
+      : super(DisponibilidadSemanal.porDefecto) {
     _ready = _cargar();
   }
   final PlanificadorPrefs _prefs;
@@ -183,17 +188,19 @@ class VentanaController extends StateNotifier<VentanaTrabajo> {
   Future<void> get ready => _ready;
 
   Future<void> _cargar() async {
-    state = await _prefs.leerVentana();
+    state = await _prefs.leerDisponibilidad();
   }
 
-  Future<void> cambiar(int inicio, int fin) async {
+  /// Cambia la disponibilidad de un día ISO (1=lun … 7=dom) y persiste.
+  Future<void> cambiarDia(int weekday, DisponibilidadDia dia) async {
     await _ready;
-    state = VentanaTrabajo(inicio: inicio, fin: fin);
-    await _prefs.guardarVentana(state);
+    state = state.conDia(weekday, dia);
+    await _prefs.guardarDisponibilidad(state);
   }
 }
 
-final ventanaTrabajoProvider =
-    StateNotifierProvider<VentanaController, VentanaTrabajo>((ref) {
-  return VentanaController(ref.watch(planificadorPrefsProvider));
+final disponibilidadProvider =
+    StateNotifierProvider<DisponibilidadController, DisponibilidadSemanal>(
+        (ref) {
+  return DisponibilidadController(ref.watch(planificadorPrefsProvider));
 });
