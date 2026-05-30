@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../theme/matix_colors.dart';
+import '../../../theme/matix_spacing.dart';
 import '../../captura_camara/presentation/captura_camara_screen.dart';
 import '../../cursos/domain/curso.dart';
 import '../../cursos/domain/sesion_clase.dart';
@@ -466,7 +467,9 @@ class _ListaDelDia extends StatelessWidget {
       );
     }
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      // Calendario vive en el HomeShell (extendBody): sin este guard
+      // inferior los últimos eventos quedan tapados por la barra de nav.
+      padding: EdgeInsets.fromLTRB(0, 8, 0, MatixLayout.bottomNavGuard(context)),
       itemCount: filas.length,
       itemBuilder: (context, i) {
         final f = filas[i];
@@ -720,7 +723,10 @@ class _VistaSemana extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      key: const Key('cal-semana-lista'),
+      // Vista semana en el HomeShell (extendBody): el guard inferior deja
+      // bajar hasta el domingo sin que lo tape la barra de navegación.
+      padding: EdgeInsets.fromLTRB(0, 8, 0, MatixLayout.bottomNavGuard(context)),
       children: [
         for (final d in dias)
           _DiaSemanaSeccion(
