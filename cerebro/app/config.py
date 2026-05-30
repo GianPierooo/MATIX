@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_redirect_uri: str = ""
 
+    # Push (FCM · Push Capa 1). El JSON COMPLETO del service account de
+    # Firebase (Project settings → Service accounts → Generate new private
+    # key), pegado tal cual como variable de entorno en Railway. Si está
+    # vacío, los endpoints de /push devuelven 503 con mensaje claro.
+    firebase_service_account_json: str = ""
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [

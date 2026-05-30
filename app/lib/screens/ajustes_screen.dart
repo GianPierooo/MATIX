@@ -21,6 +21,7 @@ import '../features/nudges/providers/nudges_providers.dart';
 import '../features/papelera/presentation/papelera_screen.dart';
 import '../features/planificador/application/plan_dia_controller.dart';
 import '../features/planificador/domain/disponibilidad.dart';
+import '../features/push/data/push_repository.dart';
 import '../features/repaso/presentation/repaso_semanal_screen.dart';
 import '../theme/matix_colors.dart';
 
@@ -209,6 +210,30 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
     }
   }
 
+  /// Pide al cerebro un push REAL vía FCM. A diferencia de las locales,
+  /// este debería llegar aunque el OEM (Honor/Huawei) mate la app.
+  Future<void> _enviarPushPrueba() async {
+    setState(() => _probando = true);
+    String msg;
+    try {
+      final res = await ref.read(pushRepositoryProvider).probar();
+      final enviados = (res['enviados'] as num?)?.toInt() ?? 0;
+      final fallidos = (res['fallidos'] as num?)?.toInt() ?? 0;
+      msg = enviados > 0
+          ? 'Push enviado ($enviados ok). Bloquea la pantalla y espera unos '
+              'segundos.'
+          : 'No se envió ($fallidos fallidos). Revisa el service account en '
+              'Railway.';
+    } on MatixApiException catch (e) {
+      msg = 'Error ${e.statusCode}: ${e.message}';
+    } catch (e) {
+      msg = 'Error: $e';
+    }
+    if (!mounted) return;
+    setState(() => _probando = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -310,6 +335,13 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
             onTap: _probando ? null : _probarEn1Min,
             subtitle: 'Programada con alarma exacta. Si la inmediata llega '
                 'pero esta no, es la batería del OEM (Huawei/Honor).',
+          ),
+          _Accion(
+            label: _probando ? 'Enviando…' : 'Enviar push de prueba (FCM)',
+            icon: Icons.cloud_outlined,
+            onTap: _probando ? null : _enviarPushPrueba,
+            subtitle: 'Push REAL desde el cerebro. Este SÍ debería llegar '
+                'aunque el OEM mate la app.',
           ),
 
           const _Seccion('Nudges de urgencia'),

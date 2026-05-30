@@ -243,5 +243,6 @@ def _barrer_residuos_test() -> object:
         DELETE FROM evaluaciones
           WHERE titulo ILIKE 'test%' OR titulo ILIKE '\\_test\\_%';
         DELETE FROM cierres_dia WHERE fecha < '2000-01-01';
+        DELETE FROM device_tokens WHERE token ILIKE '\\_test\\_%';
         """
     )

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,6 +19,7 @@ import 'features/eventos/presentation/nuevo_evento_screen.dart';
 import 'features/eventos/providers/eventos_providers.dart';
 import 'features/matix/data/captura_apunte_repository.dart';
 import 'features/matix/providers/captura_apunte_providers.dart';
+import 'features/push/application/push_service.dart';
 import 'features/tareas/presentation/nueva_tarea_screen.dart';
 import 'screens/home_shell.dart';
 import 'theme/matix_theme.dart';
@@ -43,6 +45,10 @@ Future<void> main() async {
   // capacidad de usar servicios Firebase.
   try {
     await Firebase.initializeApp();
+    // Push (FCM · Capa 1): el handler de background DEBE registrarse antes
+    // de runApp y apuntar a una función top-level. Los OEM matan las
+    // notifs locales en segundo plano; el push las reemplaza.
+    FirebaseMessaging.onBackgroundMessage(manejarPushEnBackground);
   } catch (e) {
     if (kDebugMode) {
       debugPrint('Firebase no inicializado (sin google-services.json): $e');
@@ -108,6 +114,9 @@ class _MatixAppState extends ConsumerState<MatixApp> {
     // el usuario ya tiene la noti del briefing activa, el config
     // controller la reprograma al leer SharedPreferences.
     unawaited(notis.inicializar());
+    // Push (FCM · Capa 1): pide permiso, registra el token en el cerebro y
+    // escucha mensajes. Best-effort.
+    unawaited(ref.read(pushServiceProvider).inicializar());
     // Refresca la ventana móvil de recordatorios de eventos (Cal-3):
     // las series recurrentes solo tienen agendados los próximos ~30
     // días, así que al abrir la app reagendamos para que la ventana

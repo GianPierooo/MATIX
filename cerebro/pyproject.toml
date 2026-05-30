@@ -24,6 +24,10 @@ dependencies = [
     "google-auth>=2.35",
     "google-auth-oauthlib>=1.2",
     "google-api-python-client>=2.150",
+    # Push (FCM · Push Capa 1). firebase-admin manda los mensajes a los
+    # tokens de dispositivo. Se configura con el service account de
+    # Firebase vía FIREBASE_SERVICE_ACCOUNT_JSON.
+    "firebase-admin>=6.5",
 ]
 
 [dependency-groups]
