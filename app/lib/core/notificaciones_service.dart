@@ -1,5 +1,6 @@
 import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -149,12 +150,22 @@ class NotificacionesService {
         ? AndroidScheduleMode.exactAllowWhileIdle
         : AndroidScheduleMode.inexactAllowWhileIdle;
     try {
-      await agendar(modo);
-    } on PlatformException {
-      // El permiso de alarma exacta puede estar revocado: degradamos a
-      // inexacta para que el aviso igual llegue (con menos precisión).
-      if (!exacto) rethrow;
-      await agendar(AndroidScheduleMode.inexactAllowWhileIdle);
+      try {
+        await agendar(modo);
+      } on PlatformException {
+        // El permiso de alarma exacta puede estar revocado: degradamos a
+        // inexacta para que el aviso igual llegue (con menos precisión).
+        if (!exacto) rethrow;
+        await agendar(AndroidScheduleMode.inexactAllowWhileIdle);
+      }
+    } on PlatformException catch (e) {
+      // Falla de plataforma no recuperable del plugin (p.ej. la caché de
+      // notificaciones quedó ilegible: "Missing type parameter"). NO la
+      // propagamos: la tarea/bloque que nos llamó debe crearse igual —
+      // solo no llega este aviso. El resto de notifs se reparan solas en
+      // la próxima programación.
+      debugPrint('Notif: no pude programar $id ($e). Sigo sin avisar.');
+      return false;
     }
     return true;
   }
@@ -195,42 +206,69 @@ class NotificacionesService {
       ),
     );
 
-    await _plugin.zonedSchedule(
-      id,
-      titulo,
-      cuerpo,
-      primera,
-      detalles,
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-      // Repite cada día a la misma hora — el plugin la vuelve a
-      // disparar sin que tengamos que reprogramarla.
-      matchDateTimeComponents: DateTimeComponents.time,
-      payload: payload,
-    );
+    try {
+      await _plugin.zonedSchedule(
+        id,
+        titulo,
+        cuerpo,
+        primera,
+        detalles,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        // Repite cada día a la misma hora — el plugin la vuelve a
+        // disparar sin que tengamos que reprogramarla.
+        matchDateTimeComponents: DateTimeComponents.time,
+        payload: payload,
+      );
+    } on PlatformException catch (e) {
+      // Igual que `programar`: no abortamos al caller por una falla del
+      // plugin (caché ilegible, OEM raro). El ajuste que la disparó
+      // (p.ej. el cierre diario) queda guardado igual.
+      debugPrint('Notif: no pude programar la diaria $id ($e).');
+    }
   }
 
   /// Cancela la notificación con ese `id` (no falla si no existía).
+  ///
+  /// Internamente el plugin lee su caché de notificaciones programadas
+  /// (Gson). Si esa lectura revienta — pasó al aplicar el plan del día
+  /// con una build minificada sin reglas R8: "Missing type parameter" —
+  /// NO propagamos: cancelar un aviso nunca debe tumbar el flujo que nos
+  /// llamó (crear el bloque, completar la tarea…).
   Future<void> cancelar(int id) async {
     if (!_inicializado) await inicializar();
-    await _plugin.cancel(id);
+    try {
+      await _plugin.cancel(id);
+    } on PlatformException catch (e) {
+      debugPrint('Notif: no pude cancelar $id ($e). Sigo.');
+    }
   }
 
   /// Cancela todas las notificaciones programadas. Útil al cerrar
   /// sesión o al hacer reset completo.
   Future<void> cancelarTodo() async {
     if (!_inicializado) await inicializar();
-    await _plugin.cancelAll();
+    try {
+      await _plugin.cancelAll();
+    } on PlatformException catch (e) {
+      debugPrint('Notif: no pude cancelar todo ($e). Sigo.');
+    }
   }
 
   /// Lista los ids actualmente programados (útil para diagnóstico y
   /// para una eventual reconciliación contra los `recordar_en` de la
-  /// BD).
+  /// BD). Ante una falla del plugin devuelve lista vacía en vez de
+  /// propagar.
   Future<List<int>> pendientes() async {
     if (!_inicializado) await inicializar();
-    final pend = await _plugin.pendingNotificationRequests();
-    return pend.map((p) => p.id).toList(growable: false);
+    try {
+      final pend = await _plugin.pendingNotificationRequests();
+      return pend.map((p) => p.id).toList(growable: false);
+    } on PlatformException catch (e) {
+      debugPrint('Notif: no pude listar pendientes ($e).');
+      return const [];
+    }
   }
 }
 

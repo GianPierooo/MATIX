@@ -3,6 +3,8 @@
 // en este patrón de "construcción de payload sin nulls".
 // ignore_for_file: use_null_aware_elements
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../../../api/matix_client.dart';
 import '../../../core/notif_id.dart';
 import '../../../core/notificaciones_service.dart';
@@ -102,8 +104,10 @@ class TareasRepository {
     // local sí la cancelamos — una tarea en papelera no debería
     // dispararla.
     await _client.delete('/api/v1/tareas/$id');
-    await _notif.cancelar(notifIdDe(id));
-    await _cancelarNudges(id);
+    await _notifSeguro(() async {
+      await _notif.cancelar(notifIdDe(id));
+      await _cancelarNudges(id);
+    });
   }
 
   /// Saca una tarea de la papelera. Devuelve la tarea restaurada
@@ -121,8 +125,10 @@ class TareasRepository {
   Future<void> borrarPermanente(String id) async {
     await _client.delete('/api/v1/tareas/$id/permanente');
     // notif ya cancelada en `borrar`, pero por si acaso:
-    await _notif.cancelar(notifIdDe(id));
-    await _cancelarNudges(id);
+    await _notifSeguro(() async {
+      await _notif.cancelar(notifIdDe(id));
+      await _cancelarNudges(id);
+    });
   }
 
   /// Cancela la notificación previa (si la había) y programa una
@@ -135,19 +141,36 @@ class TareasRepository {
   /// silenciosamente. Si lo niega, la notif simplemente no llega —
   /// la app sigue funcionando.
   Future<void> _reprogramarRecordatorio(Tarea t) async {
-    final nid = notifIdDe(t.id);
-    await _notif.cancelar(nid);
-    if (t.completada) return;
-    final r = t.recordarEn;
-    if (r == null) return;
-    await _notif.pedirPermisos();
-    await _notif.programar(
-      id: nid,
-      titulo: t.titulo,
-      cuerpo: _cuerpoRecordatorio(t),
-      cuando: r.toLocal(),
-      payload: 'tarea:${t.id}',
-    );
+    // Las notificaciones son un efecto secundario: si fallan (plugin con
+    // caché ilegible, permiso raro de un OEM), NO deben tumbar el CRUD ni
+    // el "aplicar plan del día". La tarea ya quedó guardada en el cerebro.
+    await _notifSeguro(() async {
+      final nid = notifIdDe(t.id);
+      await _notif.cancelar(nid);
+      if (t.completada) return;
+      final r = t.recordarEn;
+      if (r == null) return;
+      await _notif.pedirPermisos();
+      await _notif.programar(
+        id: nid,
+        titulo: t.titulo,
+        cuerpo: _cuerpoRecordatorio(t),
+        cuando: r.toLocal(),
+        payload: 'tarea:${t.id}',
+      );
+    });
+  }
+
+  /// Corre un efecto de notificaciones sin dejar que su error escale.
+  /// El servicio ya traga las `PlatformException`; esto es la red por si
+  /// algo más inesperado revienta — el flujo que llamó (crear/editar/
+  /// aplicar plan) debe completarse igual.
+  Future<void> _notifSeguro(Future<void> Function() op) async {
+    try {
+      await op();
+    } catch (e) {
+      debugPrint('Notif (tareas): efecto ignorado por error: $e');
+    }
   }
 
   // ─── Nudges escalados (Urgencia-2) ────────────────────────────────────
@@ -157,28 +180,30 @@ class TareasRepository {
   /// No agenda nada para tareas completadas, sin plazo, o con los nudges
   /// apagados — y `programar` ignora puntos en el pasado.
   Future<void> _reprogramarNudges(Tarea t) async {
-    await _cancelarNudges(t.id);
-    if (t.completada || t.plazoEfectivo == null) return;
-    final cfg = await _nudgesPrefs.leerConfig();
-    final silenciada = await _nudgesPrefs.estaSilenciada(t.id);
-    final plan = planNudges(
-      t,
-      DateTime.now(),
-      intensidad: cfg.intensidad,
-      silencio: cfg.silencio,
-      silenciada: silenciada,
-    );
-    if (plan.isEmpty) return;
-    await _notif.pedirPermisos();
-    for (final n in plan) {
-      await _notif.programar(
-        id: n.id,
-        titulo: t.titulo,
-        cuerpo: n.cuerpo,
-        cuando: n.cuando,
-        payload: 'tarea:${t.id}',
+    await _notifSeguro(() async {
+      await _cancelarNudges(t.id);
+      if (t.completada || t.plazoEfectivo == null) return;
+      final cfg = await _nudgesPrefs.leerConfig();
+      final silenciada = await _nudgesPrefs.estaSilenciada(t.id);
+      final plan = planNudges(
+        t,
+        DateTime.now(),
+        intensidad: cfg.intensidad,
+        silencio: cfg.silencio,
+        silenciada: silenciada,
       );
-    }
+      if (plan.isEmpty) return;
+      await _notif.pedirPermisos();
+      for (final n in plan) {
+        await _notif.programar(
+          id: n.id,
+          titulo: t.titulo,
+          cuerpo: n.cuerpo,
+          cuando: n.cuando,
+          payload: 'tarea:${t.id}',
+        );
+      }
+    });
   }
 
   Future<void> _cancelarNudges(String tareaId) async {

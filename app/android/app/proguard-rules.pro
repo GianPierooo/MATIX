@@ -18,3 +18,21 @@
 -dontwarn com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
 -dontwarn com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions$Builder
 -dontwarn com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
+
+# flutter_local_notifications · persiste las notificaciones PROGRAMADAS en
+# SharedPreferences con Gson, usando un TypeToken genérico
+# (ArrayList<ScheduledNotification>). R8 borra el atributo `Signature` y
+# obfusca las clases del plugin → Gson pierde el parámetro de tipo y
+# revienta con "java.lang.RuntimeException: Missing type parameter." en
+# cualquier llamada que lea esa caché (cancel / zonedSchedule /
+# pendingNotificationRequests). Pasaba al APLICAR el plan del día (cada
+# bloque cancela/reprograma su recordatorio). Estas reglas lo evitan:
+# mantienen las clases del plugin y los genéricos que Gson necesita.
+-keepattributes Signature
+-keepattributes *Annotation*
+-keep class com.dexterous.** { *; }
+-keep class com.google.gson.reflect.TypeToken { *; }
+-keep class * extends com.google.gson.reflect.TypeToken
+-keepclassmembers,allowobfuscation class * {
+  @com.google.gson.annotations.SerializedName <fields>;
+}
