@@ -16,7 +16,6 @@ import '../features/cierre/presentation/cierre_dia_screen.dart';
 import '../features/cierre/presentation/cierre_screen.dart';
 import '../features/cierre/providers/cierre_providers.dart';
 import '../features/google/presentation/conexion_google_tile.dart';
-import '../features/nudges/domain/nudges.dart';
 import '../features/nudges/providers/nudges_providers.dart';
 import '../features/papelera/presentation/papelera_screen.dart';
 import '../features/planificador/application/plan_dia_controller.dart';
@@ -1122,9 +1121,11 @@ class _FilaDisponibilidad extends ConsumerWidget {
   }
 }
 
-/// Ajustes de los nudges escalados (Urgencia-2): intensidad global y
-/// horas de silencio. El interruptor por tarea vive en el detalle de
-/// cada tarea, no acá.
+/// Ajustes de los nudges intensos de tareas (Push Capa 3b): interruptor
+/// maestro + horas de silencio. Los manda el cerebro por push; son
+/// intensos por defecto (sin selector Suave/Normal/Fuerte). El apagado
+/// POR TAREA vive en el detalle de cada tarea, y la disponibilidad por
+/// día en su propia sección.
 class _NudgesTile extends ConsumerWidget {
   const _NudgesTile();
 
@@ -1136,7 +1137,7 @@ class _NudgesTile extends ConsumerWidget {
     String dosDigitos(int h) => '${h.toString().padLeft(2, '0')}:00';
 
     Future<void> elegirHora(bool inicio) async {
-      final actual = inicio ? cfg.silencio.inicio : cfg.silencio.fin;
+      final actual = inicio ? cfg.silencioInicio : cfg.silencioFin;
       final picked = await showTimePicker(
         context: context,
         initialTime: TimeOfDay(hour: actual, minute: 0),
@@ -1144,15 +1145,15 @@ class _NudgesTile extends ConsumerWidget {
       );
       if (picked == null) return;
       if (inicio) {
-        await ctrl.cambiarSilencio(picked.hour, cfg.silencio.fin);
+        await ctrl.cambiarSilencio(picked.hour, cfg.silencioFin);
       } else {
-        await ctrl.cambiarSilencio(cfg.silencio.inicio, picked.hour);
+        await ctrl.cambiarSilencio(cfg.silencioInicio, picked.hour);
       }
     }
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
       decoration: BoxDecoration(
         color: MatixColors.card,
         borderRadius: BorderRadius.circular(12),
@@ -1160,46 +1161,37 @@ class _NudgesTile extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Intensidad',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: MatixColors.text,
-            ),
-          ),
-          const SizedBox(height: 2),
-          const Text(
-            'Qué tan seguido te empujo al acercarse el plazo.',
-            style: TextStyle(fontSize: 12, color: MatixColors.muted),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
+          Row(
             children: [
-              for (final i in IntensidadNudge.values)
-                ChoiceChip(
-                  label: Text(i.label),
-                  selected: cfg.intensidad == i,
-                  onSelected: (_) => ctrl.cambiarIntensidad(i),
-                  selectedColor: MatixColors.accent.withValues(alpha: 0.25),
-                  labelStyle: TextStyle(
-                    color: cfg.intensidad == i
-                        ? MatixColors.text
-                        : MatixColors.muted,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
-                  backgroundColor: MatixColors.bg,
-                  side: BorderSide(
-                    color: cfg.intensidad == i
-                        ? MatixColors.accent
-                        : MatixColors.hairline,
-                  ),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Avisos de urgencia',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: MatixColors.text,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Te empujo más seguido al acercarse el plazo de tus '
+                      'tareas. Apágalo si no quieres ninguno.',
+                      style: TextStyle(fontSize: 12, color: MatixColors.muted),
+                    ),
+                  ],
                 ),
+              ),
+              const SizedBox(width: 8),
+              Switch(
+                value: cfg.activo,
+                onChanged: ctrl.cambiarActivo,
+              ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           const Text(
             'Horas de silencio',
             style: TextStyle(
@@ -1211,26 +1203,29 @@ class _NudgesTile extends ConsumerWidget {
           const SizedBox(height: 2),
           const Text(
             'Acá no te aviso nunca. Un nudge que caiga adentro se '
-            'corre a la hora de fin.',
+            'corre al fin del silencio.',
             style: TextStyle(fontSize: 12, color: MatixColors.muted),
           ),
           const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => elegirHora(true),
-                  child: Text('Desde ${dosDigitos(cfg.silencio.inicio)}'),
+          Opacity(
+            opacity: cfg.activo ? 1 : 0.4,
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: cfg.activo ? () => elegirHora(true) : null,
+                    child: Text('Desde ${dosDigitos(cfg.silencioInicio)}'),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => elegirHora(false),
-                  child: Text('Hasta ${dosDigitos(cfg.silencio.fin)}'),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: cfg.activo ? () => elegirHora(false) : null,
+                    child: Text('Hasta ${dosDigitos(cfg.silencioFin)}'),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),

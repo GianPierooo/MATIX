@@ -8,8 +8,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import '../../../api/matix_client.dart';
 import '../../../core/notif_id.dart';
 import '../../../core/notificaciones_service.dart';
-import '../../nudges/data/nudges_prefs.dart';
-import '../../nudges/domain/nudges.dart';
+import '../../nudges/domain/nudges.dart' show kMaxNudges;
 import '../domain/tarea.dart';
 
 /// Wrapper sobre `MatixClient` para las rutas `/api/v1/tareas` y
@@ -21,10 +20,9 @@ import '../domain/tarea.dart';
 /// se deriva del uuid de la tarea (ver `notif_id.dart`), así es
 /// estable entre runs sin necesidad de persistir nada.
 class TareasRepository {
-  TareasRepository(this._client, this._notif, this._nudgesPrefs);
+  TareasRepository(this._client, this._notif);
   final MatixClient _client;
   final NotificacionesService _notif;
-  final NudgesPrefs _nudgesPrefs;
 
   // ─── Tareas ───────────────────────────────────────────────────────────
 
@@ -161,52 +159,22 @@ class TareasRepository {
     }
   }
 
-  // ─── Nudges escalados (Urgencia-2) ────────────────────────────────────
+  // ─── Nudges de urgencia (Push Capa 3b) ────────────────────────────────
 
-  /// Cancela TODOS los posibles nudges de una tarea (rango fijo de ids,
-  /// sin guardar estado) y, si corresponde, agenda el calendario nuevo.
-  /// No agenda nada para tareas completadas, sin plazo, o con los nudges
-  /// apagados — y `programar` ignora puntos en el pasado.
+  /// Los nudges de urgencia ahora los manda el CEREBRO por push (FCM):
+  /// las alarmas locales no disparan en los OEM que matan el segundo
+  /// plano (Honor/Magic UI). Acá solo cancelamos cualquier nudge local
+  /// previo (de versiones viejas de la app) al crear/editar/restaurar,
+  /// para no dejar alarmas huérfanas en el dispositivo. El interruptor
+  /// por tarea vive en `tareas.nudges_silenciada` (lo respeta el
+  /// scheduler), y el maestro + silencio + disponibilidad en el cerebro.
   Future<void> _reprogramarNudges(Tarea t) async {
-    await _notifSeguro(() async {
-      await _cancelarNudges(t.id);
-      if (t.completada || t.plazoEfectivo == null) return;
-      final cfg = await _nudgesPrefs.leerConfig();
-      final silenciada = await _nudgesPrefs.estaSilenciada(t.id);
-      final plan = planNudges(
-        t,
-        DateTime.now(),
-        intensidad: cfg.intensidad,
-        silencio: cfg.silencio,
-        silenciada: silenciada,
-      );
-      if (plan.isEmpty) return;
-      await _notif.pedirPermisos();
-      for (final n in plan) {
-        await _notif.programar(
-          id: n.id,
-          titulo: t.titulo,
-          cuerpo: n.cuerpo,
-          cuando: n.cuando,
-          payload: 'tarea:${t.id}',
-        );
-      }
-    });
+    await _notifSeguro(() => _cancelarNudges(t.id));
   }
 
   Future<void> _cancelarNudges(String tareaId) async {
     for (var i = 0; i < kMaxNudges; i++) {
       await _notif.cancelar(notifIdDeNudge(tareaId, i));
-    }
-  }
-
-  /// Reprograma los nudges de TODAS las tareas. Lo llama el ajuste
-  /// global de nudges (intensidad / horas de silencio) para que el
-  /// cambio aplique de inmediato sin tener que editar tarea por tarea.
-  Future<void> reprogramarNudgesDeTodas() async {
-    final tareas = await listar();
-    for (final t in tareas) {
-      await _reprogramarNudges(t);
     }
   }
 

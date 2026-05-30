@@ -4,8 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/providers.dart';
 import '../../eventos/domain/evento.dart';
 import '../../eventos/providers/eventos_providers.dart';
+import '../../nudges/data/nudges_repository.dart';
 import '../../nudges/domain/nudges.dart';
-import '../../nudges/providers/nudges_providers.dart';
 import '../../tareas/domain/tarea.dart';
 import '../../tareas/providers/tareas_providers.dart';
 import '../data/duraciones_repository.dart';
@@ -89,7 +89,11 @@ class PlanDiaController extends Notifier<EstadoPlan> {
           ref.read(eventosDelDiaProvider(dia)).valueOrNull ?? const <Evento>[];
       _disponibilidad =
           await ref.read(planificadorPrefsProvider).leerDisponibilidad();
-      _silencio = (await ref.read(nudgesPrefsProvider).leerConfig()).silencio;
+      // Las horas de silencio ahora viven en el CEREBRO (Push Capa 3b):
+      // el planificador no debe encajar bloques de trabajo dentro de
+      // ellas, así que las leemos del servidor. Si falla la red, caemos
+      // al default local (22–08), nunca dejamos el plan mudo.
+      _silencio = await _leerSilencio();
       _excluidas.clear();
       _duraciones.clear();
       // Matix estima las duraciones. Si falla (sin red, sin API key),
@@ -106,6 +110,18 @@ class PlanDiaController extends Notifier<EstadoPlan> {
         error: 'No pude armar el plan: $e',
       );
     }
+  }
+
+  /// Lee las horas de silencio del cerebro (fuente de verdad desde Push
+  /// Capa 3b). Si no hay red / config, usa el default local.
+  Future<HorasSilencio> _leerSilencio() async {
+    try {
+      final cfg = await ref.read(nudgesRepositoryProvider).obtener();
+      if (cfg != null) {
+        return HorasSilencio(inicio: cfg.silencioInicio, fin: cfg.silencioFin);
+      }
+    } catch (_) {}
+    return const HorasSilencio();
   }
 
   void _repack() {
@@ -179,11 +195,12 @@ final planDiaControllerProvider =
 /// disponibilidad y, hoy, el planificador del día (Urgencia-3); mañana,
 /// el planificador de sesiones (Fase 4).
 class DisponibilidadController extends StateNotifier<DisponibilidadSemanal> {
-  DisponibilidadController(this._prefs)
+  DisponibilidadController(this._prefs, this._nudgesRepo)
       : super(DisponibilidadSemanal.porDefecto) {
     _ready = _cargar();
   }
   final PlanificadorPrefs _prefs;
+  final NudgesRepository _nudgesRepo;
   late final Future<void> _ready;
   Future<void> get ready => _ready;
 
@@ -192,15 +209,37 @@ class DisponibilidadController extends StateNotifier<DisponibilidadSemanal> {
   }
 
   /// Cambia la disponibilidad de un día ISO (1=lun … 7=dom) y persiste.
+  /// La disponibilidad también la respeta el scheduler de nudges del
+  /// CEREBRO (Push Capa 3b): solo te empuja dentro de tus ventanas. Por
+  /// eso, además de guardarla local (la usa el planificador del día), la
+  /// sincronizamos al servidor en cada cambio. Best-effort: si la red
+  /// falla, el cambio local queda igual.
   Future<void> cambiarDia(int weekday, DisponibilidadDia dia) async {
     await _ready;
     state = state.conDia(weekday, dia);
     await _prefs.guardarDisponibilidad(state);
+    try {
+      await _nudgesRepo.actualizar(disponibilidad: _aServidor(state));
+    } catch (_) {}
   }
+
+  /// Mapa por día ISO en string ("1".."7") → {activo, inicio, fin}, el
+  /// formato que espera el cerebro.
+  static Map<String, dynamic> _aServidor(DisponibilidadSemanal d) => {
+        for (var w = 1; w <= 7; w++)
+          '$w': {
+            'activo': d.diaDe(w).activo,
+            'inicio': d.diaDe(w).inicio,
+            'fin': d.diaDe(w).fin,
+          },
+      };
 }
 
 final disponibilidadProvider =
     StateNotifierProvider<DisponibilidadController, DisponibilidadSemanal>(
         (ref) {
-  return DisponibilidadController(ref.watch(planificadorPrefsProvider));
+  return DisponibilidadController(
+    ref.watch(planificadorPrefsProvider),
+    ref.watch(nudgesRepositoryProvider),
+  );
 });

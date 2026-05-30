@@ -63,6 +63,7 @@ class Tarea {
     required this.actualizadaEn,
     this.bloqueInicio,
     this.bloqueFin,
+    this.nudgesSilenciada = false,
   });
 
   final String id;
@@ -85,6 +86,11 @@ class Tarea {
   /// hecha. No pisan `venceEn` (el plazo real de entrega).
   final DateTime? bloqueInicio;
   final DateTime? bloqueFin;
+
+  /// Push Capa 3b: si está en `true`, el cerebro NO manda nudges de
+  /// urgencia para esta tarea (apagado por tarea). El maestro global
+  /// vive en Ajustes.
+  final bool nudgesSilenciada;
 
   /// El plazo que manda para la urgencia: el bloque planificado si lo
   /// hay (es un "plazo propio"), si no el vencimiento real. Lo usan los
@@ -124,6 +130,7 @@ class Tarea {
         actualizadaEn: DateTime.parse(json['actualizada_en'] as String),
         bloqueInicio: _parseTs(json['bloque_inicio']),
         bloqueFin: _parseTs(json['bloque_fin']),
+        nudgesSilenciada: json['nudges_silenciada'] as bool? ?? false,
       );
 }
 

@@ -108,8 +108,13 @@ async def revisar(db: Postgrest = Depends(get_db)) -> dict:
     esperar el minuto. Útil para probar: crea un evento/tarea con
     recordatorio cercano (o pon la hora del ritual al minuto actual) y llama
     a esto. Devuelve cuántos mandó."""
-    from ..matix.recordatorios import revisar_rituales, revisar_y_enviar
+    from ..matix.recordatorios import (
+        revisar_nudges,
+        revisar_rituales,
+        revisar_y_enviar,
+    )
 
     recordatorios = await revisar_y_enviar(db)
     rituales = await revisar_rituales(db)
-    return {"recordatorios": recordatorios, "rituales": rituales}
+    nudges = await revisar_nudges(db)
+    return {"recordatorios": recordatorios, "rituales": rituales, "nudges": nudges}

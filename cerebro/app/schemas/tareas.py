@@ -39,6 +39,8 @@ class TareaUpdate(BaseModel):
     # Urgencia-3: bloque de tiempo asignado al planificar el día.
     bloque_inicio: datetime | None = None
     bloque_fin: datetime | None = None
+    # Push Capa 3b: apagar los nudges de ESTA tarea.
+    nudges_silenciada: bool | None = None
 
 
 class TareaRead(BaseModel):
@@ -58,6 +60,8 @@ class TareaRead(BaseModel):
     # Urgencia-3: bloque de tiempo asignado al planificar el día.
     bloque_inicio: datetime | None = None
     bloque_fin: datetime | None = None
+    # Push Capa 3b: nudges de esta tarea apagados.
+    nudges_silenciada: bool = False
     creada_en: datetime
     actualizada_en: datetime
 

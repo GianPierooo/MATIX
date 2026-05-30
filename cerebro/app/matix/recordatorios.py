@@ -359,6 +359,193 @@ async def revisar_rituales(db: Postgrest, *, ahora: datetime | None = None) -> d
     return {"rituales": enviados_ok}
 
 
+# ─── Nudges intensos de tareas (Push Capa 3b) ────────────────────────────
+# Textos motivadores, variados, que ACTIVAN (no regañan). Se rotan por un
+# contador por tarea para que nunca salga el mismo dos veces seguidas.
+_NUDGES_NORMALES = [
+    "Un paso pequeño ahora y avanzas. Tú puedes. 💪",
+    "Dedícale 10 minutos y mira qué pasa. 🚀",
+    "Buen momento para adelantar esto.",
+    "Con empezar ya ganaste la mitad. ¡Dale!",
+    "Avanza un poco; tu yo de mañana te lo agradece.",
+    "Un ratito ahora te quita el peso de después.",
+    "Pequeño empujón: esto suma a tu día. ✨",
+    "¿Le metes mano? Solo arrancar y fluye.",
+    "Hazlo por partes. El primer trozo es el más fácil.",
+    "Tienes lo necesario para esto. A por ello.",
+]
+_NUDGES_URGENTES = [
+    "Recta final: un empujón ahora y lo cierras. 🔥",
+    "Queda poco tiempo, pero te alcanza. ¡Vamos!",
+    "Últimas horas: 15 minutos enfocados marcan la diferencia.",
+    "Casi en la meta. Dale el último empujón. 💥",
+    "El plazo se acerca; tú puedes cerrarlo ahora.",
+    "Momento clave: arranca y no pares hasta terminar.",
+    "Sprint final. Concéntrate un rato y listo.",
+    "Esto se cierra hoy. Tú mandas. ⏳",
+]
+
+
+def intervalo_nudge(
+    restante: timedelta, *, modo_prueba: bool = False
+) -> timedelta | None:
+    """Curva de intensidad: cada cuánto nudgear según el tiempo que falta
+    para el plazo. Más espaciado cuando falta mucho, más seguido al
+    acercarse, con un TOPE (nunca cada minuto). `None` = no nudgear.
+
+    En `modo_prueba` la curva se comprime a minutos para verla sin esperar.
+    """
+    h = restante.total_seconds() / 3600
+    if modo_prueba:
+        if h < -1:
+            return None  # vencida hace rato: paramos
+        if h <= 0.25:
+            return timedelta(minutes=1)
+        if h <= 0.5:
+            return timedelta(minutes=2)
+        if h <= 1:
+            return timedelta(minutes=3)
+        return timedelta(minutes=5)
+    if h < -24:
+        return None  # vencida hace más de un día: dejamos de insistir
+    if h <= 3:
+        return timedelta(minutes=45)  # últimas 3 h (y vencida hasta -24h)
+    if h <= 6:
+        return timedelta(minutes=90)
+    if h <= 24:
+        return timedelta(hours=4)
+    if h <= 72:
+        return timedelta(hours=12)
+    return timedelta(hours=24)  # > 3 días: ~1 por día
+
+
+def _en_silencio(hora: int, inicio: int, fin: int) -> bool:
+    if inicio == fin:
+        return False
+    if inicio < fin:
+        return inicio <= hora < fin
+    return hora >= inicio or hora < fin  # cruza medianoche
+
+
+def permitido_ahora(local: datetime, cfg: dict) -> bool:
+    """¿Se puede nudgear AHORA? No durante el silencio, y solo dentro de la
+    ventana de disponibilidad del día (hora de Lima). PURO."""
+    h = local.hour
+    if _en_silencio(
+        h, int(cfg.get("silencio_inicio", 22)), int(cfg.get("silencio_fin", 8))
+    ):
+        return False
+    disp = cfg.get("disponibilidad") or {}
+    dia = disp.get(str(local.isoweekday())) or {}
+    if not dia.get("activo", True):
+        return False
+    return int(dia.get("inicio", 0)) <= h < int(dia.get("fin", 24))
+
+
+def texto_nudge(titulo: str, restante: timedelta, n: int) -> tuple[str, str]:
+    """Título (= la tarea) + cuerpo motivador, rotado por `n` para variar.
+    Usa el pool urgente en las últimas 3 h. PURO."""
+    urgente = restante.total_seconds() <= 3 * 3600
+    pool = _NUDGES_URGENTES if urgente else _NUDGES_NORMALES
+    return (titulo or "Tu tarea", pool[n % len(pool)])
+
+
+async def revisar_nudges(db: Postgrest, *, ahora: datetime | None = None) -> dict:
+    """Un tick de nudges: para cada tarea pendiente con plazo (no silenciada),
+    si toca según la curva y estamos en ventana permitida, manda el push."""
+    ahora = ahora or datetime.now(timezone.utc)
+    cfgs = await db.list("config_nudges", limit=1)
+    if not cfgs:
+        return {"nudges": 0}
+    cfg = cfgs[0]
+    if not cfg.get("activo"):
+        return {"nudges": 0, "off": True}
+    local = ahora.astimezone(LIMA)
+    if not permitido_ahora(local, cfg):
+        return {"nudges": 0, "fuera_de_ventana": True}
+    modo_prueba = bool(cfg.get("modo_prueba"))
+
+    tareas = await db.list(
+        "tareas",
+        raw_filters={
+            "vence_en": "not.is.null",
+            "completada": "is.false",
+            "eliminado_en": "is.null",
+            "nudges_silenciada": "is.false",
+        },
+        limit=500,
+    )
+    if not tareas:
+        return {"nudges": 0}
+
+    desde = _iso_z(ahora - timedelta(hours=48))
+    env = await db.list(
+        "nudges_enviados", raw_filters={"momento": f"gte.{desde}"}, limit=2000
+    )
+    ultimo: dict[str, datetime] = {}
+    conteo: dict[str, int] = {}
+    for e in env:
+        tid = str(e["tarea_id"])
+        conteo[tid] = conteo.get(tid, 0) + 1
+        d = _parse(e.get("momento"))
+        if d and (tid not in ultimo or d > ultimo[tid]):
+            ultimo[tid] = d
+
+    tokens = [t["token"] for t in await db.list("device_tokens", limit=100)]
+    if not tokens:
+        return {"nudges": 0, "sin_tokens": True}
+
+    momento_iso = _iso_z(ahora.replace(second=0, microsecond=0))
+    enviados = 0
+    for t in tareas:
+        tid = str(t["id"])
+        vence = _parse(t.get("vence_en"))
+        if vence is None:
+            continue
+        interval = intervalo_nudge(vence - ahora, modo_prueba=modo_prueba)
+        if interval is None:
+            continue
+        last = ultimo.get(tid)
+        if last is not None and (ahora - last) < interval:
+            continue
+        titulo, cuerpo = texto_nudge(
+            t.get("titulo") or "Tu tarea", vence - ahora, conteo.get(tid, 0)
+        )
+        algun_ok = False
+        for tok in list(tokens):
+            try:
+                await asyncio.to_thread(
+                    enviar_push,
+                    tok,
+                    titulo=titulo,
+                    cuerpo=cuerpo,
+                    data={"payload": f"tarea:{tid}"},
+                )
+                algun_ok = True
+            except TokenInvalido:
+                filas = await db.list("device_tokens", filters={"token": tok}, limit=1)
+                if filas:
+                    await db.delete("device_tokens", filas[0]["id"])
+                tokens.remove(tok)
+            except RuntimeError as e:
+                logger.error("scheduler nudges: FCM no configurado (%s)", e)
+                return {"nudges": enviados, "error": "fcm_no_config"}
+            except Exception:  # noqa: BLE001
+                logger.exception("scheduler nudges: fallo mandando push")
+        if algun_ok:
+            try:
+                await db.insert(
+                    "nudges_enviados", {"tarea_id": tid, "momento": momento_iso}
+                )
+                enviados += 1
+            except Exception:  # noqa: BLE001
+                logger.debug("nudge ya marcado este minuto: %s", tid)
+
+    if enviados:
+        logger.info("scheduler: %d nudge(s) enviado(s) por push", enviados)
+    return {"nudges": enviados}
+
+
 # ─── Arranque / parada del job (lo llama el lifespan de FastAPI) ──────────
 _scheduler = None
 
@@ -386,6 +573,10 @@ def iniciar(db: Postgrest) -> None:
             await revisar_rituales(db)
         except Exception:  # noqa: BLE001
             logger.exception("scheduler: el tick de rituales falló")
+        try:
+            await revisar_nudges(db)
+        except Exception:  # noqa: BLE001
+            logger.exception("scheduler: el tick de nudges falló")
 
     sch = AsyncIOScheduler(timezone=LIMA)
     sch.add_job(

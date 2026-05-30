@@ -6,7 +6,6 @@ import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:matix/api/matix_client.dart';
 import 'package:matix/core/notificaciones_service.dart';
-import 'package:matix/features/nudges/data/nudges_prefs.dart';
 import 'package:matix/features/tareas/data/tareas_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -97,7 +96,7 @@ void main() {
   test('aplicar bloque (actualizar) no crashea aunque las notifs revienten',
       () async {
     final notif = _NotifQueRevienta();
-    final repo = TareasRepository(_FakeClient(), notif, NudgesPrefs());
+    final repo = TareasRepository(_FakeClient(), notif);
 
     final t = await repo.actualizar('t1', {
       'bloque_inicio': '2026-05-30T14:00:00Z',
@@ -112,7 +111,7 @@ void main() {
 
   test('crear tampoco crashea aunque las notifs revienten', () async {
     final notif = _NotifQueRevienta();
-    final repo = TareasRepository(_FakeClient(), notif, NudgesPrefs());
+    final repo = TareasRepository(_FakeClient(), notif);
 
     final t = await repo.crear(titulo: 'Avanzar tesis');
     expect(t.titulo, isNotEmpty);
