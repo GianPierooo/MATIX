@@ -85,3 +85,31 @@ class CierreHoyRead(BaseModel):
     cierre_frase: str
     resumen_corto: str
     texto_para_voz: str
+
+
+# ─── Repaso semanal (Capa 8 · Repaso) ────────────────────────────────
+
+
+class TareaVencidaRepaso(BaseModel):
+    """Una tarea que se pasó de fecha. Lleva `id` para que la app
+    permita reprogramarla desde el repaso."""
+
+    id: str
+    titulo: str
+    contexto: str | None = None
+    vence_en: str | None = None
+
+
+class RepasoSemanalRead(BaseModel):
+    """Repaso semanal sintetizado por Matix. `resumen` y `focos` los
+    redacta el LLM (balance honesto, sin reproche); el resto son datos
+    del hub de los últimos 7 días. `vencidas` trae ids para accionar."""
+
+    semana_desde: str
+    semana_hasta: str
+    resumen: str
+    focos: list[str] = []
+    completadas: int = 0
+    vencidas: list[TareaVencidaRepaso] = []
+    eventos: int = 0
+    apuntes_nuevos: int = 0

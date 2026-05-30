@@ -381,6 +381,66 @@ async def desglosar_tarea_json(
     return {"es_atomica": es_atomica, "pasos": pasos}
 
 
+async def repaso_semanal_json(
+    datos: dict,
+    *,
+    model: str = "gpt-4o-mini",
+) -> dict:
+    """Sintetiza el repaso semanal a partir de un resumen de la semana
+    (Capa 8 · Repaso). Tono: balance honesto y cercano, SIN reproche
+    (como el cierre del día). Reconoce lo hecho, nombra lo que quedó sin
+    drama, y sugiere 1–3 focos para la próxima semana.
+
+    Recibe `datos` (dict ya agregado por el cerebro: cuántas completó,
+    qué quedó, eventos, proyectos, apuntes) y devuelve
+    `{"resumen": str, "focos": [str]}`. El encaje/lectura del hub lo
+    hace el cerebro; esto solo redacta. Lanza RuntimeError si falta la
+    API key (el caller cae a un resumen determinístico)."""
+    client = _get_client()
+    system = (
+        "Eres Matix haciendo el repaso semanal con el usuario. Tono: "
+        "balance honesto y cercano, SIN reproche (como un cierre de "
+        "semana amable). Reconoce lo que SÍ se hizo, nombra lo que quedó "
+        "sin drama (no es culpa, es información) y sugiere de 1 a 3 focos "
+        "concretos para la próxima semana. Hablas en tú (nunca voseo).\n\n"
+        "Recibes un resumen en JSON de la semana. SINTETIZA en prosa "
+        "breve (2 a 4 frases); NO listes los datos crudos ni inventes "
+        "nada que no esté en los datos.\n\n"
+        "Responde SOLO un objeto JSON con esta forma exacta:\n"
+        '{"resumen": "...", "focos": ["...", "..."]}'
+    )
+    user = json.dumps(datos, ensure_ascii=False)
+    resp = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.4,
+        response_format={"type": "json_object"},
+    )
+    medidor.registrar_chat(resp.usage)
+
+    contenido = resp.choices[0].message.content or "{}"
+    try:
+        out = json.loads(contenido)
+    except json.JSONDecodeError as e:
+        raise RuntimeError("El modelo no devolvió un JSON válido.") from e
+    if not isinstance(out, dict):
+        raise RuntimeError("El modelo no devolvió el objeto esperado.")
+
+    resumen = out.get("resumen")
+    if not isinstance(resumen, str) or not resumen.strip():
+        raise RuntimeError("El modelo no devolvió un resumen.")
+    crudos = out.get("focos")
+    focos: list[str] = []
+    if isinstance(crudos, list):
+        for f in crudos:
+            if isinstance(f, str) and f.strip():
+                focos.append(f.strip())
+    return {"resumen": resumen.strip(), "focos": focos[:3]}
+
+
 async def transcribir(
     audio_bytes: bytes,
     *,

@@ -20,6 +20,7 @@ import '../features/nudges/domain/nudges.dart';
 import '../features/nudges/providers/nudges_providers.dart';
 import '../features/papelera/presentation/papelera_screen.dart';
 import '../features/planificador/application/plan_dia_controller.dart';
+import '../features/repaso/presentation/repaso_semanal_screen.dart';
 import '../theme/matix_colors.dart';
 
 /// Pantalla de Ajustes — informativa en Capa 1.
@@ -291,6 +292,17 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
             subtitle: 'Repaso: qué hiciste, qué queda, qué viene.',
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const CierreScreen()),
+            ),
+          ),
+
+          const _Seccion('Repaso semanal'),
+          _Accion(
+            label: 'Repaso de la semana',
+            icon: Icons.calendar_view_week_outlined,
+            subtitle: 'Balance de la semana con Matix: qué se hizo, qué '
+                'quedó, qué priorizar.',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const RepasoSemanalScreen()),
             ),
           ),
 

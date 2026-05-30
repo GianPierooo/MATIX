@@ -19,8 +19,13 @@ from fastapi import APIRouter, Depends
 
 from ..briefing import armar as briefing_armar
 from ..briefing import cierre as briefing_cierre
+from ..briefing import repaso_semanal
 from ..db import Postgrest, get_db
-from ..schemas.briefing import BriefingHoyRead, CierreHoyRead
+from ..schemas.briefing import (
+    BriefingHoyRead,
+    CierreHoyRead,
+    RepasoSemanalRead,
+)
 from ..security import require_api_key
 
 router = APIRouter(
@@ -42,3 +47,13 @@ async def cierre_de_hoy(
     db: Postgrest = Depends(get_db),
 ) -> dict[str, Any]:
     return await briefing_cierre.armar_cierre(db)
+
+
+@router.get("/repaso-semanal", response_model=RepasoSemanalRead)
+async def repaso_de_la_semana(
+    db: Postgrest = Depends(get_db),
+) -> dict[str, Any]:
+    """Repaso semanal on-demand (Capa 8 · Repaso). Matix sintetiza la
+    semana del hub. Nunca falla: si el LLM no está, cae a un resumen
+    determinístico."""
+    return await repaso_semanal.armar_repaso(db)
