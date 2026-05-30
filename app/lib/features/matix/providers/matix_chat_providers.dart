@@ -88,9 +88,21 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
   /// etc.), invalidamos los providers de las tablas afectadas para
   /// que la UI refleje el cambio sin que el usuario tenga que
   /// recargar la pestaña.
-  Future<void> enviar(String texto) async {
+  Future<void> enviar(
+    String texto, {
+    String? imagenDataUrl,
+    String? imagenPath,
+  }) async {
     final t = texto.trim();
-    if (t.isEmpty || state.enviando) return;
+    // Permitimos mandar solo imagen (sin texto). Si no hay ni texto ni
+    // imagen, no hay nada que enviar.
+    if ((t.isEmpty && imagenDataUrl == null) || state.enviando) return;
+
+    // Cuando solo se adjunta imagen, mandamos un texto por defecto: el
+    // schema del cerebro exige `mensaje` no vacío y le da una
+    // instrucción al modelo.
+    final mensaje =
+        t.isEmpty ? 'Mira esta imagen y ayúdame con lo que muestre.' : t;
 
     // Historial que se manda al cerebro: el de ANTES de agregar el
     // nuevo mensaje (el endpoint espera `historial` separado del
@@ -101,6 +113,7 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
       rol: RolMensaje.usuario,
       contenido: t,
       enviadoEn: DateTime.now(),
+      imagenPath: imagenPath,
     );
     state = state.copyWith(
       mensajes: [...historialPrevio, propio],
@@ -113,7 +126,8 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
       final repo = ref.read(matixChatRepositoryProvider);
       final turno = await repo.enviar(
         historial: historialPrevio,
-        mensaje: t,
+        mensaje: mensaje,
+        imagenDataUrl: imagenDataUrl,
       );
       final ans = Mensaje(
         rol: RolMensaje.matix,

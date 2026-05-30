@@ -23,11 +23,17 @@ class Mensaje {
     required this.rol,
     required this.contenido,
     required this.enviadoEn,
+    this.imagenPath,
   });
 
   final RolMensaje rol;
   final String contenido;
   final DateTime enviadoEn;
+
+  /// Ruta local de la imagen adjunta (solo para mostrar la miniatura en
+  /// la burbuja del usuario). NO se envía al cerebro en `historial` —
+  /// la imagen va aparte y solo en el turno actual.
+  final String? imagenPath;
 
   /// Forma que entiende el cerebro en `POST /matix/chat`:
   /// `{"rol": "user"|"assistant", "contenido": "..."}`.

@@ -42,6 +42,7 @@ async def conversar(
     *,
     historial: list[dict],
     mensaje: str,
+    imagen: str | None = None,
 ) -> dict[str, Any]:
     """Genera la respuesta de Matix a `mensaje`, considerando
     `historial` (lista de `{rol, contenido}` con `rol` en
@@ -70,7 +71,19 @@ async def conversar(
         if rol not in ("user", "assistant"):
             continue
         mensajes.append({"role": rol, "content": m["contenido"]})
-    mensajes.append({"role": "user", "content": mensaje})
+
+    # El turno actual: si trae imagen, el `content` es una lista
+    # multimodal [texto, imagen] que gpt-4o-mini (visión) entiende. La
+    # imagen solo viaja en ESTE turno — no entra al historial, así no
+    # se re-manda en turnos siguientes.
+    if imagen:
+        contenido_usuario: Any = [
+            {"type": "text", "text": mensaje},
+            {"type": "image_url", "image_url": {"url": imagen}},
+        ]
+    else:
+        contenido_usuario = mensaje
+    mensajes.append({"role": "user", "content": contenido_usuario})
 
     tools_usadas: list[str] = []
     tablas_cambiadas: list[str] = []

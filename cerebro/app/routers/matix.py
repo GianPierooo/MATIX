@@ -52,13 +52,31 @@ router = APIRouter(
 _MAX_AUDIO_BYTES = 24 * 1024 * 1024
 
 
+# Tope blando de la imagen del chat (data URL base64). ~5 MB de imagen
+# ≈ 6.7M chars; dejamos margen. La app además comprime antes de mandar.
+_MAX_IMAGEN_CHARS = 7_000_000
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, db: Postgrest = Depends(get_db)) -> dict:
+    imagen = body.imagen
+    if imagen is not None:
+        if not imagen.startswith("data:image/"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La imagen debe venir como data URL (data:image/…).",
+            )
+        if len(imagen) > _MAX_IMAGEN_CHARS:
+            raise HTTPException(
+                status_code=413,  # Content Too Large
+                detail="La imagen es muy pesada. Adjunta una más liviana.",
+            )
     try:
         resultado = await conversar(
             db,
             historial=[m.model_dump() for m in body.historial],
             mensaje=body.mensaje,
+            imagen=imagen,
         )
     except RuntimeError as e:
         # Caso típico: OPENAI_API_KEY no configurada.

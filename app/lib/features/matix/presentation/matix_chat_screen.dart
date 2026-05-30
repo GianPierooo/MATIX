@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../theme/matix_colors.dart';
@@ -35,6 +38,14 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
   final _controller = TextEditingController();
   final _scroll = ScrollController();
   final _focusInput = FocusNode();
+  final _picker = ImagePicker();
+
+  /// Imagen adjunta lista para mandar con el próximo mensaje (Capa 2 ·
+  /// chat multimodal). Null = ninguna.
+  XFile? _imagenAdjunta;
+
+  /// Tope: imágenes más pesadas se rechazan con mensaje claro.
+  static const int _maxImagenBytes = 4 * 1024 * 1024;
 
   /// Reloj que actualiza la duración mostrada mientras se graba.
   /// Vive en la UI para no obligar al notifier a tener un Timer
@@ -66,12 +77,84 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
 
   Future<void> _enviar() async {
     final texto = _controller.text.trim();
-    if (texto.isEmpty) return;
+    final img = _imagenAdjunta;
+    if (texto.isEmpty && img == null) return;
+
+    String? dataUrl;
+    String? imagenPath;
+    if (img != null) {
+      final bytes = await File(img.path).readAsBytes();
+      if (bytes.length > _maxImagenBytes) {
+        if (mounted) {
+          _mostrarAviso('La imagen es muy pesada (máx 4 MB). Prueba otra.');
+        }
+        return;
+      }
+      // image_picker, al comprimir con imageQuality, entrega JPEG.
+      dataUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+      imagenPath = img.path;
+    }
+
     _controller.clear();
-    await ref.read(chatMatixProvider.notifier).enviar(texto);
+    setState(() => _imagenAdjunta = null);
+    await ref.read(chatMatixProvider.notifier).enviar(
+          texto,
+          imagenDataUrl: dataUrl,
+          imagenPath: imagenPath,
+        );
     _scrollAlFinal();
-    // Devolver el foco al input para encadenar mensajes rápido.
     if (mounted) _focusInput.requestFocus();
+  }
+
+  void _mostrarAviso(String msg) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  /// Adjunta una imagen (cámara o galería) para mandarla con el mensaje.
+  /// La comprime para no enviar 8 MP cuando no hace falta.
+  Future<void> _adjuntarImagen() async {
+    final origen = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: MatixColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined,
+                  color: MatixColors.accent),
+              title: const Text('Tomar foto'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined,
+                  color: MatixColors.accent),
+              title: const Text('Elegir de la galería'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (origen == null) return;
+    try {
+      final x = await _picker.pickImage(
+        source: origen,
+        imageQuality: 70,
+        maxWidth: 1280,
+        maxHeight: 1280,
+      );
+      if (x != null && mounted) setState(() => _imagenAdjunta = x);
+    } catch (e) {
+      if (mounted) _mostrarAviso('No pude abrir la cámara / galería: $e');
+    }
   }
 
   Future<void> _reintentar() async {
@@ -266,11 +349,17 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
                       },
                     ),
             ),
+            if (_imagenAdjunta != null)
+              _PreviewAdjunto(
+                path: _imagenAdjunta!.path,
+                onQuitar: () => setState(() => _imagenAdjunta = null),
+              ),
             _Composer(
               controller: _controller,
               focusNode: _focusInput,
               enabled: !estado.enviando,
               onEnviar: _enviar,
+              onAdjuntar: estado.enviando ? null : _adjuntarImagen,
               voz: voz,
               onEmpezarVoz: _empezarAGrabar,
               onDetenerVoz: _detenerYTranscribir,
@@ -388,9 +477,30 @@ class _Burbuja extends StatelessWidget {
                     ? null
                     : Border.all(color: MatixColors.hairline),
               ),
-              child: SelectableText(
-                mensaje.contenido,
-                style: MatixText.body.copyWith(color: colorTexto),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (mensaje.imagenPath != null) ...[
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Image.file(
+                        File(mensaje.imagenPath!),
+                        width: 180,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stack) =>
+                            const SizedBox.shrink(),
+                      ),
+                    ),
+                    if (mensaje.contenido.isNotEmpty)
+                      const SizedBox(height: MatixSpacing.s),
+                  ],
+                  if (mensaje.contenido.isNotEmpty)
+                    SelectableText(
+                      mensaje.contenido,
+                      style: MatixText.body.copyWith(color: colorTexto),
+                    ),
+                ],
               ),
             ),
           ),
@@ -648,12 +758,53 @@ class _ChipPill extends StatelessWidget {
 
 // ─── Composer (input + mic + botón enviar) ───────────────────────────────
 
+/// Tira de previsualización de la imagen adjunta, encima del composer.
+class _PreviewAdjunto extends StatelessWidget {
+  const _PreviewAdjunto({required this.path, required this.onQuitar});
+  final String path;
+  final VoidCallback onQuitar;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: MatixColors.bg,
+      padding: const EdgeInsets.fromLTRB(
+          MatixSpacing.xl, MatixSpacing.s, MatixSpacing.xl, 0),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.file(
+              File(path),
+              width: 48,
+              height: 48,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stack) => const Icon(
+                  Icons.broken_image_outlined, color: MatixColors.muted),
+            ),
+          ),
+          const SizedBox(width: MatixSpacing.m),
+          Expanded(
+            child: Text('Imagen adjunta', style: MatixText.small),
+          ),
+          IconButton(
+            tooltip: 'Quitar imagen',
+            onPressed: onQuitar,
+            icon: const Icon(Icons.close, size: 18, color: MatixColors.muted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
     required this.focusNode,
     required this.enabled,
     required this.onEnviar,
+    required this.onAdjuntar,
     required this.voz,
     required this.onEmpezarVoz,
     required this.onDetenerVoz,
@@ -664,6 +815,7 @@ class _Composer extends StatelessWidget {
   final FocusNode focusNode;
   final bool enabled;
   final VoidCallback onEnviar;
+  final VoidCallback? onAdjuntar;
   final EstadoVoz voz;
   final VoidCallback onEmpezarVoz;
   final VoidCallback onDetenerVoz;
@@ -698,7 +850,14 @@ class _Composer extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         _MicButton(onTap: enabled ? onEmpezarVoz : null),
-        const SizedBox(width: MatixSpacing.m),
+        const SizedBox(width: MatixSpacing.s),
+        IconButton(
+          tooltip: 'Adjuntar imagen',
+          onPressed: onAdjuntar,
+          icon: const Icon(Icons.add_photo_alternate_outlined,
+              color: MatixColors.muted),
+        ),
+        const SizedBox(width: MatixSpacing.s),
         Expanded(
           child: Container(
             decoration: BoxDecoration(

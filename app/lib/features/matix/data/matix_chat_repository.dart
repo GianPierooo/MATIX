@@ -1,3 +1,8 @@
+// Mantenemos `if (x != null) 'k': x` por claridad (mismo patrón que el
+// resto de repos). La sintaxis null-aware `?'k': x` hace lo mismo pero
+// menos legible en este caso.
+// ignore_for_file: use_null_aware_elements
+
 import '../../../api/matix_client.dart';
 import '../domain/mensaje.dart';
 
@@ -46,12 +51,16 @@ class MatixChatRepository {
   Future<ChatTurno> enviar({
     required List<Mensaje> historial,
     required String mensaje,
+    String? imagenDataUrl,
   }) async {
     final body = <String, dynamic>{
       'historial': historial
           .map((m) => m.toJsonParaCerebro())
           .toList(growable: false),
       'mensaje': mensaje,
+      // La imagen (data URL) solo viaja en este turno; el cerebro la
+      // pasa al modelo de visión y no la guarda en el historial.
+      if (imagenDataUrl != null) 'imagen': imagenDataUrl,
     };
     final j = await _client.post('/api/v1/matix/chat', body);
     return ChatTurno(

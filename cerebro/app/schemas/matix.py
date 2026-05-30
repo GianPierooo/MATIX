@@ -14,10 +14,18 @@ class MensajeChat(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """Cuerpo del endpoint `/matix/chat`."""
+    """Cuerpo del endpoint `/matix/chat`.
+
+    `imagen`, si viene, es un data URL (`data:image/...;base64,...`) que
+    se adjunta al mensaje para que el modelo de visión la vea. Va al
+    servidor a propósito (distinto del OCR on-device): para entender la
+    imagen hace falta el modelo. Solo viaja en ESE turno; no se guarda
+    en el historial.
+    """
 
     historial: list[MensajeChat] = Field(default_factory=list)
     mensaje: str = Field(min_length=1)
+    imagen: str | None = None
 
 
 class TranscripcionResponse(BaseModel):
