@@ -3,9 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../theme/matix_colors.dart';
+import '../../captura_camara/presentation/captura_camara_screen.dart';
 import '../domain/apunte.dart';
 import '../providers/apuntes_providers.dart';
-import 'apunte_desde_foto_flow.dart';
 import 'editor_apunte_screen.dart';
 
 class ApuntesListScreen extends ConsumerWidget {
@@ -18,9 +18,11 @@ class ApuntesListScreen extends ConsumerWidget {
         title: const Text('Apuntes'),
         actions: [
           IconButton(
-            tooltip: 'Apunte desde foto',
+            tooltip: 'Cámara inteligente',
             icon: const Icon(Icons.camera_alt_outlined),
-            onPressed: () => iniciarFlujoApunteDesdeFoto(context, ref),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const CapturaCamaraScreen()),
+            ),
           ),
           IconButton(
             tooltip: 'Nuevo apunte',

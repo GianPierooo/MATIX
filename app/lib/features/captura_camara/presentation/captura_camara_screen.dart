@@ -1,6 +1,7 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../theme/matix_colors.dart';
@@ -9,11 +10,14 @@ import '../../../theme/matix_typography.dart';
 import '../application/captura_controller.dart';
 import 'resultado_ocr_screen.dart';
 
-/// Pantalla de cámara con preview en vivo + botón de captura (Capa 7-A).
+/// Cámara inteligente: una sola cámara que rutea sola (Capa 7).
 ///
-/// Al disparar, toma la foto y se la pasa al [CapturaController], que
-/// corre el OCR on-device. Cuando el controller termina (listo o
-/// error) navegamos a [ResultadoOcrScreen] con el texto editable.
+/// Disparas (o eliges de la galería) y el [CapturaController] corre el
+/// OCR on-device y luego le pregunta al cerebro a qué flujo pertenece el
+/// texto: tareas, eventos o apunte. Cuando termina (listo o error)
+/// navegamos a [ResultadoOcrScreen] con el texto editable y el tipo ya
+/// sugerido (corregible). La imagen NUNCA sale del teléfono: solo viaja
+/// el texto.
 ///
 /// El `CameraController` reserva la cámara física: lo soltamos al salir
 /// y cuando la app pasa a segundo plano (y lo re-armamos al volver),
@@ -134,6 +138,31 @@ class _CapturaCamaraScreenState extends ConsumerState<CapturaCamaraScreen>
     }
   }
 
+  /// Misma cámara inteligente, pero desde una foto ya existente. Reusa
+  /// el mismo pipeline (OCR on-device → clasificación) que el disparo.
+  Future<void> _elegirDeGaleria() async {
+    if (_capturando) return;
+    final XFile? picked;
+    try {
+      picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        // ML Kit no necesita la foto a resolución completa para leer
+        // texto: comprimimos para que el temporal pese menos.
+        imageQuality: 85,
+        maxWidth: 2400,
+        maxHeight: 2400,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No pude abrir la galería: $e')),
+      );
+      return;
+    }
+    if (picked == null) return; // el usuario canceló
+    await ref.read(capturaControllerProvider.notifier).procesarFoto(picked.path);
+  }
+
   void _escribirAMano(String aviso) {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
@@ -144,13 +173,15 @@ class _CapturaCamaraScreenState extends ConsumerState<CapturaCamaraScreen>
 
   @override
   Widget build(BuildContext context) {
-    // Cuando el OCR termina, saltamos al resultado editable.
+    // Cuando el OCR + la clasificación terminan, saltamos al resultado
+    // editable con el tipo ya sugerido (corregible).
     ref.listen<EstadoCaptura>(capturaControllerProvider, (prev, next) {
       if (next.fase == FaseCaptura.listo) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (_) => ResultadoOcrScreen(
               textoInicial: next.texto,
+              destino: next.destino,
               aviso: next.vacio
                   ? 'No detecté texto en la foto. Escríbelo a mano.'
                   : null,
@@ -169,25 +200,38 @@ class _CapturaCamaraScreenState extends ConsumerState<CapturaCamaraScreen>
       }
     });
 
-    final procesando =
-        ref.watch(capturaControllerProvider).fase == FaseCaptura.procesando;
+    final fase = ref.watch(capturaControllerProvider).fase;
+    // Durante OCR y clasificación, la cámara está "trabajando": tapamos
+    // el preview y bloqueamos los disparos.
+    final ocupado =
+        fase == FaseCaptura.procesando || fase == FaseCaptura.clasificando;
+    final mensajeOcupado = fase == FaseCaptura.clasificando
+        ? 'Viendo qué es…'
+        : 'Extrayendo texto…';
 
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: const Text('Capturar texto'),
+        title: const Text('Cámara inteligente'),
         leading: IconButton(
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.of(context).pop(),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Elegir de la galería',
+            icon: const Icon(Icons.photo_library_outlined),
+            onPressed: ocupado ? null : _elegirDeGaleria,
+          ),
+        ],
       ),
-      body: _construirCuerpo(procesando),
+      body: _construirCuerpo(ocupado, mensajeOcupado),
     );
   }
 
-  Widget _construirCuerpo(bool procesando) {
+  Widget _construirCuerpo(bool ocupado, String mensajeOcupado) {
     if (_inicializando) {
       return const Center(
         child: CircularProgressIndicator(color: MatixColors.accent),
@@ -241,24 +285,24 @@ class _CapturaCamaraScreenState extends ConsumerState<CapturaCamaraScreen>
       fit: StackFit.expand,
       children: [
         Center(child: CameraPreview(camara)),
-        if (procesando)
+        if (ocupado)
           Container(
             color: Colors.black.withValues(alpha: 0.6),
-            child: const Center(
+            child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  CircularProgressIndicator(color: MatixColors.accent),
-                  SizedBox(height: MatixSpacing.l),
+                  const CircularProgressIndicator(color: MatixColors.accent),
+                  const SizedBox(height: MatixSpacing.l),
                   Text(
-                    'Extrayendo texto…',
-                    style: TextStyle(color: Colors.white, fontSize: 14),
+                    mensajeOcupado,
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
                   ),
                 ],
               ),
             ),
           ),
-        if (!procesando)
+        if (!ocupado)
           Align(
             alignment: Alignment.bottomCenter,
             child: Padding(

@@ -213,6 +213,26 @@ class ExtraerEventosResponse(BaseModel):
     eventos: list[EventoPropuesto] = Field(default_factory=list)
 
 
+class ClasificarCapturaRequest(BaseModel):
+    """Cuerpo de `/matix/clasificar-captura` (Cámara inteligente).
+
+    `texto` es el OCR on-device de una foto. SOLO viaja el texto: la
+    imagen se quedó en el teléfono. El cerebro decide a qué flujo
+    pertenece (tareas, eventos o apunte); no crea nada — la app abre la
+    revisión correspondiente y el usuario puede corregir el tipo.
+    """
+
+    texto: str = Field(min_length=1)
+
+
+class ClasificarCapturaResponse(BaseModel):
+    """Respuesta de `/matix/clasificar-captura`. `tipo` es el destino
+    sugerido. Ante duda, el cerebro responde `apunte` — el catch-all que
+    no pierde nada (siempre se puede guardar como nota)."""
+
+    tipo: Literal["tareas", "eventos", "apunte"] = "apunte"
+
+
 class ChatResponse(BaseModel):
     """Respuesta del endpoint `/matix/chat`.
 

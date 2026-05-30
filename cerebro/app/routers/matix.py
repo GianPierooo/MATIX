@@ -27,6 +27,8 @@ from ..schemas.matix import (
     CapturaApunteResponse,
     ChatRequest,
     ChatResponse,
+    ClasificarCapturaRequest,
+    ClasificarCapturaResponse,
     DesglosarTareaRequest,
     DesglosarTareaResponse,
     EstimarDuracionesRequest,
@@ -210,6 +212,34 @@ async def extraer_eventos(body: ExtraerEventosRequest) -> dict:
             detail=f"Error llamando al modelo: {e}",
         ) from e
     return {"eventos": eventos}
+
+
+@router.post("/clasificar-captura", response_model=ClasificarCapturaResponse)
+async def clasificar_captura(body: ClasificarCapturaRequest) -> dict:
+    """Mira el texto de una captura (OCR on-device de una foto) y dice a
+    cuál de los tres flujos de la cámara inteligente pertenece: `tareas`,
+    `eventos` o `apunte`. SOLO viaja el texto: la imagen se quedó en el
+    teléfono. No persiste nada — la app abre la revisión del flujo
+    sugerido y el usuario puede corregir el tipo. Ante duda, devuelve
+    `apunte` (catch-all)."""
+    texto = body.texto.strip()
+    if not texto:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El texto está vacío.",
+        )
+    try:
+        tipo = await llm.clasificar_captura_json(texto)
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error llamando al modelo: {e}",
+        ) from e
+    return {"tipo": tipo}
 
 
 @router.post("/estimar-duraciones", response_model=EstimarDuracionesResponse)

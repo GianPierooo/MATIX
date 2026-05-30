@@ -3,12 +3,15 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:matix/features/captura_camara/application/captura_controller.dart';
+import 'package:matix/features/captura_camara/data/clasificacion_repository.dart';
 import 'package:matix/features/captura_camara/data/ocr_service.dart';
+import 'package:matix/features/captura_camara/domain/destino_ocr.dart';
 
-/// Tests del `CapturaController` (Capa 7-A). No tocamos ML Kit real
-/// (necesita platform channel): sustituimos `ocrServiceProvider` por un
-/// fake que `implements OcrService` — al implementar la interfaz nunca
-/// se construye el `TextRecognizer` nativo.
+/// Tests del `CapturaController` (cámara inteligente). No tocamos ML Kit
+/// real (necesita platform channel) ni el cerebro: sustituimos
+/// `ocrServiceProvider` y `clasificacionRepositoryProvider` por fakes —
+/// al implementar la interfaz nunca se construye el nativo ni se pega a
+/// la red.
 
 class _FakeOcr implements OcrService {
   _FakeOcr({this.texto = '', this.lanza = false});
@@ -25,6 +28,20 @@ class _FakeOcr implements OcrService {
   Future<void> dispose() async {}
 }
 
+class _FakeClasif implements ClasificacionRepository {
+  _FakeClasif({this.destino = DestinoOcr.apunte, this.lanza = false});
+  final DestinoOcr destino;
+  final bool lanza;
+  int llamadas = 0;
+
+  @override
+  Future<DestinoOcr> clasificar(String texto) async {
+    llamadas++;
+    if (lanza) throw Exception('sin red');
+    return destino;
+  }
+}
+
 /// Crea una imagen temporal para que `procesarFoto` tenga algo que
 /// borrar en el `finally`. Devuelve la ruta.
 Future<String> _fotoTemp() async {
@@ -34,9 +51,12 @@ Future<String> _fotoTemp() async {
   return f.path;
 }
 
-ProviderContainer _contenedor(OcrService fake) {
+ProviderContainer _contenedor(OcrService fake, {ClasificacionRepository? clasif}) {
   final c = ProviderContainer(
-    overrides: [ocrServiceProvider.overrideWithValue(fake)],
+    overrides: [
+      ocrServiceProvider.overrideWithValue(fake),
+      clasificacionRepositoryProvider.overrideWithValue(clasif ?? _FakeClasif()),
+    ],
   );
   addTearDown(c.dispose);
   return c;
@@ -68,8 +88,42 @@ void main() {
     expect(File(ruta).existsSync(), isFalse);
   });
 
-  test('procesarFoto sin texto → listo pero vacío=true', () async {
-    final c = _contenedor(_FakeOcr(texto: '   '));
+  // ─── Clasificación: el texto se rutea a cada uno de los tres flujos ──
+  for (final destino in DestinoOcr.values) {
+    test('clasifica a $destino → destino sugerido en el estado', () async {
+      final c = _contenedor(
+        _FakeOcr(texto: 'algo con texto'),
+        clasif: _FakeClasif(destino: destino),
+      );
+      final ruta = await _fotoTemp();
+
+      await c.read(capturaControllerProvider.notifier).procesarFoto(ruta);
+
+      final estado = c.read(capturaControllerProvider);
+      expect(estado.fase, FaseCaptura.listo);
+      expect(estado.destino, destino);
+    });
+  }
+
+  test('clasificación que falla → cae a apunte (best-effort), no atasca',
+      () async {
+    final c = _contenedor(
+      _FakeOcr(texto: 'un texto cualquiera'),
+      clasif: _FakeClasif(lanza: true),
+    );
+    final ruta = await _fotoTemp();
+
+    await c.read(capturaControllerProvider.notifier).procesarFoto(ruta);
+
+    final estado = c.read(capturaControllerProvider);
+    expect(estado.fase, FaseCaptura.listo);
+    expect(estado.texto, 'un texto cualquiera');
+    expect(estado.destino, DestinoOcr.apunte);
+  });
+
+  test('procesarFoto sin texto → listo, apunte y sin clasificar', () async {
+    final clasif = _FakeClasif(destino: DestinoOcr.tareas);
+    final c = _contenedor(_FakeOcr(texto: '   '), clasif: clasif);
     final ruta = await _fotoTemp();
 
     await c.read(capturaControllerProvider.notifier).procesarFoto(ruta);
@@ -77,6 +131,10 @@ void main() {
     final estado = c.read(capturaControllerProvider);
     expect(estado.fase, FaseCaptura.listo);
     expect(estado.vacio, isTrue);
+    // Sin texto no hay nada que clasificar: catch-all apunte, y NO se
+    // llama al cerebro.
+    expect(estado.destino, DestinoOcr.apunte);
+    expect(clasif.llamadas, 0);
   });
 
   test('procesarFoto que lanza → fase error con mensaje', () async {

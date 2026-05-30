@@ -224,6 +224,66 @@ async def extraer_tareas_json(
     return tareas
 
 
+async def clasificar_captura_json(
+    texto: str,
+    *,
+    model: str = "gpt-4o-mini",
+) -> str:
+    """Clasifica el texto de una captura (OCR de una foto) en uno de los
+    tres destinos de la cámara inteligente:
+
+    - ``"tareas"``: una lista de pendientes / cosas por hacer.
+    - ``"eventos"``: un horario, sílabo o calendario con clases, fechas
+      o exámenes.
+    - ``"apunte"``: una nota, idea, definición o cualquier otra cosa. Es
+      el **catch-all**: ante la duda, todo cae aquí (siempre se puede
+      guardar como apunte sin perder nada).
+
+    SOLO viaja el texto: la imagen se quedó en el teléfono (OCR
+    on-device). La app abre el flujo sugerido y el usuario puede
+    corregir el tipo. Usa el **modo JSON** de OpenAI para forzar un
+    objeto válido; cualquier respuesta inválida cae a ``"apunte"``.
+    """
+    client = _get_client()
+    system = (
+        "Eres un clasificador de capturas. Recibes el texto que un OCR "
+        "extrajo de una foto y decides a cuál de tres destinos "
+        "pertenece. Puede traer errores de OCR.\n\n"
+        "Destinos:\n"
+        '- "tareas": una lista de cosas por hacer / pendientes '
+        "(ej. 'comprar pan, llamar a Ana, entregar informe').\n"
+        '- "eventos": un horario, sílabo o calendario con clases, fechas '
+        "o exámenes (ej. 'Cálculo III lun y mié 10-12, parcial 15 "
+        "abril').\n"
+        '- "apunte": una nota, idea, definición, resumen o cualquier '
+        "texto que no sea claramente lo anterior. Es el destino por "
+        "defecto cuando dudes.\n\n"
+        "Elige UN solo destino, el más probable. Responde SOLO un objeto "
+        'JSON con esta forma exacta:\n'
+        '{"tipo": "tareas" | "eventos" | "apunte"}'
+    )
+    resp = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": texto},
+        ],
+        temperature=0,
+        response_format={"type": "json_object"},
+    )
+    medidor.registrar_chat(resp.usage)
+
+    contenido = resp.choices[0].message.content or "{}"
+    try:
+        datos = json.loads(contenido)
+    except json.JSONDecodeError:
+        return "apunte"
+    tipo = datos.get("tipo") if isinstance(datos, dict) else None
+    if tipo in ("tareas", "eventos", "apunte"):
+        return tipo
+    return "apunte"
+
+
 async def estimar_duraciones_json(
     tareas: list[dict],
     *,

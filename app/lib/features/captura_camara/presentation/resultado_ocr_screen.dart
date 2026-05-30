@@ -8,17 +8,12 @@ import '../../apuntes/application/guardar_apunte_controller.dart';
 import '../../apuntes/presentation/editor_apunte_screen.dart';
 import '../application/extraccion_eventos_controller.dart';
 import '../application/extraccion_tareas_controller.dart';
+import '../domain/destino_ocr.dart';
 import 'captura_camara_screen.dart';
 import 'revision_eventos_screen.dart';
 import 'revision_tareas_screen.dart';
 
-/// A qué se convierte el texto OCR tras corregirlo.
-///
-/// El OCR on-device (ML Kit, Capa 7-A) es el mismo para todos los
-/// caminos; solo cambia el destino: las tareas y los eventos pasan por
-/// su hoja de revisión, y los apuntes se guardan clasificados (Paso C).
-/// En todos, la imagen se quedó en el teléfono: solo viaja el texto.
-enum DestinoOcr { tareas, apunte, eventos }
+export '../domain/destino_ocr.dart' show DestinoOcr;
 
 /// Muestra el texto que extrajo el OCR en un campo **editable**, para
 /// que el usuario corrija lo que ML Kit haya errado (Capa 7-A) y, con
@@ -54,24 +49,21 @@ class ResultadoOcrScreen extends ConsumerStatefulWidget {
 class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
   late final TextEditingController _texto;
 
-  DestinoOcr get _destino => widget.destino;
+  /// El destino arranca con lo que sugirió la clasificación, pero es
+  /// editable: el usuario corrige el tipo con el selector ("esto en
+  /// realidad es → …") y se reabre el flujo correcto.
+  late DestinoOcr _destino;
 
   @override
   void initState() {
     super.initState();
     _texto = TextEditingController(text: widget.textoInicial);
+    _destino = widget.destino;
     // Arrancamos el flujo limpio: si quedó estado de una captura
     // anterior, lo reseteamos para que el `ref.listen` no dispare una
     // navegación fantasma al montar.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      switch (_destino) {
-        case DestinoOcr.apunte:
-          ref.read(guardarApunteControllerProvider.notifier).reiniciar();
-        case DestinoOcr.eventos:
-          ref.read(extraccionEventosControllerProvider.notifier).reiniciar();
-        case DestinoOcr.tareas:
-          ref.read(extraccionTareasControllerProvider.notifier).reiniciar();
-      }
+      _reiniciarFlujo(_destino);
     });
   }
 
@@ -79,6 +71,27 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
   void dispose() {
     _texto.dispose();
     super.dispose();
+  }
+
+  void _reiniciarFlujo(DestinoOcr destino) {
+    switch (destino) {
+      case DestinoOcr.apunte:
+        ref.read(guardarApunteControllerProvider.notifier).reiniciar();
+      case DestinoOcr.eventos:
+        ref.read(extraccionEventosControllerProvider.notifier).reiniciar();
+      case DestinoOcr.tareas:
+        ref.read(extraccionTareasControllerProvider.notifier).reiniciar();
+    }
+  }
+
+  /// Corrige el tipo cuando Matix adivinó mal. El mismo texto ya
+  /// corregido se reusa; solo cambia a qué flujo de revisión se manda.
+  void _cambiarDestino(DestinoOcr nuevo) {
+    if (nuevo == _destino) return;
+    setState(() => _destino = nuevo);
+    // Limpiamos el estado del flujo nuevo para que su `ref.listen` no
+    // dispare una navegación con datos de una corrida anterior.
+    _reiniciarFlujo(nuevo);
   }
 
   void _capturarOtra() {
@@ -141,6 +154,11 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
                 _AvisoBanner(mensaje: widget.aviso!),
                 const SizedBox(height: MatixSpacing.l),
               ],
+              _SelectorTipo(
+                destino: _destino,
+                onChanged: ocupado ? null : _cambiarDestino,
+              ),
+              const SizedBox(height: MatixSpacing.l),
               Expanded(
                 child: Container(
                   padding: const EdgeInsets.all(MatixSpacing.l),
@@ -286,6 +304,63 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
         );
       }
     });
+  }
+}
+
+/// Selector "esto en realidad es → tareas / eventos / apunte".
+///
+/// Arranca en lo que Matix clasificó; si adivinó mal, el usuario toca
+/// el tipo correcto y la pantalla reabre el flujo adecuado con el mismo
+/// texto. Se deshabilita mientras un flujo está trabajando.
+class _SelectorTipo extends StatelessWidget {
+  const _SelectorTipo({required this.destino, required this.onChanged});
+
+  final DestinoOcr destino;
+  final ValueChanged<DestinoOcr>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Matix detectó qué es. Si se equivocó, cámbialo:',
+          style: MatixText.small.copyWith(color: MatixColors.muted),
+        ),
+        const SizedBox(height: MatixSpacing.m),
+        SizedBox(
+          width: double.infinity,
+          child: SegmentedButton<DestinoOcr>(
+            segments: const [
+              ButtonSegment(
+                value: DestinoOcr.tareas,
+                label: Text('Tareas'),
+                icon: Icon(Icons.checklist_outlined, size: 16),
+              ),
+              ButtonSegment(
+                value: DestinoOcr.eventos,
+                label: Text('Eventos'),
+                icon: Icon(Icons.event_outlined, size: 16),
+              ),
+              ButtonSegment(
+                value: DestinoOcr.apunte,
+                label: Text('Apunte'),
+                icon: Icon(Icons.note_add_outlined, size: 16),
+              ),
+            ],
+            selected: {destino},
+            onSelectionChanged: onChanged == null
+                ? null
+                : (seleccion) => onChanged!(seleccion.first),
+            showSelectedIcon: false,
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              textStyle: WidgetStatePropertyAll(MatixText.small),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 

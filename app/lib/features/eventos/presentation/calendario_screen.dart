@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../theme/matix_colors.dart';
-import '../../captura_camara/presentation/silabo_flow.dart';
+import '../../captura_camara/presentation/captura_camara_screen.dart';
 import '../../cursos/domain/curso.dart';
 import '../../cursos/domain/sesion_clase.dart';
 import '../../universidad/providers/universidad_providers.dart';
@@ -49,8 +49,10 @@ class _CalendarioScreenState extends ConsumerState<CalendarioScreen> {
             icon: const Icon(Icons.today),
           ),
           IconButton(
-            tooltip: 'Escanear sílabo u horario',
-            onPressed: () => iniciarFlujoSilaboDesdeFoto(context, ref),
+            tooltip: 'Cámara inteligente',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const CapturaCamaraScreen()),
+            ),
             icon: const Icon(Icons.document_scanner_outlined),
           ),
           IconButton(
