@@ -20,6 +20,10 @@ import '../features/evaluaciones/domain/evaluacion.dart';
 import '../features/eventos/domain/evento.dart';
 import '../features/eventos/presentation/calendario_screen.dart';
 import '../features/eventos/providers/eventos_providers.dart';
+import '../features/finanzas/domain/movimiento.dart';
+import '../features/finanzas/presentation/finanzas_screen.dart';
+import '../features/finanzas/presentation/formato_finanzas.dart';
+import '../features/finanzas/providers/movimientos_providers.dart';
 import '../features/matix/data/captura_apunte_repository.dart';
 import '../features/matix/data/grabacion_voz_service.dart';
 import '../features/matix/data/matix_transcribir_repository.dart';
@@ -257,6 +261,7 @@ class InicioScreen extends ConsumerWidget {
           ref.invalidate(apuntesListProvider);
           ref.invalidate(sesionesClaseProvider);
           ref.invalidate(cursosListProvider);
+          ref.invalidate(movimientosListProvider);
         },
         child: ListView(
           // Cubre la nav inferior + safe area + saliente del FAB.
@@ -270,6 +275,7 @@ class InicioScreen extends ConsumerWidget {
             _BotonesRitual(),
             _CapturaApunte(),
             _BloqueHoy(),
+            _BloqueFinanzas(),
             _BloqueApuntesRecientes(),
             _BloqueReflote(),
             _BloqueProyectosActivos(),
@@ -1663,6 +1669,130 @@ class _UniMini extends StatelessWidget {
 }
 
 // ─── Piezas compartidas ─────────────────────────────────────────
+
+/// Tarjeta de Finanzas en Inicio: el balance del mes en curso (ingresos,
+/// gastos y balance) que abre la sección completa. Finanzas vive fuera de
+/// la barra inferior; este es su punto de entrada (Finanzas-1).
+class _BloqueFinanzas extends ConsumerWidget {
+  const _BloqueFinanzas();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ahora = DateTime.now();
+    final movimientosAsync = ref.watch(movimientosListProvider);
+
+    void abrir() => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const FinanzasScreen()),
+        );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionLabel(
+          label: 'Finanzas',
+          accionLabel: 'Ver todo',
+          onAccion: abrir,
+        ),
+        movimientosAsync.when(
+          loading: () => const _LoaderLinea(),
+          error: (_, _) => const _EmptyCard('No pude cargar tus finanzas.'),
+          data: (lista) {
+            final resumen = resumenDeMes(lista, ahora.year, ahora.month);
+            return _FinanzasResumenCard(resumen: resumen, onTap: abrir);
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _FinanzasResumenCard extends StatelessWidget {
+  const _FinanzasResumenCard({required this.resumen, required this.onTap});
+  final ResumenFinanzas resumen;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final balance = resumen.balance;
+    final colorBalance = balance >= 0 ? MatixColors.green : MatixColors.red;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 2),
+      child: Material(
+        color: MatixColors.card,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    const Text(
+                      'Balance del mes',
+                      style: TextStyle(fontSize: 12, color: MatixColors.muted),
+                    ),
+                    const Spacer(),
+                    Text(
+                      montoSoles(balance),
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: colorBalance,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                  ],
+                ),
+                if (resumen.vacio) ...[
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Aún no registras movimientos este mes. Toca para empezar.',
+                    style: TextStyle(
+                        fontSize: 12, color: MatixColors.muted, height: 1.3),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      const Icon(Icons.north_east,
+                          size: 13, color: MatixColors.green),
+                      const SizedBox(width: 4),
+                      Text(
+                        montoSoles(resumen.ingresos),
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: MatixColors.green,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      const Icon(Icons.south_west,
+                          size: 13, color: MatixColors.red),
+                      const SizedBox(width: 4),
+                      Text(
+                        montoSoles(resumen.gastos),
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: MatixColors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _SectionLabel extends StatelessWidget {
   const _SectionLabel({
