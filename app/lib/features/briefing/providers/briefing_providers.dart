@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/notificaciones_service.dart';
 import '../../../core/providers.dart';
+import '../../rituales/data/rituales_repository.dart';
 import '../data/briefing_prefs.dart';
 import '../data/briefing_repository.dart';
 
@@ -15,77 +15,63 @@ final briefingHoyProvider = FutureProvider<BriefingHoy>((ref) async {
   return ref.watch(briefingRepositoryProvider).hoy();
 });
 
-final briefingPrefsProvider = Provider<BriefingPrefs>((_) => BriefingPrefs());
-
-/// Estado del switch + hora del briefing matutino. Lee de
-/// SharedPreferences al arrancar y persiste cada cambio.
+/// Estado del switch + hora del briefing matutino. La fuente de verdad es
+/// el CEREBRO (Push Capa 3a): lee la config del servidor al arrancar y
+/// persiste cada cambio ahí. El push lo dispara el scheduler del cerebro,
+/// no una alarma local. Default ON (lo trae el servidor, sembrado activo).
 class BriefingConfigController extends StateNotifier<BriefingConfig> {
-  BriefingConfigController(this._prefs, this._notis)
-      : super(const BriefingConfig(
-          activo: false,
-          hora: BriefingPrefs.horaDefault,
-          minuto: BriefingPrefs.minutoDefault,
-        )) {
+  BriefingConfigController(this._repo)
+      : super(const BriefingConfig(activo: true, hora: 8, minuto: 0)) {
     _ready = _cargar();
   }
 
-  final BriefingPrefs _prefs;
-  final NotificacionesService _notis;
+  final RitualesRepository _repo;
   late final Future<void> _ready;
 
-  /// Future que completa cuando el primer load + reprogramación de
-  /// arranque terminó. Los métodos públicos lo esperan para que no
-  /// se entrelace con escrituras concurrentes.
+  /// Completa cuando terminó el primer load desde el cerebro.
   Future<void> get ready => _ready;
 
   Future<void> _cargar() async {
-    state = await _prefs.leer();
-    // Si quedó activo de una sesión anterior, reprogramamos (idempotente)
-    // por si el SO reseteó las pendientes o instalamos una versión nueva.
-    if (state.activo) {
-      await _programar(state.hora, state.minuto);
+    try {
+      final c = await _repo.obtener('briefing');
+      if (c != null) {
+        state = BriefingConfig(
+          activo: c.activo,
+          hora: c.hora,
+          minuto: c.minuto,
+        );
+      }
+    } catch (_) {
+      // Sin red / migración sin aplicar: dejamos el default (ON, 08:00).
     }
   }
 
   Future<void> activar(bool v) async {
-    await _ready;
-    if (v) {
-      await _notis.pedirPermisos();
-      await _programar(state.hora, state.minuto);
-    } else {
-      await _notis.cancelar(BriefingPrefs.idNotificacion);
-    }
     state = state.copyWith(activo: v);
-    await _prefs.guardar(state);
+    await _guardar();
   }
 
   Future<void> cambiarHora(int hora, int minuto) async {
-    await _ready;
     state = state.copyWith(hora: hora, minuto: minuto);
-    await _prefs.guardar(state);
-    if (state.activo) {
-      await _programar(hora, minuto);
-    }
+    await _guardar();
   }
 
-  Future<void> _programar(int hora, int minuto) async {
-    await _notis.programarDiaria(
-      id: BriefingPrefs.idNotificacion,
-      titulo: '🌅 Briefing de hoy',
-      cuerpo: 'Abrí Matix para ver tu resumen del día.',
-      hora: hora,
-      minuto: minuto,
-      // El payload lo lee el handler registrado en `MatixApp.initState`
-      // para empujar la `BriefingScreen` al tocar la notificación.
-      payload: 'briefing',
-    );
+  Future<void> _guardar() async {
+    try {
+      await _repo.actualizar(
+        'briefing',
+        activo: state.activo,
+        hora: state.hora,
+        minuto: state.minuto,
+      );
+    } catch (_) {
+      // Best-effort: el estado local ya cambió; reintenta en el próximo
+      // toque. (Sin red no podemos persistir.)
+    }
   }
 }
 
 final briefingConfigProvider =
     StateNotifierProvider<BriefingConfigController, BriefingConfig>((ref) {
-  return BriefingConfigController(
-    ref.watch(briefingPrefsProvider),
-    ref.watch(notificacionesServiceProvider),
-  );
+  return BriefingConfigController(ref.watch(ritualesRepositoryProvider));
 });

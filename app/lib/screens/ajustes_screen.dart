@@ -39,12 +39,6 @@ class AjustesScreen extends ConsumerStatefulWidget {
   ConsumerState<AjustesScreen> createState() => _AjustesScreenState();
 }
 
-/// Id estable para la notificación diaria del cierre del día.
-/// Estable entre runs para poder cancelarla sin guardar nada.
-const _kNotifIdCierreDiario = 1001;
-const _kHoraCierre = 21;
-const _kMinutoCierre = 30;
-
 class _AjustesScreenState extends ConsumerState<AjustesScreen> {
   String? _pingResultado;
   bool _pingando = false;
@@ -56,48 +50,18 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
   String? _zonaNotifs;
   bool _probando = false;
 
-  bool _cierreDiarioActivo = false;
-  bool _toggleEnCurso = false;
-
   @override
   void initState() {
     super.initState();
-    _cargarEstadoCierreDiario();
+    _cargarZonaNotifs();
   }
 
-  Future<void> _cargarEstadoCierreDiario() async {
+  Future<void> _cargarZonaNotifs() async {
     final svc = ref.read(notificacionesServiceProvider);
-    final pend = await svc.pendientes();
-    if (mounted) {
-      setState(() {
-        _cierreDiarioActivo = pend.contains(_kNotifIdCierreDiario);
-        // Tras `pendientes()` el servicio ya se inicializó → la zona está
-        // resuelta.
-        _zonaNotifs = svc.zonaHoraria;
-      });
-    }
-  }
-
-  Future<void> _toggleCierreDiario(bool v) async {
-    setState(() => _toggleEnCurso = true);
-    final svc = ref.read(notificacionesServiceProvider);
-    try {
-      if (v) {
-        await svc.pedirPermisos();
-        await svc.programarDiaria(
-          id: _kNotifIdCierreDiario,
-          titulo: 'Cierre del día',
-          cuerpo: '3 cosas que sí hiciste hoy.',
-          hora: _kHoraCierre,
-          minuto: _kMinutoCierre,
-        );
-      } else {
-        await svc.cancelar(_kNotifIdCierreDiario);
-      }
-      if (mounted) setState(() => _cierreDiarioActivo = v);
-    } finally {
-      if (mounted) setState(() => _toggleEnCurso = false);
-    }
+    // `pendientes()` fuerza la inicialización del servicio → la zona queda
+    // resuelta y la mostramos en el diagnóstico.
+    await svc.pendientes();
+    if (mounted) setState(() => _zonaNotifs = svc.zonaHoraria);
   }
 
   Future<void> _ping() async {
@@ -351,48 +315,6 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
           const _DisponibilidadTile(),
 
           const _Seccion('Rituales'),
-          Container(
-            margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-            padding: const EdgeInsets.fromLTRB(14, 4, 8, 4),
-            decoration: BoxDecoration(
-              color: MatixColors.card,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.nightlight_outlined,
-                    color: MatixColors.accent, size: 22),
-                const SizedBox(width: 14),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Recordarme el cierre del día',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: MatixColors.text,
-                        ),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        'Aviso cada noche a las 21:30',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: MatixColors.muted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Switch(
-                  value: _cierreDiarioActivo,
-                  onChanged: _toggleEnCurso ? null : _toggleCierreDiario,
-                ),
-              ],
-            ),
-          ),
           _Accion(
             label: 'Hacer el cierre de hoy',
             icon: Icons.nightlight_outlined,

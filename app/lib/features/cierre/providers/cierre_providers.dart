@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/notificaciones_service.dart';
 import '../../../core/providers.dart';
+import '../../rituales/data/rituales_repository.dart';
 import '../data/cierre_prefs.dart';
 import '../data/cierre_repository.dart';
 
@@ -14,72 +14,57 @@ final cierreHoyProvider = FutureProvider<CierreHoy>((ref) async {
   return ref.watch(cierreRepositoryProvider).hoy();
 });
 
-final cierrePrefsProvider = Provider<CierrePrefs>((_) => CierrePrefs());
-
 /// Estado del switch + hora del cierre del día. Espejo del
-/// `BriefingConfigController` pero con su id, payload y defaults.
+/// `BriefingConfigController`: la config vive en el cerebro (Push Capa 3a)
+/// y el scheduler dispara el push. Default ON, 22:00.
 class CierreConfigController extends StateNotifier<CierreConfig> {
-  CierreConfigController(this._prefs, this._notis)
-      : super(const CierreConfig(
-          activo: false,
-          hora: CierrePrefs.horaDefault,
-          minuto: CierrePrefs.minutoDefault,
-        )) {
+  CierreConfigController(this._repo)
+      : super(const CierreConfig(activo: true, hora: 22, minuto: 0)) {
     _ready = _cargar();
   }
 
-  final CierrePrefs _prefs;
-  final NotificacionesService _notis;
+  final RitualesRepository _repo;
   late final Future<void> _ready;
 
+  /// Completa cuando terminó el primer load desde el cerebro.
   Future<void> get ready => _ready;
 
   Future<void> _cargar() async {
-    state = await _prefs.leer();
-    if (state.activo) {
-      await _programar(state.hora, state.minuto);
+    try {
+      final c = await _repo.obtener('cierre');
+      if (c != null) {
+        state = CierreConfig(activo: c.activo, hora: c.hora, minuto: c.minuto);
+      }
+    } catch (_) {
+      // Sin red / migración sin aplicar: dejamos el default (ON, 22:00).
     }
   }
 
   Future<void> activar(bool v) async {
-    await _ready;
-    if (v) {
-      await _notis.pedirPermisos();
-      await _programar(state.hora, state.minuto);
-    } else {
-      await _notis.cancelar(CierrePrefs.idNotificacion);
-    }
     state = state.copyWith(activo: v);
-    await _prefs.guardar(state);
+    await _guardar();
   }
 
   Future<void> cambiarHora(int hora, int minuto) async {
-    await _ready;
     state = state.copyWith(hora: hora, minuto: minuto);
-    await _prefs.guardar(state);
-    if (state.activo) {
-      await _programar(hora, minuto);
-    }
+    await _guardar();
   }
 
-  Future<void> _programar(int hora, int minuto) async {
-    await _notis.programarDiaria(
-      id: CierrePrefs.idNotificacion,
-      titulo: '🌙 Cierre del día',
-      cuerpo: 'Abrí Matix para repasar tu día.',
-      hora: hora,
-      minuto: minuto,
-      // El handler de `MatixApp.initState` lee este payload para
-      // empujar la `CierreScreen`.
-      payload: 'cierre',
-    );
+  Future<void> _guardar() async {
+    try {
+      await _repo.actualizar(
+        'cierre',
+        activo: state.activo,
+        hora: state.hora,
+        minuto: state.minuto,
+      );
+    } catch (_) {
+      // Best-effort.
+    }
   }
 }
 
 final cierreConfigProvider =
     StateNotifierProvider<CierreConfigController, CierreConfig>((ref) {
-  return CierreConfigController(
-    ref.watch(cierrePrefsProvider),
-    ref.watch(notificacionesServiceProvider),
-  );
+  return CierreConfigController(ref.watch(ritualesRepositoryProvider));
 });

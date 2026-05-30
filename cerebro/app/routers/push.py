@@ -104,9 +104,12 @@ async def probar(
 
 @router.post("/revisar")
 async def revisar(db: Postgrest = Depends(get_db)) -> dict:
-    """Corre AHORA un tick del scheduler de recordatorios (Push Capa 2), sin
+    """Corre AHORA un tick del scheduler (recordatorios + rituales), sin
     esperar el minuto. Útil para probar: crea un evento/tarea con
-    recordatorio cercano y llama a esto. Devuelve cuántos mandó."""
-    from ..matix.recordatorios import revisar_y_enviar
+    recordatorio cercano (o pon la hora del ritual al minuto actual) y llama
+    a esto. Devuelve cuántos mandó."""
+    from ..matix.recordatorios import revisar_rituales, revisar_y_enviar
 
-    return await revisar_y_enviar(db)
+    recordatorios = await revisar_y_enviar(db)
+    rituales = await revisar_rituales(db)
+    return {"recordatorios": recordatorios, "rituales": rituales}

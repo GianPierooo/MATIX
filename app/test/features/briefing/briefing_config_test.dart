@@ -1,165 +1,84 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matix/core/notificaciones_service.dart';
-import 'package:matix/features/briefing/data/briefing_prefs.dart';
 import 'package:matix/features/briefing/providers/briefing_providers.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:matix/features/rituales/data/rituales_repository.dart';
 
-/// Tests del `BriefingConfigController` (Capa 8 reducida · Paso 1).
+/// Tests del `BriefingConfigController` (Push Capa 3a).
 ///
-/// Lo importante: cuando el usuario activa el briefing y/o cambia la
-/// hora, el controller persiste en SharedPreferences y le pide a
-/// `NotificacionesService` que programe/cancele con el id estable.
-/// No tocamos `flutter_local_notifications` real — pasamos un servicio
-/// fake que registra las llamadas.
+/// Ahora la config vive en el CEREBRO: el controller carga del servidor y
+/// persiste cada cambio ahí (el push lo dispara el scheduler). Usamos un
+/// `RitualesRepository` fake que guarda la config y registra los PATCH.
 
-class _NotisFake extends NotificacionesService {
-  final List<({int id, int hora, int minuto, String? payload})> programadas =
-      [];
-  final List<int> canceladas = [];
-  int permisos = 0;
+class _FakeRepo implements RitualesRepository {
+  _FakeRepo(this._actual);
+  RitualConfig? _actual;
+  final List<RitualConfig> guardados = [];
 
   @override
-  Future<void> inicializar() async {}
+  Future<RitualConfig?> obtener(String ritual) async => _actual;
 
   @override
-  Future<bool> pedirPermisos() async {
-    permisos++;
-    return true;
-  }
-
-  @override
-  Future<void> programarDiaria({
-    required int id,
-    required String titulo,
-    required String cuerpo,
+  Future<void> actualizar(
+    String ritual, {
+    required bool activo,
     required int hora,
     required int minuto,
-    String? payload,
   }) async {
-    programadas.add(
-      (id: id, hora: hora, minuto: minuto, payload: payload),
-    );
-  }
-
-  @override
-  Future<void> cancelar(int id) async {
-    canceladas.add(id);
+    final c = (activo: activo, hora: hora, minuto: minuto);
+    _actual = c;
+    guardados.add(c);
   }
 }
 
+ProviderContainer _con(_FakeRepo repo) {
+  final c = ProviderContainer(
+    overrides: [ritualesRepositoryProvider.overrideWithValue(repo)],
+  );
+  addTearDown(c.dispose);
+  return c;
+}
+
 void main() {
-  setUp(() {
-    // SharedPreferences mockeado para que el controller pueda persistir.
-    SharedPreferences.setMockInitialValues({});
-  });
-
-  ProviderContainer containerCon(_NotisFake fake) => ProviderContainer(
-        overrides: [
-          notificacionesServiceProvider.overrideWithValue(fake),
-        ],
-      );
-
-  test('estado inicial: opt-in off, hora 08:00', () async {
-    final fake = _NotisFake();
-    final c = containerCon(fake);
-    addTearDown(c.dispose);
-    // Forzamos primer read para que el controller corra `_cargar`.
+  test('carga la config del cerebro al arrancar', () async {
+    final c = _con(_FakeRepo((activo: false, hora: 7, minuto: 30)));
     await c.read(briefingConfigProvider.notifier).ready;
     final cfg = c.read(briefingConfigProvider);
     expect(cfg.activo, isFalse);
-    expect(cfg.hora, BriefingPrefs.horaDefault);
-    expect(cfg.minuto, BriefingPrefs.minutoDefault);
+    expect(cfg.hora, 7);
+    expect(cfg.minuto, 30);
   });
 
-  test('activar(true) pide permisos y programa con payload=briefing',
-      () async {
-    final fake = _NotisFake();
-    final c = containerCon(fake);
-    addTearDown(c.dispose);
+  test('si el cerebro no responde, queda el default ON 08:00', () async {
+    final c = _con(_FakeRepo(null)); // obtener devuelve null
     await c.read(briefingConfigProvider.notifier).ready;
-
-    await c.read(briefingConfigProvider.notifier).activar(true);
-
-    expect(fake.permisos, 1);
-    expect(fake.programadas, hasLength(1));
-    final p = fake.programadas.single;
-    expect(p.id, BriefingPrefs.idNotificacion);
-    expect(p.hora, BriefingPrefs.horaDefault);
-    expect(p.minuto, BriefingPrefs.minutoDefault);
-    expect(p.payload, 'briefing');
-    expect(c.read(briefingConfigProvider).activo, isTrue);
+    final cfg = c.read(briefingConfigProvider);
+    expect(cfg.activo, isTrue);
+    expect(cfg.hora, 8);
+    expect(cfg.minuto, 0);
   });
 
-  test('activar(false) cancela', () async {
-    final fake = _NotisFake();
-    final c = containerCon(fake);
-    addTearDown(c.dispose);
-    c.read(briefingConfigProvider);
-    await c.read(briefingConfigProvider.notifier).activar(true);
+  test('activar(false) persiste activo=false en el cerebro', () async {
+    final repo = _FakeRepo((activo: true, hora: 8, minuto: 0));
+    final c = _con(repo);
+    await c.read(briefingConfigProvider.notifier).ready;
 
     await c.read(briefingConfigProvider.notifier).activar(false);
 
-    expect(fake.canceladas, [BriefingPrefs.idNotificacion]);
     expect(c.read(briefingConfigProvider).activo, isFalse);
+    expect(repo.guardados.last.activo, isFalse);
   });
 
-  test(
-    'cambiarHora estando activo reprograma con el nuevo horario',
-    () async {
-      final fake = _NotisFake();
-      final c = containerCon(fake);
-      addTearDown(c.dispose);
-      c.read(briefingConfigProvider);
-      await c.read(briefingConfigProvider.notifier).activar(true);
-      fake.programadas.clear();
+  test('cambiarHora persiste la nueva hora en el cerebro', () async {
+    final repo = _FakeRepo((activo: true, hora: 8, minuto: 0));
+    final c = _con(repo);
+    await c.read(briefingConfigProvider.notifier).ready;
 
-      await c.read(briefingConfigProvider.notifier).cambiarHora(7, 15);
+    await c.read(briefingConfigProvider.notifier).cambiarHora(7, 15);
 
-      expect(fake.programadas, hasLength(1));
-      expect(fake.programadas.single.hora, 7);
-      expect(fake.programadas.single.minuto, 15);
-      // El estado refleja el cambio y se persistió.
-      final cfg = c.read(briefingConfigProvider);
-      expect(cfg.hora, 7);
-      expect(cfg.minuto, 15);
-    },
-  );
-
-  test(
-    'cambiarHora estando desactivado solo persiste, NO programa',
-    () async {
-      final fake = _NotisFake();
-      final c = containerCon(fake);
-      addTearDown(c.dispose);
-      c.read(briefingConfigProvider);
-
-      await c.read(briefingConfigProvider.notifier).cambiarHora(6, 30);
-
-      expect(fake.programadas, isEmpty);
-      expect(c.read(briefingConfigProvider).hora, 6);
-      expect(c.read(briefingConfigProvider).minuto, 30);
-    },
-  );
-
-  test('persistencia: tras guardar, un container nuevo recupera valores',
-      () async {
-    final fake1 = _NotisFake();
-    final c1 = containerCon(fake1);
-    await c1.read(briefingConfigProvider.notifier).ready;
-    await c1.read(briefingConfigProvider.notifier).cambiarHora(9, 45);
-    await c1.read(briefingConfigProvider.notifier).activar(true);
-    c1.dispose();
-
-    final fake2 = _NotisFake();
-    final c2 = containerCon(fake2);
-    addTearDown(c2.dispose);
-    await c2.read(briefingConfigProvider.notifier).ready;
-    final cfg = c2.read(briefingConfigProvider);
-    expect(cfg.activo, isTrue);
-    expect(cfg.hora, 9);
-    expect(cfg.minuto, 45);
-    // Y como quedó activo, el nuevo container reprograma al arrancar.
-    expect(fake2.programadas, hasLength(1));
+    final cfg = c.read(briefingConfigProvider);
+    expect(cfg.hora, 7);
+    expect(cfg.minuto, 15);
+    expect(repo.guardados.last.hora, 7);
+    expect(repo.guardados.last.minuto, 15);
   });
 }

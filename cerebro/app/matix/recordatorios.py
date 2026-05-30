@@ -34,6 +34,10 @@ logger = logging.getLogger("matix.recordatorios")
 LIMA = ZoneInfo("America/Lima")
 LOOKBACK = timedelta(minutes=10)
 GRACE = timedelta(seconds=90)
+# Ventana de catch-up de los rituales diarios: si el cerebro estuvo caído a
+# la hora del ritual y vuelve dentro de este rato, igual lo manda (una vez
+# por día). Más viejo que esto = se considera stale y no se manda.
+VENTANA_RITUAL = timedelta(hours=2)
 
 
 @dataclass(frozen=True)
@@ -212,6 +216,149 @@ async def revisar_y_enviar(db: Postgrest, *, ahora: datetime | None = None) -> d
     return {"candidatos": len(tareas) + len(eventos), "enviados": enviados_ok}
 
 
+# ─── Rituales diarios: briefing + cierre (Push Capa 3a) ──────────────────
+def rituales_due(
+    configs: list[dict],
+    enviados_hoy: set[str],
+    ahora: datetime,
+) -> list[str]:
+    """PURO: dados la config de los rituales, cuáles ya se mandaron hoy y
+    `ahora`, devuelve qué rituales toca mandar. Un ritual se manda si está
+    activo, su hora ya pasó hoy y hace menos de `VENTANA_RITUAL` (catch-up),
+    y no se mandó aún hoy."""
+    local = ahora.astimezone(LIMA)
+    out: list[str] = []
+    for c in configs:
+        if not c.get("activo"):
+            continue
+        ritual = c.get("ritual")
+        if not ritual or ritual in enviados_hoy:
+            continue
+        prog = local.replace(
+            hour=int(c["hora"]), minute=int(c["minuto"]), second=0, microsecond=0
+        )
+        diff = (local - prog).total_seconds()
+        if 0 <= diff < VENTANA_RITUAL.total_seconds():
+            out.append(ritual)
+    return out
+
+
+async def _contar_hoy(db: Postgrest, ahora: datetime) -> tuple[int, int]:
+    """(eventos de hoy, tareas que vencen hoy) en hora de Lima. Best-effort:
+    si falla, devuelve (0, 0) y el briefing sale sin números."""
+    try:
+        hoy = ahora.astimezone(LIMA).date()
+        eventos = await db.list(
+            "eventos",
+            raw_filters={"inicia_en": "not.is.null", "eliminado_en": "is.null"},
+            limit=500,
+        )
+        nev = sum(
+            1
+            for e in eventos
+            if (d := _parse(e.get("inicia_en"))) and d.astimezone(LIMA).date() == hoy
+        )
+        tareas = await db.list(
+            "tareas",
+            raw_filters={
+                "vence_en": "not.is.null",
+                "completada": "is.false",
+                "eliminado_en": "is.null",
+            },
+            limit=500,
+        )
+        ntar = sum(
+            1
+            for t in tareas
+            if (d := _parse(t.get("vence_en"))) and d.astimezone(LIMA).date() == hoy
+        )
+        return nev, ntar
+    except Exception:  # noqa: BLE001
+        logger.exception("briefing: no pude contar lo de hoy")
+        return 0, 0
+
+
+async def _contenido_ritual(
+    db: Postgrest, ritual: str, ahora: datetime
+) -> tuple[str, str]:
+    if ritual == "cierre":
+        return (
+            "🌙 Cierre del día",
+            "¿Qué aprendiste hoy? Anota 3 cosas que sí hiciste y haz tu "
+            "descarga mental. Toca para cerrar el día.",
+        )
+    nev, ntar = await _contar_hoy(db, ahora)
+    if nev == 0 and ntar == 0:
+        cuerpo = "Día despejado, nada agendado. Toca para ver tu resumen."
+    else:
+        cuerpo = (
+            f"Hoy: {nev} evento(s) y {ntar} tarea(s) que vencen. "
+            "Toca para ver tu día."
+        )
+    return ("🌅 Buenos días", cuerpo)
+
+
+async def revisar_rituales(db: Postgrest, *, ahora: datetime | None = None) -> dict:
+    """Un tick de rituales: si toca el briefing o el cierre (hora de Lima) y
+    no se mandó hoy, manda el push. Best-effort."""
+    ahora = ahora or datetime.now(timezone.utc)
+    hoy_iso = ahora.astimezone(LIMA).date().isoformat()
+
+    configs = await db.list("config_rituales", limit=10)
+    if not configs:
+        return {"rituales": 0}
+    env_rows = await db.list(
+        "rituales_enviados", filters={"fecha": hoy_iso}, limit=10
+    )
+    enviados = {r["ritual"] for r in env_rows}
+
+    due = rituales_due(configs, enviados, ahora)
+    if not due:
+        return {"rituales": 0}
+
+    tokens = [t["token"] for t in await db.list("device_tokens", limit=100)]
+    if not tokens:
+        return {"rituales": 0, "sin_tokens": True}
+
+    enviados_ok = 0
+    for ritual in due:
+        titulo, cuerpo = await _contenido_ritual(db, ritual, ahora)
+        algun_ok = False
+        for tok in list(tokens):
+            try:
+                await asyncio.to_thread(
+                    enviar_push,
+                    tok,
+                    titulo=titulo,
+                    cuerpo=cuerpo,
+                    data={"payload": ritual},
+                )
+                algun_ok = True
+            except TokenInvalido:
+                filas = await db.list("device_tokens", filters={"token": tok}, limit=1)
+                if filas:
+                    await db.delete("device_tokens", filas[0]["id"])
+                tokens.remove(tok)
+            except RuntimeError as e:
+                logger.error("scheduler rituales: FCM no configurado (%s)", e)
+                return {"rituales": enviados_ok, "error": "fcm_no_config"}
+            except Exception:  # noqa: BLE001
+                logger.exception("scheduler rituales: fallo mandando push")
+
+        if algun_ok:
+            try:
+                await db.insert(
+                    "rituales_enviados", {"ritual": ritual, "fecha": hoy_iso}
+                )
+                enviados_ok += 1
+            except Exception:  # noqa: BLE001
+                logger.debug("ritual ya marcado hoy: %s", ritual)
+
+    if enviados_ok:
+        logger.info("scheduler: %d ritual(es) enviado(s) por push", enviados_ok)
+    return {"rituales": enviados_ok}
+
+
 # ─── Arranque / parada del job (lo llama el lifespan de FastAPI) ──────────
 _scheduler = None
 
@@ -234,7 +381,11 @@ def iniciar(db: Postgrest) -> None:
         try:
             await revisar_y_enviar(db)
         except Exception:  # noqa: BLE001
-            logger.exception("scheduler: el tick falló")
+            logger.exception("scheduler: el tick de recordatorios falló")
+        try:
+            await revisar_rituales(db)
+        except Exception:  # noqa: BLE001
+            logger.exception("scheduler: el tick de rituales falló")
 
     sch = AsyncIOScheduler(timezone=LIMA)
     sch.add_job(
