@@ -6,6 +6,7 @@ import '../../../theme/matix_colors.dart';
 import '../../../theme/matix_spacing.dart';
 import '../domain/movimiento.dart';
 import '../providers/movimientos_providers.dart';
+import 'dashboard_finanzas_screen.dart';
 import 'editor_movimiento_screen.dart';
 import 'formato_finanzas.dart';
 
@@ -49,6 +50,14 @@ class _FinanzasScreenState extends ConsumerState<FinanzasScreen> {
       appBar: AppBar(
         title: const Text('Finanzas'),
         actions: [
+          IconButton(
+            tooltip: 'Dashboard',
+            icon: const Icon(Icons.insights_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                  builder: (_) => const DashboardFinanzasScreen()),
+            ),
+          ),
           IconButton(
             tooltip: 'Nuevo movimiento',
             icon: const Icon(Icons.add),

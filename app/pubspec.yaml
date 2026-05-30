@@ -42,6 +42,11 @@ dependencies:
   # Formato de fechas y números en es-PE.
   intl: ^0.20.2
 
+  # Gráficos del dashboard de Finanzas (Finanzas-3): torta de gastos por
+  # categoría y barras de ingresos vs gastos por mes. Solo visualización
+  # sobre los movimientos que ya se registran.
+  fl_chart: ^0.69.0
+
   # Notificaciones locales programadas (Paso 11).
   # Necesita `timezone` para programar en hora local del usuario y
   # convertir a UTC al guardar.
