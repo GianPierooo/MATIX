@@ -1,17 +1,18 @@
-"""Ingesta documentos de una carpeta al RAG de Matix (Capa 3).
+"""Ingesta documentos de una carpeta a la BIBLIOTECA de material de
+aprendizaje de Matix (Fase 1).
 
-Lee los archivos de una carpeta (.txt, .md, .pdf, .docx), extrae el
-texto y crea un APUNTE por documento llamando al cerebro
-(`POST /api/v1/apuntes`). Crear el apunte dispara el indexador semántico
-(embeddings con OpenAI → tabla `apunte_chunks`), así que tras correr esto
-Matix ya puede buscar y citar el contenido por significado.
+OJO: el material NO va a los apuntes (tu inbox de ideas). Va a un store
+SEPARADO (`material_chunks`), etiquetado por:
 
-Reusa todo el pipeline que ya existe (apuntes + indexador del Paso 1 de
-Capa 3); NO toca la base de datos directamente: solo habla con el cerebro
-por su API, igual que la app. Por eso únicamente necesita la URL del
-cerebro y la MATIX_API_KEY — ninguna credencial de Supabase.
+  - skill  = la CARPETA   (ej. 'calistenia')  → un track.
+  - bloque = cada ARCHIVO (ej. 'bloque_3')    → una etapa del track.
 
-La imagen/archivo original NO se sube: solo viaja el texto extraído.
+Así Matix puede traer "el bloque 3 de calistenia" sin mezclarlo con la
+búsqueda de apuntes. El cerebro trocea/embebe y guarda; el documento
+original se queda en tu PC (solo viaja el texto).
+
+Idempotente por skill+bloque: re-ingestar el mismo archivo REEMPLAZA su
+material (no duplica).
 
 ────────────────────────────────────────────────────────────────────
 USO
@@ -22,54 +23,50 @@ USO
 
        pip install pypdf python-docx
 
-2) Dale la URL del cerebro y tu API key. Dos opciones:
-
-   a) Variables de entorno (recomendado):
+2) Dale la URL del cerebro y tu API key (variables de entorno o flags):
 
        # Windows (PowerShell)
        $env:MATIX_API_URL = "https://tu-cerebro.up.railway.app"
        $env:MATIX_API_KEY = "tu-token-secreto"
-       python scripts/ingestar_documentos.py "C:/ruta/a/INGLES"
+       python scripts/ingestar_documentos.py "C:/ruta/a/calistenia"
 
-       # Linux / macOS
-       export MATIX_API_URL="https://tu-cerebro.up.railway.app"
-       export MATIX_API_KEY="tu-token-secreto"
-       python scripts/ingestar_documentos.py ~/Documentos/INGLES
-
-   b) Por argumento, sin tocar el entorno:
-
-       python scripts/ingestar_documentos.py "C:/ruta/a/INGLES" \
+       # …o por argumento, sin tocar el entorno:
+       python scripts/ingestar_documentos.py "C:/ruta/a/calistenia" \
          --api-url "https://tu-cerebro.up.railway.app" \
          --api-key "tu-token-secreto"
 
-3) La etiqueta del apunte por defecto es el nombre de la carpeta
-   (p.ej. "INGLES"), para que puedas filtrarlos después. Cámbiala con
-   `--etiqueta`.
+   El skill por defecto es el nombre de la carpeta ('calistenia').
+   Cámbialo con --skill. El bloque sale del nombre de cada archivo
+   (ej. "Bloque 3.pdf" → 'bloque_3').
 
-Opciones útiles:
-   --dry-run         No crea nada; solo muestra qué haría (para probar).
-   --etiqueta TXT    Etiqueta a poner en cada apunte (default: carpeta).
-   --curso-id UUID   Asocia los apuntes a un curso existente.
-   --proyecto-id U   Asocia los apuntes a un proyecto existente.
-   --max-chars N     Corta documentos largos en apuntes de ~N caracteres
-                     (default 18000) para que TODO quede indexado: el
-                     indexador embebe ~1 chunk por apunte.
-
-Es seguro re-correrlo, pero NO es idempotente: vuelve a crear los
-apuntes. Si reingestas una carpeta, borra antes los apuntes viejos de esa
-etiqueta desde la app (o no la reingestes).
+Opciones:
+   --dry-run         No sube nada; solo muestra qué haría (para probar).
+   --skill TEXTO     Skill/track (default: nombre de la carpeta).
+   --max-chars N     Corta archivos largos en piezas de ~N caracteres
+                     (default 18000) para que TODO quede indexado.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import re
 import sys
+import unicodedata
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 EXTENSIONES = {".txt", ".md", ".pdf", ".docx"}
+
+
+def slug_bloque(texto: str) -> str:
+    """Normaliza el nombre de un archivo a un tag de bloque estable:
+    sin acentos, minúsculas, separadores → '_'. Ej: 'Bloque 3' →
+    'bloque_3', 'Día 1.pdf' (stem 'Día 1') → 'dia_1'."""
+    t = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
+    t = re.sub(r"[^a-z0-9]+", "_", t.strip().lower()).strip("_")
+    return t or "sin_nombre"
 
 
 # ─── Extracción de texto por formato ──────────────────────────────────
@@ -85,7 +82,7 @@ def _texto_de_pdf(ruta: Path) -> str:
             "Falta 'pypdf' para leer PDFs. Instálalo con: pip install pypdf"
         ) from e
     lector = PdfReader(str(ruta))
-    return "\n\n".join((pagina.extract_text() or "") for pagina in lector.pages)
+    return "\n\n".join((p.extract_text() or "") for p in lector.pages)
 
 
 def _texto_de_docx(ruta: Path) -> str:
@@ -113,9 +110,8 @@ def extraer_texto(ruta: Path) -> str:
 
 # ─── Troceo de documentos largos ──────────────────────────────────────
 def trocear(texto: str, max_chars: int) -> list[str]:
-    """Parte `texto` en piezas de hasta `max_chars`, cortando en un
-    salto de línea cercano al límite para no romper a mitad de frase.
-    Un documento corto devuelve una sola pieza."""
+    """Parte `texto` en piezas de hasta `max_chars`, cortando en un salto
+    de línea cercano al límite. Un documento corto devuelve una pieza."""
     texto = texto.strip()
     if len(texto) <= max_chars:
         return [texto] if texto else []
@@ -135,56 +131,52 @@ def trocear(texto: str, max_chars: int) -> list[str]:
 
 
 # ─── Cliente del cerebro (stdlib, sin dependencias) ───────────────────
-def crear_apunte(
+def ingestar_bloque(
     *,
     api_url: str,
     api_key: str,
-    titulo: str,
-    contenido: str,
-    etiquetas: list[str],
-    curso_id: str | None,
-    proyecto_id: str | None,
-) -> None:
-    cuerpo: dict[str, object] = {
-        "titulo": titulo,
-        "contenido": contenido,
-        "etiquetas": etiquetas,
-    }
-    if curso_id:
-        cuerpo["curso_id"] = curso_id
-    if proyecto_id:
-        cuerpo["proyecto_id"] = proyecto_id
-
-    datos = json.dumps(cuerpo).encode("utf-8")
+    skill: str,
+    bloque: str,
+    fuente: str,
+    piezas: list[str],
+) -> dict:
+    cuerpo = {"skill": skill, "bloque": bloque, "fuente": fuente, "piezas": piezas}
     req = urllib.request.Request(
-        api_url.rstrip("/") + "/api/v1/apuntes",
-        data=datos,
+        api_url.rstrip("/") + "/api/v1/material/ingestar",
+        data=json.dumps(cuerpo).encode("utf-8"),
         method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "X-Matix-Key": api_key,
-        },
+        headers={"Content-Type": "application/json", "X-Matix-Key": api_key},
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    # La embebida de varias piezas puede tardar; damos margen.
+    with urllib.request.urlopen(req, timeout=120) as resp:
         if resp.status not in (200, 201):
             raise RuntimeError(f"HTTP {resp.status}")
+        return json.loads(resp.read().decode("utf-8"))
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Ingesta documentos de una carpeta al RAG de Matix.",
+        description="Ingesta documentos de una carpeta a la biblioteca de "
+        "material de Matix (un skill = la carpeta; un bloque = cada archivo).",
     )
-    parser.add_argument("carpeta", help="Carpeta con los documentos.")
-    parser.add_argument("--etiqueta", help="Etiqueta (default: nombre de la carpeta).")
+    parser.add_argument("carpeta", help="Carpeta del skill (ej. .../calistenia).")
+    parser.add_argument("--skill", help="Skill/track (default: nombre de la carpeta).")
     parser.add_argument("--api-url", default=os.environ.get("MATIX_API_URL"))
     parser.add_argument("--api-key", default=os.environ.get("MATIX_API_KEY"))
-    parser.add_argument("--curso-id", dest="curso_id")
-    parser.add_argument("--proyecto-id", dest="proyecto_id")
     parser.add_argument("--max-chars", type=int, default=18000)
     parser.add_argument(
-        "--dry-run", action="store_true", help="No crea nada; solo muestra."
+        "--dry-run", action="store_true", help="No sube nada; solo muestra."
     )
     args = parser.parse_args()
+
+    # Consolas de Windows suelen ser cp1252 y revientan con caracteres
+    # fuera de ese set. Forzamos UTF-8 (con reemplazo) para no crashear
+    # imprimiendo nombres de archivo con tildes u otros símbolos.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
 
     carpeta = Path(args.carpeta).expanduser()
     if not carpeta.is_dir():
@@ -200,7 +192,7 @@ def main() -> int:
         )
         return 2
 
-    etiqueta = args.etiqueta or carpeta.name
+    skill = slug_bloque(args.skill or carpeta.name)
     archivos = sorted(
         p for p in carpeta.rglob("*")
         if p.is_file() and p.suffix.lower() in EXTENSIONES
@@ -210,16 +202,16 @@ def main() -> int:
         return 0
 
     print(
-        f"Carpeta: {carpeta}\nEtiqueta: {etiqueta}\n"
-        f"Documentos encontrados: {len(archivos)}"
-        + ("  (DRY-RUN: no se crea nada)" if args.dry_run else "")
+        f"Carpeta: {carpeta}\nSkill: {skill}\n"
+        f"Archivos (bloques): {len(archivos)}"
+        + ("  (DRY-RUN: no se sube nada)" if args.dry_run else "")
         + "\n"
     )
 
-    fallidos = vacios = apuntes = 0
+    ok = fallidos = vacios = piezas_total = 0
     for i, ruta in enumerate(archivos, start=1):
-        nombre = ruta.relative_to(carpeta)
-        print(f"  [{i}/{len(archivos)}] {nombre}", end=" ", flush=True)
+        bloque = slug_bloque(ruta.stem)
+        print(f"  [{i}/{len(archivos)}] {ruta.name} -> bloque '{bloque}'", end=" ", flush=True)
         try:
             texto = extraer_texto(ruta).strip()
         except RuntimeError as e:
@@ -227,44 +219,43 @@ def main() -> int:
             fallidos += 1
             continue
         if not texto:
-            print("— vacío, lo salto")
+            print("- vacío, lo salto")
             vacios += 1
             continue
 
         piezas = trocear(texto, args.max_chars)
-        base = ruta.stem
-        for k, pieza in enumerate(piezas, start=1):
-            titulo = base if len(piezas) == 1 else f"{base} (parte {k}/{len(piezas)})"
-            if args.dry_run:
-                apuntes += 1
-                continue
-            try:
-                crear_apunte(
-                    api_url=args.api_url,
-                    api_key=args.api_key,
-                    titulo=titulo,
-                    contenido=pieza,
-                    etiquetas=[etiqueta],
-                    curso_id=args.curso_id,
-                    proyecto_id=args.proyecto_id,
-                )
-                apuntes += 1
-            except (urllib.error.URLError, RuntimeError) as e:
-                print(f"FALLÓ al crear «{titulo}» ({e})")
-                fallidos += 1
-                break
-        else:
-            print(f"ok ({len(piezas)} apunte(s))")
+        if args.dry_run:
+            print(f"ok ({len(piezas)} pieza(s))")
+            piezas_total += len(piezas)
+            ok += 1
+            continue
+        try:
+            res = ingestar_bloque(
+                api_url=args.api_url,
+                api_key=args.api_key,
+                skill=skill,
+                bloque=bloque,
+                fuente=ruta.name,
+                piezas=piezas,
+            )
+            extra = (
+                f", reemplazó {res['reemplazados']}" if res.get("reemplazados") else ""
+            )
+            print(f"ok ({res.get('creados', len(piezas))} pieza(s){extra})")
+            piezas_total += res.get("creados", len(piezas))
+            ok += 1
+        except (urllib.error.URLError, RuntimeError, ValueError) as e:
+            print(f"FALLÓ ({e})")
+            fallidos += 1
 
-    procesados = len(archivos) - fallidos - vacios
     print(
-        f"\nListo. Documentos procesados: {procesados} · apuntes creados: "
-        f"{apuntes} · vacíos: {vacios} · fallidos: {fallidos}"
+        f"\nListo. Bloques ok: {ok} · piezas: {piezas_total} · "
+        f"vacíos: {vacios} · fallidos: {fallidos}"
     )
-    if not args.dry_run:
+    if not args.dry_run and ok:
         print(
-            "Los embeddings se generan en segundo plano en el cerebro; en "
-            "unos segundos Matix ya podrá buscar este material."
+            "El material quedó en la biblioteca (store aparte de tus "
+            "apuntes). Matix ya puede traerlo por skill/bloque."
         )
     return 1 if fallidos else 0
 

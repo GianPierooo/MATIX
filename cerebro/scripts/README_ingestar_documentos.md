@@ -1,15 +1,28 @@
-# Ingestar documentos al RAG de Matix
+# Ingestar documentos a la biblioteca de material (Fase 1)
 
 `scripts/ingestar_documentos.py` sube los documentos de una carpeta a la
-memoria de Matix (RAG, Capa 3). Lee cada archivo, extrae el texto y crea
-**un apunte por documento** llamando al cerebro. Crear el apunte dispara
-el indexador (embeddings con OpenAI), así que después Matix puede buscar
-y citar ese material por significado.
+**biblioteca de material de aprendizaje** de Matix — un store **separado**
+de tus apuntes (tu inbox de ideas). El material es lo que consumen los
+*tracks*.
+
+Cada pieza queda etiquetada por:
+
+- **skill** = la **carpeta** (ej. `calistenia`) → un track.
+- **bloque** = cada **archivo** (ej. `Bloque 3.pdf` → `bloque_3`) → una etapa.
+
+Así Matix puede traer *"el bloque 3 de calistenia"* sin mezclarlo con la
+búsqueda de apuntes. El cerebro trocea, embebe y guarda en
+`material_chunks`; el archivo original se queda en tu PC (solo viaja el
+texto).
+
+> **No va a los apuntes.** Los apuntes son tu inbox de ideas; esto es
+> material de estudio, y vive aparte.
 
 - Formatos: `.txt`, `.md`, `.pdf`, `.docx` (recorre subcarpetas).
-- Solo viaja el **texto** extraído: el archivo original no se sube.
-- Habla con el cerebro por su API (igual que la app). **No** necesita
-  credenciales de Supabase — solo la URL del cerebro y tu `MATIX_API_KEY`.
+- Habla con el cerebro por su API → solo necesita la URL del cerebro y tu
+  `MATIX_API_KEY`. **No** toca Supabase ni necesita sus credenciales.
+- **Idempotente por skill+bloque:** re-ingestar el mismo archivo
+  **reemplaza** su material (no duplica).
 
 ---
 
@@ -21,11 +34,7 @@ Los `.txt` y `.md` no necesitan nada. Para PDF y Word:
 pip install pypdf python-docx
 ```
 
-(Si solo vas a subir `.txt`/`.md`, puedes saltarte este paso.)
-
 ## 2. Dónde poner la URL del cerebro y la API key
-
-Dos formas — elige una:
 
 **A) Variables de entorno (recomendado).** La URL es la del cerebro en
 Railway; la key es el mismo `MATIX_API_KEY` que usa la app.
@@ -42,69 +51,74 @@ export MATIX_API_URL="https://tu-cerebro.up.railway.app"
 export MATIX_API_KEY="tu-token-secreto"
 ```
 
-**B) Por argumento** (sin tocar el entorno): `--api-url` y `--api-key`
-en el comando (ver abajo).
+**B) Por argumento:** `--api-url` y `--api-key` en el comando.
 
-> No pegues la key en ningún archivo que se suba al repo.
+> No pegues la key en archivos que se suban al repo.
 
-## 3. Correrlo sobre tu carpeta INGLES
+## 3. Cómo organizar la carpeta
 
-Desde la carpeta `cerebro/`:
+Una carpeta por **skill**, y dentro un archivo por **bloque**:
+
+```
+calistenia/
+  Bloque 1.pdf
+  Bloque 2.pdf
+  Bloque 3.md
+```
+
+Apuntas el script a la carpeta del skill (`calistenia`). Cada archivo se
+ingesta como su bloque.
+
+## 4. Comando final para ingestar
+
+Desde `cerebro/`:
 
 ```powershell
-# Windows, con las variables ya definidas (paso 2A)
-python scripts/ingestar_documentos.py "C:/Users/gianp/Documentos/INGLES"
+# Windows, con MATIX_API_URL y MATIX_API_KEY ya definidas (paso 2A)
+python scripts/ingestar_documentos.py "C:/Users/gianp/Documentos/calistenia"
 ```
 
 ```bash
 # Linux/macOS
-python scripts/ingestar_documentos.py ~/Documentos/INGLES
+python scripts/ingestar_documentos.py ~/Documentos/calistenia
 ```
 
-O pasando la URL/key por argumento (paso 2B):
+El **skill** por defecto es el nombre de la carpeta (`calistenia`);
+cámbialo con `--skill`. El **bloque** sale del nombre de cada archivo.
+
+### Probar sin subir nada
 
 ```bash
-python scripts/ingestar_documentos.py "C:/ruta/a/INGLES" \
-  --api-url "https://tu-cerebro.up.railway.app" \
-  --api-key "tu-token-secreto"
+python scripts/ingestar_documentos.py "C:/ruta/a/calistenia" --dry-run
 ```
-
-La **etiqueta** de los apuntes es, por defecto, el nombre de la carpeta
-(`INGLES`), para poder filtrarlos luego. Cámbiala con `--etiqueta`.
-
-### Probar sin crear nada
-
-```bash
-python scripts/ingestar_documentos.py "C:/ruta/a/INGLES" --dry-run
-```
-
-Lista qué documentos encontró y cuántos apuntes crearía, sin tocar nada.
-
----
 
 ## Opciones
 
 | Opción | Para qué |
 |---|---|
-| `--dry-run` | No crea nada; solo muestra qué haría. |
-| `--etiqueta TEXTO` | Etiqueta de los apuntes (default: nombre de la carpeta). |
+| `--dry-run` | No sube nada; solo muestra qué haría. |
+| `--skill TEXTO` | Skill/track (default: nombre de la carpeta). |
 | `--api-url URL` | URL del cerebro (si no usas `MATIX_API_URL`). |
 | `--api-key KEY` | API key (si no usas `MATIX_API_KEY`). |
-| `--curso-id UUID` | Asocia los apuntes a un curso existente. |
-| `--proyecto-id UUID` | Asocia los apuntes a un proyecto existente. |
-| `--max-chars N` | Corta documentos largos en apuntes de ~N caracteres (default 18000). |
+| `--max-chars N` | Corta archivos largos en piezas de ~N caracteres (default 18000). |
 
-**Documentos largos:** el indexador embebe ~1 chunk por apunte, así que
-un PDF muy largo se parte en varios apuntes (`Documento (parte 1/3)`, …)
-para que **todo** el contenido quede buscable. Ajusta el tamaño con
-`--max-chars`.
+**Documentos largos:** se parten en varias piezas (todas con el mismo
+skill+bloque) para que **todo** quede indexado y buscable.
+
+## Cómo lo usa Matix
+
+Matix consulta este store con la tool `buscar_material(consulta, skill?,
+bloque?)` — filtrando por skill y/o bloque. Es independiente de
+`buscar_apuntes` (tus ideas): los dos mundos no se mezclan.
 
 ## Notas
 
-- **No es idempotente.** Cada corrida crea apuntes nuevos. Si reingestas
-  una carpeta, borra antes desde la app los apuntes viejos de esa
-  etiqueta (si no, quedan duplicados).
-- Los embeddings se generan en segundo plano en el cerebro; tras correr
-  el script, en unos segundos Matix ya puede usar el material.
+- **Re-ingestar es seguro:** reemplaza el material de ese skill+bloque.
+  Si renombras un archivo, su bloque cambia (queda el viejo y el nuevo);
+  borra el viejo desde la biblioteca si hace falta.
 - Para apuntes que ya están en el hub (no archivos), el backfill de
-  embeddings es `scripts/embed_apuntes.py`.
+  embeddings es `scripts/embed_apuntes.py` — eso es otra cosa (apuntes,
+  no material).
+- Requiere la **migración 0015** aplicada en Supabase (crea
+  `material_chunks`).
+```

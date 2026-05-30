@@ -177,6 +177,18 @@ Cuándo usarla:
   tener apuntado, vale la pena buscar primero — sus apuntes son
   fuente más relevante que tu conocimiento genérico.
 
+BIBLIOTECA DE MATERIAL DE APRENDIZAJE (tracks) — store APARTE:
+- `buscar_material(consulta, skill?, bloque?, top_k?)` — busca en el
+  material de aprendizaje, que es DISTINTO de los apuntes. Está
+  etiquetado por `skill` (la carpeta, ej. 'calistenia', 'ingles') y
+  `bloque` (la etapa, ej. 'bloque_3'). Úsala cuando el usuario trabaje
+  un track o pida el material de un skill/bloque («¿qué toca en el
+  bloque 3 de calistenia?»). Filtra por skill (casi siempre) y por
+  bloque cuando pida una etapa concreta.
+- NO mezcles los dos mundos: `buscar_apuntes` son las ideas/notas del
+  usuario; `buscar_material` es el material de estudio de sus tracks.
+  Si no encuentras material, dilo — no lo inventes.
+
 Cómo responder con los resultados:
 - **Cita la fuente**: "Lo tienes en tu apunte «Cálculo III ·
   Continuidad»: …" o "Según tu nota de Gobierno de TI: …".

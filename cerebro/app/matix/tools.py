@@ -59,6 +59,7 @@ from ..schemas.cierres_dia import CierreDiaCreate
 from ..schemas.eventos import EventoCreate, EventoUpdate
 from ..schemas.proyectos import ProyectoCreate, ProyectoUpdate
 from ..schemas.tareas import TareaCreate, TareaUpdate
+from .biblioteca import buscar_material as _buscar_material_rag
 from .indexador import buscar_apuntes as _buscar_apuntes_rag
 from .indexador import indexar_apunte
 from .uso import medidor
@@ -649,6 +650,59 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "apunte_id": _UUID,
                 },
                 "required": ["apunte_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "buscar_material",
+            "description": (
+                "Busca en la BIBLIOTECA de material de aprendizaje "
+                "(NO en los apuntes de ideas: es un store aparte). "
+                "Es el material de los tracks, etiquetado por `skill` "
+                "(ej. 'calistenia', 'ingles') y `bloque` (ej. "
+                "'bloque_3'). Úsala cuando el usuario trabaje un track "
+                "o pida material de estudio de un skill: «¿qué toca en "
+                "el bloque 3 de calistenia?», «explícame el material de "
+                "esta etapa». Filtra por skill y/o bloque para traer "
+                "justo lo de esa parte. Si no devuelve nada, dilo: NO "
+                "inventes el material."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "consulta": {
+                        "type": "string",
+                        "description": (
+                            "Qué buscar dentro del material, en lenguaje "
+                            "natural. Si solo quieres todo el material de "
+                            "un bloque, una consulta corta tipo el tema "
+                            "del bloque sirve."
+                        ),
+                    },
+                    "skill": {
+                        "type": "string",
+                        "description": (
+                            "Acota a un skill (la carpeta, ej. "
+                            "'calistenia'). Úsalo casi siempre: el "
+                            "usuario trabaja un track a la vez."
+                        ),
+                    },
+                    "bloque": {
+                        "type": "string",
+                        "description": (
+                            "Acota a un bloque concreto (ej. 'bloque_3'). "
+                            "Útil para «el bloque N de <skill>»."
+                        ),
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Cuántos trozos traer (1 a 10). Default 5.",
+                    },
+                },
+                "required": ["consulta"],
                 "additionalProperties": False,
             },
         },
@@ -1536,6 +1590,51 @@ async def _buscar_apuntes(db: Postgrest, args: dict) -> dict[str, Any]:
     )
 
 
+# ── buscar_material — biblioteca de aprendizaje, solo lectura (Fase 1) ──
+
+
+async def _buscar_material(db: Postgrest, args: dict) -> dict[str, Any]:
+    consulta = (args.get("consulta") or "").strip()
+    if not consulta:
+        return _error(
+            "validacion",
+            "Falta la `consulta` (qué buscar en el material).",
+        )
+    skill = (args.get("skill") or "").strip() or None
+    bloque = (args.get("bloque") or "").strip() or None
+    top_k = args.get("top_k") or 5
+    try:
+        top_k = max(1, min(10, int(top_k)))
+    except (ValueError, TypeError):
+        top_k = 5
+
+    filas = await _buscar_material_rag(
+        db, consulta=consulta, skill=skill, bloque=bloque, top_k=top_k
+    )
+    return _ok(
+        {
+            "consulta": consulta,
+            "skill": skill,
+            "bloque": bloque,
+            "resultados": [
+                {
+                    "skill": r["skill"],
+                    "bloque": r["bloque"],
+                    "fuente": r.get("fuente"),
+                    "fragmento": r["fragmento"],
+                    "distancia": round(float(r["distancia"]), 4),
+                }
+                for r in filas
+            ],
+            "nota": (
+                "Si todos los resultados tienen distancia > 1.0, el "
+                "match es débil — dile al usuario que no encontraste "
+                "material claro en lugar de inventar."
+            ),
+        }
+    )
+
+
 # ── leer_apunte — solo lectura, contenido completo (Capa 3 Paso 2) ──
 
 
@@ -1908,6 +2007,7 @@ _HANDLERS = {
     "registrar_cierre": _registrar_cierre,
     # Solo lectura
     "buscar_apuntes": _buscar_apuntes,
+    "buscar_material": _buscar_material,
     "leer_apunte": _leer_apunte,
     "consultar_uso": _consultar_uso,
     "consultar_tareas": _consultar_tareas,
@@ -1938,6 +2038,7 @@ TABLAS_AFECTADAS = {
     "marcar_accion_siguiente_hecha": ["tareas", "proyectos"],
     "registrar_cierre": ["cierres_dia"],
     "buscar_apuntes": [],  # solo lectura
+    "buscar_material": [],  # solo lectura
     "leer_apunte": [],  # solo lectura
     "consultar_uso": [],  # solo lectura
     "consultar_tareas": [],  # solo lectura
