@@ -673,6 +673,117 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_tareas",
+            "description": (
+                "Consulta las tareas del hub con filtros (SOLO LECTURA). "
+                "Úsala cuando el usuario pregunte por sus pendientes: "
+                "«¿qué tengo de la tesis?», «¿qué vence esta semana?», "
+                "«¿qué tareas tengo del curso X?». No incluye la papelera. "
+                "Para `proyecto_id`/`curso_id` usa los uuid tal como "
+                "aparecen en el contexto vivo. Si la pregunta abarca un "
+                "período (esta semana, este mes), calcula `vence_desde` / "
+                "`vence_hasta` con la fecha de hoy del contexto. RESUME los "
+                "resultados en lenguaje natural; no vuelques la lista cruda."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": {
+                        "type": "string",
+                        "description": "Filtra por proyecto (uuid del contexto vivo).",
+                    },
+                    "curso_id": {
+                        "type": "string",
+                        "description": "Filtra por curso (uuid del contexto vivo).",
+                    },
+                    "estado": {
+                        "type": "string",
+                        "enum": ["pendiente", "completada", "todas"],
+                        "description": "Default 'pendiente' (lo que falta hacer).",
+                    },
+                    "vence_desde": {
+                        "type": "string",
+                        "description": (
+                            "Fecha YYYY-MM-DD: solo tareas que vencen en o "
+                            "después de este día."
+                        ),
+                    },
+                    "vence_hasta": {
+                        "type": "string",
+                        "description": (
+                            "Fecha YYYY-MM-DD: solo tareas que vencen hasta "
+                            "este día (inclusive)."
+                        ),
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_eventos",
+            "description": (
+                "Consulta los eventos del calendario en un rango de fechas "
+                "(SOLO LECTURA). Úsala para «¿qué eventos tengo esta "
+                "semana?», «¿qué tengo el viernes?». No incluye la "
+                "papelera. Calcula `desde`/`hasta` con la fecha de hoy del "
+                "contexto. Los eventos recurrentes se devuelven por su "
+                "fecha ancla con su regla; avísale al usuario que se "
+                "repiten. RESUME, no vuelques la lista cruda."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "desde": {
+                        "type": "string",
+                        "description": "Fecha YYYY-MM-DD de inicio del rango (inclusive).",
+                    },
+                    "hasta": {
+                        "type": "string",
+                        "description": "Fecha YYYY-MM-DD de fin del rango (inclusive).",
+                    },
+                },
+                "required": ["desde", "hasta"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_proyectos",
+            "description": (
+                "Consulta los proyectos del hub (SOLO LECTURA). Úsala para "
+                "«¿qué proyectos tengo?», «¿cuáles están en riesgo?». "
+                "`en_riesgo=true` devuelve solo los activos sin avance en "
+                "3+ días. Filtra por estado si hace falta. RESUME en "
+                "lenguaje natural."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "estado": {
+                        "type": "string",
+                        "enum": ["activo", "aparcado", "terminado", "todos"],
+                        "description": "Default 'activo'.",
+                    },
+                    "en_riesgo": {
+                        "type": "boolean",
+                        "description": (
+                            "Si true, solo los activos en riesgo (3+ días "
+                            "sin actividad)."
+                        ),
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 
@@ -1537,6 +1648,238 @@ async def _crear_siguiente_instancia(
 # ─────────────────────────────────────────────────────────────────────
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Consultas del hub (solo lectura) — "pregúntale a tu hub"
+#
+# El filtrado vive en funciones puras (testeables sin BD): los handlers
+# solo traen las filas con `db.list` y delegan el filtro. Los rangos de
+# fecha se comparan en fecha local de Lima.
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _fecha_lima(iso: Any) -> date | None:
+    """Fecha local (Lima) de un timestamp ISO, o None si no parsea."""
+    if not isinstance(iso, str) or not iso:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        return dt.astimezone(timezone(timedelta(hours=-5))).date()
+    except Exception:
+        return None
+
+
+def _parse_dia(s: Any) -> date | None:
+    """Parsea 'YYYY-MM-DD' (o ISO) a date, o None."""
+    if not isinstance(s, str) or not s.strip():
+        return None
+    try:
+        return date.fromisoformat(s.strip()[:10])
+    except Exception:
+        return None
+
+
+def filtrar_tareas(
+    tareas: list[dict],
+    *,
+    proyecto_id: str | None = None,
+    curso_id: str | None = None,
+    estado: str = "pendiente",
+    vence_desde: date | None = None,
+    vence_hasta: date | None = None,
+) -> list[dict]:
+    """Filtra tareas (excluye papelera) por proyecto, curso, estado y
+    rango de vencimiento. Si hay rango, las tareas sin fecha no entran.
+    Ordena por vencimiento ascendente (sin fecha al final)."""
+    out: list[dict] = []
+    for t in tareas:
+        if t.get("eliminado_en"):
+            continue
+        comp = bool(t.get("completada"))
+        if estado == "pendiente" and comp:
+            continue
+        if estado == "completada" and not comp:
+            continue
+        if proyecto_id and t.get("proyecto_id") != proyecto_id:
+            continue
+        if curso_id and t.get("curso_id") != curso_id:
+            continue
+        if vence_desde or vence_hasta:
+            f = _fecha_lima(t.get("vence_en"))
+            if f is None:
+                continue
+            if vence_desde and f < vence_desde:
+                continue
+            if vence_hasta and f > vence_hasta:
+                continue
+        out.append(t)
+    out.sort(
+        key=lambda t: (
+            _fecha_lima(t.get("vence_en")) is None,
+            _fecha_lima(t.get("vence_en")) or date.max,
+        )
+    )
+    return out
+
+
+def eventos_en_rango(
+    eventos: list[dict], desde: date, hasta: date
+) -> list[dict]:
+    """Eventos (sin papelera) en [desde, hasta]. Los recurrentes se
+    incluyen si ya arrancaron (su ancla cae en o antes de `hasta`),
+    marcados con `_recurrente` para que el modelo avise que se repiten."""
+    out: list[dict] = []
+    for e in eventos:
+        if e.get("eliminado_en"):
+            continue
+        f = _fecha_lima(e.get("inicia_en"))
+        if f is None:
+            continue
+        recurrente = bool(e.get("recurrencia_freq"))
+        if recurrente and f <= hasta:
+            # Recurrente que ya arrancó: el modelo avisa que se repite.
+            out.append({**e, "_recurrente": True})
+        elif not recurrente and desde <= f <= hasta:
+            out.append(e)
+    out.sort(key=lambda e: e.get("inicia_en") or "")
+    return out
+
+
+def _dias_inactivo(proyecto: dict, ahora: datetime) -> int | None:
+    ult = proyecto.get("ultima_actividad_en")
+    if not isinstance(ult, str) or not ult:
+        return None
+    try:
+        dt = datetime.fromisoformat(ult.replace("Z", "+00:00"))
+        return (ahora - dt).days
+    except Exception:
+        return None
+
+
+def filtrar_proyectos(
+    proyectos: list[dict],
+    *,
+    estado: str = "activo",
+    en_riesgo: bool = False,
+    ahora: datetime,
+) -> list[dict]:
+    """Filtra proyectos por estado y, opcionalmente, solo los activos en
+    riesgo (3+ días sin actividad). Anota `dias_inactivo` y `en_riesgo`."""
+    out: list[dict] = []
+    for p in proyectos:
+        est = p.get("estado")
+        dias = _dias_inactivo(p, ahora)
+        riesgo = est == "activo" and dias is not None and dias >= 3
+        if en_riesgo:
+            if not riesgo:
+                continue
+        elif estado != "todos" and est != estado:
+            continue
+        out.append({**p, "dias_inactivo": dias, "en_riesgo": riesgo})
+    return out
+
+
+async def _consultar_tareas(db: Postgrest, args: dict) -> dict[str, Any]:
+    estado = args.get("estado") or "pendiente"
+    if estado not in ("pendiente", "completada", "todas"):
+        estado = "pendiente"
+    tareas = await db.list("tareas", raw_filters={"eliminado_en": "is.null"})
+    filtradas = filtrar_tareas(
+        tareas,
+        proyecto_id=(args.get("proyecto_id") or None),
+        curso_id=(args.get("curso_id") or None),
+        estado=estado,
+        vence_desde=_parse_dia(args.get("vence_desde")),
+        vence_hasta=_parse_dia(args.get("vence_hasta")),
+    )
+    proyectos = await db.list("proyectos")
+    cursos = await db.list("cursos")
+    nom_proy = {p["id"]: p["nombre"] for p in proyectos}
+    nom_curso = {c["id"]: c["nombre"] for c in cursos}
+    total = len(filtradas)
+    return _ok(
+        {
+            "total": total,
+            "estado": estado,
+            "tareas": [
+                {
+                    "id": t["id"],
+                    "titulo": t.get("titulo"),
+                    "completada": bool(t.get("completada")),
+                    "vence_en": t.get("vence_en"),
+                    "prioridad": t.get("prioridad"),
+                    "proyecto": nom_proy.get(t.get("proyecto_id")),
+                    "curso": nom_curso.get(t.get("curso_id")),
+                }
+                for t in filtradas[:40]
+            ],
+            "truncado": total > 40,
+        }
+    )
+
+
+async def _consultar_eventos(db: Postgrest, args: dict) -> dict[str, Any]:
+    desde = _parse_dia(args.get("desde"))
+    hasta = _parse_dia(args.get("hasta"))
+    if desde is None or hasta is None:
+        return _error(
+            "validacion",
+            "Faltan `desde` / `hasta` en formato YYYY-MM-DD.",
+        )
+    if hasta < desde:
+        desde, hasta = hasta, desde
+    eventos = await db.list("eventos", raw_filters={"eliminado_en": "is.null"})
+    enrango = eventos_en_rango(eventos, desde, hasta)
+    return _ok(
+        {
+            "desde": desde.isoformat(),
+            "hasta": hasta.isoformat(),
+            "total": len(enrango),
+            "eventos": [
+                {
+                    "id": e["id"],
+                    "titulo": e.get("titulo"),
+                    "inicia_en": e.get("inicia_en"),
+                    "termina_en": e.get("termina_en"),
+                    "todo_el_dia": bool(e.get("todo_el_dia")),
+                    "se_repite": bool(e.get("_recurrente")),
+                }
+                for e in enrango[:40]
+            ],
+        }
+    )
+
+
+async def _consultar_proyectos(db: Postgrest, args: dict) -> dict[str, Any]:
+    estado = args.get("estado") or "activo"
+    if estado not in ("activo", "aparcado", "terminado", "todos"):
+        estado = "activo"
+    en_riesgo = bool(args.get("en_riesgo"))
+    proyectos = await db.list("proyectos")
+    ahora = datetime.now(timezone.utc)
+    filtrados = filtrar_proyectos(
+        proyectos, estado=estado, en_riesgo=en_riesgo, ahora=ahora
+    )
+    filtrados.sort(key=lambda p: p.get("prioridad") or 99)
+    return _ok(
+        {
+            "total": len(filtrados),
+            "en_riesgo_solicitado": en_riesgo,
+            "proyectos": [
+                {
+                    "id": p["id"],
+                    "nombre": p.get("nombre"),
+                    "estado": p.get("estado"),
+                    "prioridad": p.get("prioridad"),
+                    "linea_meta": p.get("linea_meta"),
+                    "dias_inactivo": p.get("dias_inactivo"),
+                    "en_riesgo": p.get("en_riesgo"),
+                }
+                for p in filtrados
+            ],
+        }
+    )
+
+
 # Mapa de nombre → handler. Mantener sincronizado con TOOL_DEFINITIONS.
 _HANDLERS = {
     # Crear
@@ -1567,6 +1910,9 @@ _HANDLERS = {
     "buscar_apuntes": _buscar_apuntes,
     "leer_apunte": _leer_apunte,
     "consultar_uso": _consultar_uso,
+    "consultar_tareas": _consultar_tareas,
+    "consultar_eventos": _consultar_eventos,
+    "consultar_proyectos": _consultar_proyectos,
 }
 
 
@@ -1594,6 +1940,9 @@ TABLAS_AFECTADAS = {
     "buscar_apuntes": [],  # solo lectura
     "leer_apunte": [],  # solo lectura
     "consultar_uso": [],  # solo lectura
+    "consultar_tareas": [],  # solo lectura
+    "consultar_eventos": [],  # solo lectura
+    "consultar_proyectos": [],  # solo lectura
 }
 
 
