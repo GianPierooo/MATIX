@@ -7,10 +7,12 @@ import '../../../theme/matix_typography.dart';
 import '../../apuntes/application/guardar_apunte_controller.dart';
 import '../../apuntes/presentation/editor_apunte_screen.dart';
 import '../application/extraccion_eventos_controller.dart';
+import '../application/extraccion_recibo_controller.dart';
 import '../application/extraccion_tareas_controller.dart';
 import '../domain/destino_ocr.dart';
 import 'captura_camara_screen.dart';
 import 'revision_eventos_screen.dart';
+import 'revision_recibo_screen.dart';
 import 'revision_tareas_screen.dart';
 
 export '../domain/destino_ocr.dart' show DestinoOcr;
@@ -81,6 +83,8 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
         ref.read(extraccionEventosControllerProvider.notifier).reiniciar();
       case DestinoOcr.tareas:
         ref.read(extraccionTareasControllerProvider.notifier).reiniciar();
+      case DestinoOcr.recibo:
+        ref.read(extraccionReciboControllerProvider.notifier).reiniciar();
     }
   }
 
@@ -112,6 +116,10 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
         ref
             .read(extraccionTareasControllerProvider.notifier)
             .interpretar(_texto.text);
+      case DestinoOcr.recibo:
+        ref
+            .read(extraccionReciboControllerProvider.notifier)
+            .interpretar(_texto.text);
     }
   }
 
@@ -124,6 +132,8 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
         _escucharEventos();
       case DestinoOcr.tareas:
         _escucharTareas();
+      case DestinoOcr.recibo:
+        _escucharRecibo();
     }
 
     final ocupado = switch (_destino) {
@@ -134,6 +144,8 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
             FaseEventos.interpretando,
       DestinoOcr.tareas => ref.watch(extraccionTareasControllerProvider).fase ==
           FaseExtraccion.interpretando,
+      DestinoOcr.recibo => ref.watch(extraccionReciboControllerProvider).fase ==
+          FaseRecibo.interpretando,
     };
 
     return Scaffold(
@@ -224,6 +236,7 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
         DestinoOcr.apunte => Icons.note_add_outlined,
         DestinoOcr.eventos => Icons.event_outlined,
         DestinoOcr.tareas => Icons.checklist_outlined,
+        DestinoOcr.recibo => Icons.receipt_long_outlined,
       };
 
   String _etiquetaBoton(bool ocupado) => switch (_destino) {
@@ -233,6 +246,8 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
           ocupado ? 'Leyendo…' : 'Convertir en eventos',
         DestinoOcr.tareas =>
           ocupado ? 'Convirtiendo…' : 'Convertir en tareas',
+        DestinoOcr.recibo =>
+          ocupado ? 'Leyendo…' : 'Revisar gasto',
       };
 
   // ─── Camino tareas (Capa 7-B) ─────────────────────────────────────
@@ -305,6 +320,26 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
       }
     });
   }
+
+  // ─── Camino recibo (Finanzas-2 → gasto) ───────────────────────────
+  void _escucharRecibo() {
+    ref.listen<EstadoRecibo>(extraccionReciboControllerProvider,
+        (prev, next) {
+      if (prev?.fase == next.fase) return;
+      if (next.fase == FaseRecibo.revision) {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const RevisionReciboScreen()),
+        );
+      } else if (next.fase == FaseRecibo.error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(next.error ?? 'No pude leer el recibo.'),
+            action: SnackBarAction(label: 'Reintentar', onPressed: _accion),
+          ),
+        );
+      }
+    });
+  }
 }
 
 /// Selector "esto en realidad es → tareas / eventos / apunte".
@@ -330,23 +365,14 @@ class _SelectorTipo extends StatelessWidget {
         const SizedBox(height: MatixSpacing.m),
         SizedBox(
           width: double.infinity,
+          // Cuatro tipos (tareas/eventos/apunte/recibo): sin iconos para
+          // que entren cómodos a lo ancho del teléfono.
           child: SegmentedButton<DestinoOcr>(
             segments: const [
-              ButtonSegment(
-                value: DestinoOcr.tareas,
-                label: Text('Tareas'),
-                icon: Icon(Icons.checklist_outlined, size: 16),
-              ),
-              ButtonSegment(
-                value: DestinoOcr.eventos,
-                label: Text('Eventos'),
-                icon: Icon(Icons.event_outlined, size: 16),
-              ),
-              ButtonSegment(
-                value: DestinoOcr.apunte,
-                label: Text('Apunte'),
-                icon: Icon(Icons.note_add_outlined, size: 16),
-              ),
+              ButtonSegment(value: DestinoOcr.tareas, label: Text('Tareas')),
+              ButtonSegment(value: DestinoOcr.eventos, label: Text('Eventos')),
+              ButtonSegment(value: DestinoOcr.apunte, label: Text('Apunte')),
+              ButtonSegment(value: DestinoOcr.recibo, label: Text('Recibo')),
             ],
             selected: {destino},
             onSelectionChanged: onChanged == null

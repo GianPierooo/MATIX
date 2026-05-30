@@ -23,6 +23,7 @@ from app.matix import llm
     [
         ("tareas", "comprar pan\nllamar a Ana\nentregar informe"),
         ("eventos", "Cálculo III lun y mié 10-12. Parcial 15 abril."),
+        ("recibo", "SUPERMERCADO XYZ\nTOTAL S/ 45.90\n10/05/2026"),
         ("apunte", "la mitocondria es la central energética de la célula"),
     ],
 )

@@ -7,9 +7,10 @@
 ///
 /// - [DestinoOcr.tareas]: una lista de pendientes → hoja de revisión (7-B).
 /// - [DestinoOcr.eventos]: un horario o sílabo → revisión de eventos.
+/// - [DestinoOcr.recibo]: una boleta/ticket → gasto en Finanzas (Finanzas-2).
 /// - [DestinoOcr.apunte]: una nota/idea → apunte clasificado. Es el
 ///   catch-all: ante la duda, todo cae aquí (no se pierde nada).
-enum DestinoOcr { tareas, apunte, eventos }
+enum DestinoOcr { tareas, apunte, eventos, recibo }
 
 /// Mapea la etiqueta que devuelve el cerebro
 /// (`POST /matix/clasificar-captura`) al destino de la app. Tolerante:
@@ -21,6 +22,8 @@ DestinoOcr destinoDesdeTipo(String? tipo) {
       return DestinoOcr.tareas;
     case 'eventos':
       return DestinoOcr.eventos;
+    case 'recibo':
+      return DestinoOcr.recibo;
     case 'apunte':
       return DestinoOcr.apunte;
     default:

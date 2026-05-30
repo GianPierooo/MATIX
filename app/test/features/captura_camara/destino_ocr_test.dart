@@ -9,6 +9,7 @@ void main() {
   test('cada etiqueta válida mapea a su destino', () {
     expect(destinoDesdeTipo('tareas'), DestinoOcr.tareas);
     expect(destinoDesdeTipo('eventos'), DestinoOcr.eventos);
+    expect(destinoDesdeTipo('recibo'), DestinoOcr.recibo);
     expect(destinoDesdeTipo('apunte'), DestinoOcr.apunte);
   });
 

@@ -230,7 +230,36 @@ class ClasificarCapturaResponse(BaseModel):
     sugerido. Ante duda, el cerebro responde `apunte` — el catch-all que
     no pierde nada (siempre se puede guardar como nota)."""
 
-    tipo: Literal["tareas", "eventos", "apunte"] = "apunte"
+    tipo: Literal["tareas", "eventos", "recibo", "apunte"] = "apunte"
+
+
+class ExtraerReciboRequest(BaseModel):
+    """Cuerpo de `/matix/extraer-recibo` (Finanzas-2 · Cámara).
+
+    `texto` es el OCR de un recibo/boleta (ya corregido). SOLO viaja el
+    texto: la imagen se quedó en el teléfono. El cerebro propone un gasto;
+    no crea nada — la app lo revisa y lo guarda en Finanzas.
+    """
+
+    texto: str = Field(min_length=1)
+
+
+class ReciboPropuesto(BaseModel):
+    """El gasto candidato extraído de un recibo. Todo es opcional: si el
+    OCR no dio un total claro, `monto` viene `null` y la app deja
+    escribirlo a mano (no se inventan cifras). `categoria` es una
+    sugerencia que el usuario puede cambiar."""
+
+    monto: float | None = None
+    fecha: date | None = None
+    comercio: str | None = None
+    categoria: str | None = None
+
+
+class ExtraerReciboResponse(BaseModel):
+    """Respuesta de `/matix/extraer-recibo`: un único gasto propuesto."""
+
+    recibo: ReciboPropuesto = Field(default_factory=ReciboPropuesto)
 
 
 class ChatResponse(BaseModel):

@@ -35,6 +35,8 @@ from ..schemas.matix import (
     EstimarDuracionesResponse,
     ExtraerEventosRequest,
     ExtraerEventosResponse,
+    ExtraerReciboRequest,
+    ExtraerReciboResponse,
     ExtraerTareasRequest,
     ExtraerTareasResponse,
     TranscripcionResponse,
@@ -212,6 +214,39 @@ async def extraer_eventos(body: ExtraerEventosRequest) -> dict:
             detail=f"Error llamando al modelo: {e}",
         ) from e
     return {"eventos": eventos}
+
+
+@router.post("/extraer-recibo", response_model=ExtraerReciboResponse)
+async def extraer_recibo(body: ExtraerReciboRequest) -> dict:
+    """Convierte el texto de un recibo/boleta (OCR ya corregido) en un
+    gasto propuesto: monto, fecha, comercio y categoría sugerida
+    (Finanzas-2). SOLO viaja el texto: la imagen se quedó en el teléfono.
+    No persiste nada — la app lo revisa y lo guarda en Finanzas. Si no hay
+    un total claro, `monto` viene null y la app lo deja escribir a mano
+    (no se inventan cifras)."""
+    texto = body.texto.strip()
+    if not texto:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El texto está vacío.",
+        )
+    hoy = (
+        datetime.now(timezone.utc)
+        .astimezone(timezone(timedelta(hours=-5)))
+        .strftime("%Y-%m-%d")
+    )
+    try:
+        recibo = await llm.extraer_recibo_json(texto, hoy=hoy)
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error llamando al modelo: {e}",
+        ) from e
+    return {"recibo": recibo}
 
 
 @router.post("/clasificar-captura", response_model=ClasificarCapturaResponse)

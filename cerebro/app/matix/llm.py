@@ -230,11 +230,13 @@ async def clasificar_captura_json(
     model: str = "gpt-4o-mini",
 ) -> str:
     """Clasifica el texto de una captura (OCR de una foto) en uno de los
-    tres destinos de la cámara inteligente:
+    cuatro destinos de la cámara inteligente:
 
     - ``"tareas"``: una lista de pendientes / cosas por hacer.
     - ``"eventos"``: un horario, sílabo o calendario con clases, fechas
       o exámenes.
+    - ``"recibo"``: una boleta, factura o ticket de compra (con monto a
+      pagar, total, comercio) → se registra como gasto en Finanzas.
     - ``"apunte"``: una nota, idea, definición o cualquier otra cosa. Es
       el **catch-all**: ante la duda, todo cae aquí (siempre se puede
       guardar como apunte sin perder nada).
@@ -247,7 +249,7 @@ async def clasificar_captura_json(
     client = _get_client()
     system = (
         "Eres un clasificador de capturas. Recibes el texto que un OCR "
-        "extrajo de una foto y decides a cuál de tres destinos "
+        "extrajo de una foto y decides a cuál de cuatro destinos "
         "pertenece. Puede traer errores de OCR.\n\n"
         "Destinos:\n"
         '- "tareas": una lista de cosas por hacer / pendientes '
@@ -255,12 +257,16 @@ async def clasificar_captura_json(
         '- "eventos": un horario, sílabo o calendario con clases, fechas '
         "o exámenes (ej. 'Cálculo III lun y mié 10-12, parcial 15 "
         "abril').\n"
+        '- "recibo": una boleta, factura o ticket de compra: tiene un '
+        "total o monto a pagar, el nombre de un comercio, fecha de "
+        "compra, items con precios (ej. 'SUPERMERCADO XYZ … TOTAL S/ "
+        "45.90').\n"
         '- "apunte": una nota, idea, definición, resumen o cualquier '
         "texto que no sea claramente lo anterior. Es el destino por "
         "defecto cuando dudes.\n\n"
         "Elige UN solo destino, el más probable. Responde SOLO un objeto "
         'JSON con esta forma exacta:\n'
-        '{"tipo": "tareas" | "eventos" | "apunte"}'
+        '{"tipo": "tareas" | "eventos" | "recibo" | "apunte"}'
     )
     resp = await client.chat.completions.create(
         model=model,
@@ -279,9 +285,96 @@ async def clasificar_captura_json(
     except json.JSONDecodeError:
         return "apunte"
     tipo = datos.get("tipo") if isinstance(datos, dict) else None
-    if tipo in ("tareas", "eventos", "apunte"):
+    if tipo in ("tareas", "eventos", "recibo", "apunte"):
         return tipo
     return "apunte"
+
+
+async def extraer_recibo_json(
+    texto: str,
+    *,
+    hoy: str,
+    model: str = "gpt-4o-mini",
+) -> dict:
+    """Extrae los datos de un recibo (OCR de una boleta/ticket, ya
+    corregido) para proponer un GASTO en Finanzas (Finanzas-2).
+
+    Devuelve un dict con:
+    - ``monto``: el TOTAL pagado como número (float) o ``None`` si no hay
+      un total claro. **No inventa cifras**: ante la duda, ``None`` y la
+      app deja escribirlo a mano.
+    - ``fecha``: la fecha de la compra en ``YYYY-MM-DD`` o ``None``.
+    - ``comercio``: el nombre del comercio/tienda o ``None``.
+    - ``categoria``: una categoría de gasto sugerida en español
+      (Comida, Transporte, Hogar, Salud, Ocio, Estudios, Otros) o
+      ``None``.
+
+    `hoy` (``YYYY-MM-DD`, hora de Lima) se pasa como referencia para
+    fechas relativas; la mayoría de recibos traen fecha absoluta.
+    """
+    client = _get_client()
+    system = (
+        "Eres un extractor de recibos. Recibes el texto que un OCR sacó "
+        "de la foto de una boleta, factura o ticket de compra. Puede "
+        "traer errores de OCR.\n\n"
+        f"Hoy es {hoy} (zona horaria de Lima, Perú).\n\n"
+        "Extrae estos datos del recibo y devuélvelos como JSON:\n"
+        "- monto: el TOTAL pagado, como número (sin símbolo de moneda, "
+        "punto decimal). Si hay varias cifras, usa el TOTAL/IMPORTE a "
+        "pagar, no un subtotal ni un item suelto. Si NO hay un total "
+        "claro, usa null. NO inventes el monto.\n"
+        "- fecha: la fecha de la compra en formato YYYY-MM-DD. Resuelve "
+        "fechas relativas con la fecha de hoy. Si no hay fecha, null.\n"
+        "- comercio: el nombre del comercio o tienda. Si no se ve, null.\n"
+        "- categoria: UNA categoría de gasto en español, de esta lista: "
+        "Comida, Transporte, Hogar, Salud, Ocio, Estudios, Otros. Elige "
+        "la más probable según el comercio/los items. Si no puedes, "
+        "null.\n\n"
+        "Responde SOLO un objeto JSON con esta forma exacta:\n"
+        '{"monto": number | null, "fecha": "YYYY-MM-DD" | null, '
+        '"comercio": string | null, "categoria": string | null}'
+    )
+    resp = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": texto},
+        ],
+        temperature=0,
+        response_format={"type": "json_object"},
+    )
+    medidor.registrar_chat(resp.usage)
+
+    contenido = resp.choices[0].message.content or "{}"
+    try:
+        datos = json.loads(contenido)
+    except json.JSONDecodeError:
+        return {"monto": None, "fecha": None, "comercio": None, "categoria": None}
+    if not isinstance(datos, dict):
+        return {"monto": None, "fecha": None, "comercio": None, "categoria": None}
+
+    # monto: aceptar número o string numérico; nunca inventar.
+    monto_crudo = datos.get("monto")
+    monto: float | None = None
+    if isinstance(monto_crudo, (int, float)):
+        monto = float(monto_crudo)
+    elif isinstance(monto_crudo, str):
+        try:
+            monto = float(monto_crudo.replace(",", "").strip())
+        except ValueError:
+            monto = None
+    if monto is not None and monto <= 0:
+        monto = None
+
+    def _texto_o_none(v: object) -> str | None:
+        return v.strip() if isinstance(v, str) and v.strip() else None
+
+    return {
+        "monto": monto,
+        "fecha": _texto_o_none(datos.get("fecha")),
+        "comercio": _texto_o_none(datos.get("comercio")),
+        "categoria": _texto_o_none(datos.get("categoria")),
+    }
 
 
 async def estimar_duraciones_json(
