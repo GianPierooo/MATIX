@@ -10,8 +10,12 @@ import '../../universidad/providers/universidad_providers.dart';
 import '../domain/choque.dart';
 import '../domain/evento.dart';
 import '../domain/recurrencia.dart';
+import '../domain/semana.dart';
 import '../providers/eventos_providers.dart';
 import 'nuevo_evento_screen.dart';
+
+/// Modo de visualización del calendario.
+enum VistaCalendario { mes, semana, dia }
 
 class CalendarioScreen extends ConsumerStatefulWidget {
   const CalendarioScreen({super.key});
@@ -23,6 +27,7 @@ class _CalendarioScreenState extends ConsumerState<CalendarioScreen> {
   DateTime _mes =
       DateTime(DateTime.now().year, DateTime.now().month, 1);
   DateTime _dia = DateTime.now();
+  VistaCalendario _vista = VistaCalendario.mes;
 
   @override
   Widget build(BuildContext context) {
@@ -64,32 +69,101 @@ class _CalendarioScreenState extends ConsumerState<CalendarioScreen> {
         error: (e, _) => Center(child: Text(e.toString())),
         data: (todos) => Column(
           children: [
-            _CabeceraMes(
-              mes: _mes,
-              onPrev: () => setState(() => _mes =
-                  DateTime(_mes.year, _mes.month - 1, 1)),
-              onNext: () => setState(() => _mes =
-                  DateTime(_mes.year, _mes.month + 1, 1)),
+            _ToggleVista(
+              vista: _vista,
+              onCambia: (v) => setState(() => _vista = v),
             ),
-            _GridMes(
-              mes: _mes,
-              diaSeleccionado: _dia,
-              eventos: todos,
-              onTap: (d) => setState(() => _dia = d),
-            ),
-            const Divider(color: MatixColors.hairline, height: 1),
             Expanded(
-              child: _ListaDelDia(
-                dia: _dia,
-                eventos: todos.where((e) => e.ocurreEn(_dia)).toList()
-                  ..sort((a, b) => a.iniciaEn.compareTo(b.iniciaEn)),
-                clases: ref.watch(sesionesDelDiaProvider(_dia)),
-                cursosPorId: cursosPorId,
-              ),
+              child: switch (_vista) {
+                VistaCalendario.mes => _vistaMes(todos, cursosPorId),
+                VistaCalendario.semana => _vistaSemana(todos, cursosPorId),
+                VistaCalendario.dia => _vistaDia(todos, cursosPorId),
+              },
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _vistaMes(List<Evento> todos, Map<String, Curso> cursosPorId) {
+    return Column(
+      children: [
+        _CabeceraMes(
+          mes: _mes,
+          onPrev: () =>
+              setState(() => _mes = DateTime(_mes.year, _mes.month - 1, 1)),
+          onNext: () =>
+              setState(() => _mes = DateTime(_mes.year, _mes.month + 1, 1)),
+        ),
+        _GridMes(
+          mes: _mes,
+          diaSeleccionado: _dia,
+          eventos: todos,
+          onTap: (d) => setState(() => _dia = d),
+        ),
+        const Divider(color: MatixColors.hairline, height: 1),
+        Expanded(
+          child: _ListaDelDia(
+            dia: _dia,
+            eventos: todos.where((e) => e.ocurreEn(_dia)).toList()
+              ..sort((a, b) => a.iniciaEn.compareTo(b.iniciaEn)),
+            clases: ref.watch(sesionesDelDiaProvider(_dia)),
+            cursosPorId: cursosPorId,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _vistaDia(List<Evento> todos, Map<String, Curso> cursosPorId) {
+    return Column(
+      children: [
+        _CabeceraDia(
+          dia: _dia,
+          onPrev: () =>
+              setState(() => _dia = _dia.subtract(const Duration(days: 1))),
+          onNext: () =>
+              setState(() => _dia = _dia.add(const Duration(days: 1))),
+        ),
+        const Divider(color: MatixColors.hairline, height: 1),
+        Expanded(
+          child: _ListaDelDia(
+            dia: _dia,
+            eventos: todos.where((e) => e.ocurreEn(_dia)).toList()
+              ..sort((a, b) => a.iniciaEn.compareTo(b.iniciaEn)),
+            clases: ref.watch(sesionesDelDiaProvider(_dia)),
+            cursosPorId: cursosPorId,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _vistaSemana(List<Evento> todos, Map<String, Curso> cursosPorId) {
+    final dias = diasDeSemana(_dia);
+    return Column(
+      children: [
+        _CabeceraSemana(
+          dias: dias,
+          onPrev: () =>
+              setState(() => _dia = _dia.subtract(const Duration(days: 7))),
+          onNext: () =>
+              setState(() => _dia = _dia.add(const Duration(days: 7))),
+        ),
+        const Divider(color: MatixColors.hairline, height: 1),
+        Expanded(
+          child: _VistaSemana(
+            dias: dias,
+            eventos: todos,
+            cursosPorId: cursosPorId,
+            onTapDia: (d) => setState(() {
+              _dia = d;
+              _vista = VistaCalendario.dia;
+            }),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -526,6 +600,323 @@ class _ListaDelDia extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+// ─── Toggle de vista (mes / semana / día) ───────────────────────────
+class _ToggleVista extends StatelessWidget {
+  const _ToggleVista({required this.vista, required this.onCambia});
+  final VistaCalendario vista;
+  final ValueChanged<VistaCalendario> onCambia;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+      child: SegmentedButton<VistaCalendario>(
+        segments: const [
+          ButtonSegment(value: VistaCalendario.mes, label: Text('Mes')),
+          ButtonSegment(value: VistaCalendario.semana, label: Text('Semana')),
+          ButtonSegment(value: VistaCalendario.dia, label: Text('Día')),
+        ],
+        selected: {vista},
+        showSelectedIcon: false,
+        onSelectionChanged: (s) => onCambia(s.first),
+        style: const ButtonStyle(visualDensity: VisualDensity.compact),
+      ),
+    );
+  }
+}
+
+// ─── Cabeceras de navegación (día / semana) ──────────────────────────
+class _CabeceraNav extends StatelessWidget {
+  const _CabeceraNav({
+    required this.titulo,
+    required this.onPrev,
+    required this.onNext,
+  });
+  final String titulo;
+  final VoidCallback onPrev;
+  final VoidCallback onNext;
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 8, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              titulo,
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: MatixColors.text,
+              ),
+            ),
+          ),
+          IconButton(onPressed: onPrev, icon: const Icon(Icons.chevron_left)),
+          IconButton(onPressed: onNext, icon: const Icon(Icons.chevron_right)),
+        ],
+      ),
+    );
+  }
+}
+
+class _CabeceraDia extends StatelessWidget {
+  const _CabeceraDia({
+    required this.dia,
+    required this.onPrev,
+    required this.onNext,
+  });
+  final DateTime dia;
+  final VoidCallback onPrev;
+  final VoidCallback onNext;
+  @override
+  Widget build(BuildContext context) {
+    final txt = DateFormat('EEEE d MMM', 'es').format(dia);
+    return _CabeceraNav(
+      titulo: txt[0].toUpperCase() + txt.substring(1),
+      onPrev: onPrev,
+      onNext: onNext,
+    );
+  }
+}
+
+class _CabeceraSemana extends StatelessWidget {
+  const _CabeceraSemana({
+    required this.dias,
+    required this.onPrev,
+    required this.onNext,
+  });
+  final List<DateTime> dias;
+  final VoidCallback onPrev;
+  final VoidCallback onNext;
+  @override
+  Widget build(BuildContext context) {
+    final ini = dias.first;
+    final fin = dias.last;
+    final rango =
+        '${DateFormat.d('es').format(ini)} – ${DateFormat('d MMM', 'es').format(fin)}';
+    return _CabeceraNav(titulo: rango, onPrev: onPrev, onNext: onNext);
+  }
+}
+
+// ─── Vista de semana: 7 días con sus eventos ─────────────────────────
+class _VistaSemana extends StatelessWidget {
+  const _VistaSemana({
+    required this.dias,
+    required this.eventos,
+    required this.cursosPorId,
+    required this.onTapDia,
+  });
+  final List<DateTime> dias;
+  final List<Evento> eventos;
+  final Map<String, Curso> cursosPorId;
+  final ValueChanged<DateTime> onTapDia;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      children: [
+        for (final d in dias)
+          _DiaSemanaSeccion(
+            dia: d,
+            eventos: eventos.where((e) => e.ocurreEn(d)).toList(),
+            cursosPorId: cursosPorId,
+            onTapDia: () => onTapDia(d),
+          ),
+      ],
+    );
+  }
+}
+
+class _ItemSemana {
+  _ItemSemana({
+    required this.inicio,
+    required this.titulo,
+    required this.color,
+    required this.todoElDia,
+    this.esClase = false,
+    this.recurrente = false,
+    this.evento,
+  });
+  final DateTime inicio;
+  final String titulo;
+  final Color color;
+  final bool todoElDia;
+  final bool esClase;
+  final bool recurrente;
+  final Evento? evento;
+}
+
+class _DiaSemanaSeccion extends ConsumerWidget {
+  const _DiaSemanaSeccion({
+    required this.dia,
+    required this.eventos,
+    required this.cursosPorId,
+    required this.onTapDia,
+  });
+  final DateTime dia;
+  final List<Evento> eventos; // ya filtrados a los que ocurren en `dia`
+  final Map<String, Curso> cursosPorId;
+  final VoidCallback onTapDia;
+
+  bool _esHoy(DateTime d) {
+    final h = DateTime.now();
+    return d.year == h.year && d.month == h.month && d.day == h.day;
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final clases = ref.watch(sesionesDelDiaProvider(dia));
+
+    final items = <_ItemSemana>[];
+    for (final e in eventos) {
+      final color = _colorEvento(e, cursosPorId);
+      final regla = e.regla;
+      if (regla == null) {
+        items.add(_ItemSemana(
+          inicio: e.iniciaEn.toLocal(),
+          titulo: e.titulo,
+          color: color,
+          todoElDia: e.todoElDia,
+          evento: e,
+        ));
+      } else {
+        final inicioSerie = e.iniciaEn.toLocal();
+        for (final occ in ocurrenciasEnDia(
+            regla: regla, inicioSerie: inicioSerie, dia: dia)) {
+          items.add(_ItemSemana(
+            inicio: occ,
+            titulo: e.titulo,
+            color: color,
+            todoElDia: e.todoElDia,
+            evento: e,
+            recurrente: true,
+          ));
+        }
+      }
+    }
+    for (final entry in clases) {
+      items.add(_ItemSemana(
+        inicio: entry.$1.inicioEn(dia),
+        titulo: '${entry.$2?.nombre ?? "Clase"} — Clase',
+        color: _colorCurso(entry.$2?.color),
+        todoElDia: false,
+        esClase: true,
+      ));
+    }
+    items.sort((a, b) => a.inicio.compareTo(b.inicio));
+
+    final esHoy = _esHoy(dia);
+    final nombreDia = DateFormat('EEEE', 'es').format(dia);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          onTap: onTapDia,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+            child: Row(
+              children: [
+                Container(
+                  width: 30,
+                  height: 30,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: esHoy ? MatixColors.accent : Colors.transparent,
+                  ),
+                  child: Text(
+                    '${dia.day}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: esHoy ? Colors.white : MatixColors.text,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  nombreDia[0].toUpperCase() + nombreDia.substring(1),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: MatixColors.muted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (items.isEmpty)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(56, 0, 16, 8),
+            child: Text('Sin eventos',
+                style: TextStyle(fontSize: 12.5, color: MatixColors.muted)),
+          )
+        else
+          for (final it in items) _ItemSemanaTile(item: it),
+        const Divider(color: MatixColors.hairline, height: 1),
+      ],
+    );
+  }
+}
+
+class _ItemSemanaTile extends StatelessWidget {
+  const _ItemSemanaTile({required this.item});
+  final _ItemSemana item;
+
+  @override
+  Widget build(BuildContext context) {
+    final fila = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 3, 16, 3),
+      child: Row(
+        children: [
+          const SizedBox(width: 40),
+          SizedBox(
+            width: 44,
+            child: Text(
+              item.todoElDia ? 'Todo' : DateFormat.Hm().format(item.inicio),
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: MatixColors.text,
+              ),
+            ),
+          ),
+          Container(
+            width: 4,
+            height: 22,
+            decoration: BoxDecoration(
+              color: item.color,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              item.titulo,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13.5, color: MatixColors.text),
+            ),
+          ),
+          if (item.recurrente)
+            const Icon(Icons.repeat, size: 13, color: MatixColors.muted),
+        ],
+      ),
+    );
+    final ev = item.evento;
+    if (ev == null) return fila;
+    return InkWell(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => NuevoEventoScreen(evento: ev)),
+      ),
+      child: fila,
     );
   }
 }
