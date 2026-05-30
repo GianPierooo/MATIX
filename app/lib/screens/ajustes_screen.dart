@@ -52,6 +52,8 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
   bool _consultandoNotifs = false;
 
   bool? _permisoNotifs;
+  String? _zonaNotifs;
+  bool _probando = false;
 
   bool _cierreDiarioActivo = false;
   bool _toggleEnCurso = false;
@@ -63,12 +65,15 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
   }
 
   Future<void> _cargarEstadoCierreDiario() async {
-    final pend = await ref
-        .read(notificacionesServiceProvider)
-        .pendientes();
+    final svc = ref.read(notificacionesServiceProvider);
+    final pend = await svc.pendientes();
     if (mounted) {
-      setState(() =>
-          _cierreDiarioActivo = pend.contains(_kNotifIdCierreDiario));
+      setState(() {
+        _cierreDiarioActivo = pend.contains(_kNotifIdCierreDiario);
+        // Tras `pendientes()` el servicio ya se inicializó → la zona está
+        // resuelta.
+        _zonaNotifs = svc.zonaHoraria;
+      });
     }
   }
 
@@ -136,6 +141,74 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
     setState(() => _permisoNotifs = ok);
   }
 
+  Future<void> _pedirExactas() async {
+    await ref
+        .read(notificacionesServiceProvider)
+        .pedirPermisoAlarmasExactas();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Si se abrió la pantalla del sistema, activa "Alarmas y '
+          'recordatorios" para Matix.',
+        ),
+      ),
+    );
+  }
+
+  /// Aviso INMEDIATO. Si aparece → canal + permiso OK; el problema (si lo
+  /// hay) está en el agendado, no en mostrar.
+  Future<void> _probarAhora() async {
+    final svc = ref.read(notificacionesServiceProvider);
+    await svc.pedirPermisos();
+    await svc.mostrarAhora(
+      id: 990001,
+      titulo: 'Prueba inmediata',
+      cuerpo: 'Si ves esto, el canal y el permiso están bien.',
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Mandé una notificación AHORA. ¿La ves en la barra?'),
+      ),
+    );
+  }
+
+  /// Aviso PROGRAMADO a 1 minuto, con alarma exacta. Si la inmediata sí
+  /// llega pero esta no → es alarma exacta / batería del OEM (Huawei).
+  Future<void> _probarEn1Min() async {
+    setState(() => _probando = true);
+    final svc = ref.read(notificacionesServiceProvider);
+    try {
+      await svc.pedirPermisos();
+      await svc.pedirPermisoAlarmasExactas();
+      final cuando = DateTime.now().add(const Duration(minutes: 1));
+      final ok = await svc.programar(
+        id: 990002,
+        titulo: 'Prueba programada (1 min)',
+        cuerpo: 'Si ves esto, las alarmas programadas funcionan.',
+        cuando: cuando,
+        exacto: true,
+      );
+      final n = await svc.contarPendientes();
+      if (!mounted) return;
+      setState(() => _notifsPendientes = n);
+      final hhmm =
+          '${cuando.hour.toString().padLeft(2, '0')}:${cuando.minute.toString().padLeft(2, '0')}';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ok
+              ? 'Programada para las $hhmm (1 min). Pendientes: $n. Bloquea '
+                  'la pantalla y espera; no cierres la app desde recientes.'
+              : 'No se pudo programar (revisa el permiso de alarmas '
+                  'exactas).'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _probando = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -200,20 +273,43 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
                 : (_permisoNotifs! ? MatixColors.green : MatixColors.red),
           ),
           _Accion(
+            label: 'Permitir alarmas exactas (Android 12+)',
+            icon: Icons.alarm_on_outlined,
+            onTap: _pedirExactas,
+            subtitle: 'Necesario para que las programadas disparen al minuto.',
+          ),
+          _Accion(
             label: _consultandoNotifs
                 ? 'Consultando…'
                 : 'Ver pendientes programadas',
             icon: Icons.list_alt,
             onTap: _consultandoNotifs ? null : _contarNotifs,
             subtitle: _notifsPendientes == null
-                ? null
-                : '$_notifsPendientes notificación(es) programada(s)',
+                ? (_zonaNotifs == null ? null : 'Zona horaria: $_zonaNotifs')
+                : '$_notifsPendientes programada(s) · zona: '
+                    '${_zonaNotifs ?? "?"}',
           ),
           _Accion(
             label: 'Cancelar todas las programadas',
             icon: Icons.notifications_off_outlined,
             onTap: _cancelarTodas,
             destructive: true,
+          ),
+
+          const _Seccion('Probar notificaciones (diagnóstico)'),
+          _Accion(
+            label: 'Probar notificación AHORA',
+            icon: Icons.notifications_paused_outlined,
+            onTap: _probarAhora,
+            subtitle: 'Aviso inmediato. Si aparece, el canal y el permiso '
+                'están bien.',
+          ),
+          _Accion(
+            label: _probando ? 'Programando…' : 'Probar EN 1 MINUTO',
+            icon: Icons.timer_outlined,
+            onTap: _probando ? null : _probarEn1Min,
+            subtitle: 'Programada con alarma exacta. Si la inmediata llega '
+                'pero esta no, es la batería del OEM (Huawei/Honor).',
           ),
 
           const _Seccion('Nudges de urgencia'),

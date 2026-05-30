@@ -52,6 +52,9 @@ dependencies:
   # convertir a UTC al guardar.
   flutter_local_notifications: ^17.2.4
   timezone: ^0.9.4
+  # Zona horaria REAL del dispositivo para programar notificaciones en la
+  # hora local correcta (no hardcodear America/Lima).
+  flutter_timezone: ^3.0.1
 
   # Voz de entrada para Matix (Capa 2 Paso 3): grabar audio AAC/m4a
   # y pedir permiso de micrófono en runtime.

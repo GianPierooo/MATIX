@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -32,6 +33,11 @@ class NotificacionesService {
 
   bool _inicializado = false;
 
+  /// Zona horaria con la que quedó configurado el scheduling. Se resuelve
+  /// del dispositivo en `inicializar()`; si no se puede leer, Lima.
+  String _zonaHoraria = 'America/Lima';
+  String get zonaHoraria => _zonaHoraria;
+
   /// Callback que dispara al tocar una notificación. El payload es
   /// el string que se le pasó al programar (Capa 8 reducida usa
   /// `'briefing'` para abrir la pantalla del briefing). Si el
@@ -50,9 +56,23 @@ class NotificacionesService {
     try {
       // 1) Timezone — sin esto, `zonedSchedule` no puede programar.
       tz_data.initializeTimeZones();
-      // La zona horaria por defecto del usuario es Lima (Documento
-      // Maestro). En Capa 4+ se podría leer la del perfil.
-      tz.setLocalLocation(tz.getLocation('America/Lima'));
+      // Usamos la zona REAL del dispositivo. Si quedara mal (UTC o sin
+      // setear), una notificación "en 2 min" se calcularía contra otra
+      // zona. Fallback: Lima (zona por defecto del usuario).
+      var zona = 'America/Lima';
+      try {
+        zona = await FlutterTimezone.getLocalTimezone();
+      } catch (_) {
+        // El plugin de timezone no respondió: nos quedamos con Lima.
+      }
+      try {
+        tz.setLocalLocation(tz.getLocation(zona));
+      } catch (_) {
+        // El nombre IANA no está en la base: caemos a Lima.
+        tz.setLocalLocation(tz.getLocation('America/Lima'));
+        zona = 'America/Lima';
+      }
+      _zonaHoraria = zona;
 
       // 2) Plugin — con handler de tap para deep-links (briefing matutino,
       // futuras notificaciones contextuales).
@@ -249,6 +269,40 @@ class NotificacionesService {
       debugPrint('Notif: no pude programar la diaria $id ($e).');
     }
   }
+
+  /// Detalles del canal de alta importancia (lo comparten el aviso
+  /// inmediato y los programados).
+  NotificationDetails _detallesAlta() => const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _canalId,
+          _canalNombre,
+          channelDescription: _canalDescripcion,
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+      );
+
+  /// Muestra una notificación **inmediata** (no programada). Es para
+  /// diagnóstico: si esta aparece, el canal + el permiso de
+  /// notificaciones están bien, y el problema (si lo hay) está en el
+  /// AGENDADO (alarma exacta / batería del OEM), no en mostrar.
+  Future<void> mostrarAhora({
+    required int id,
+    required String titulo,
+    required String cuerpo,
+    String? payload,
+  }) async {
+    if (!_inicializado) await inicializar();
+    try {
+      await _plugin.show(id, titulo, cuerpo, _detallesAlta(), payload: payload);
+    } catch (e) {
+      debugPrint('Notif: no pude mostrar ahora ($e).');
+    }
+  }
+
+  /// Cuántas notificaciones hay programadas (diagnóstico). 0 si la lectura
+  /// falla.
+  Future<int> contarPendientes() async => (await pendientes()).length;
 
   /// Cancela la notificación con ese `id` (no falla si no existía).
   ///
