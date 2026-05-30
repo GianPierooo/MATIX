@@ -83,6 +83,14 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // El plugin de Flutter activa R8 (minify) en release por
+            // defecto. Sumamos reglas propias: `google_mlkit_text_recognition`
+            // referencia reconocedores de scripts que no empaquetamos, y sin
+            // estas reglas R8 falla con "Missing class" (ver proguard-rules.pro).
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }
