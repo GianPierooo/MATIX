@@ -51,6 +51,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
+import httpx
 from pydantic import ValidationError
 
 from ..db import Postgrest
@@ -2062,9 +2063,36 @@ async def ejecutar_tool(
         )
     try:
         return await handler(db, args)
+    except httpx.HTTPStatusError as e:
+        # Falla de una operación contra la BD (PostgREST). El cliente solo
+        # veía "HTTPStatusError" opaco; logueamos el status + cuerpo REAL
+        # (ej. PGRST205 "Could not find the table …" cuando falta una
+        # migración) para poder diagnosticarlo en los logs de Railway, y
+        # surfaceamos el código HTTP al modelo/usuario.
+        cuerpo = ""
+        try:
+            cuerpo = e.response.text[:500]
+        except Exception:  # noqa: BLE001
+            pass
+        logger.error(
+            "tool «%s» falló: HTTP %s -> %s",
+            name,
+            e.response.status_code,
+            cuerpo,
+        )
+        return _error(
+            "interno",
+            f"Algo falló al ejecutar «{name}» (HTTP {e.response.status_code}).",
+            sugerencia=(
+                "Probablemente falta aplicar una migración en la BD o la "
+                "tabla no existe. Revisa los logs del cerebro."
+            ),
+        )
     except Exception as e:  # noqa: BLE001
         # Nunca propagar — un crash de la tool dejaría al modelo sin
-        # contexto. Devolvemos algo que pueda explicar.
+        # contexto. Logueamos el traceback completo (Railway) y devolvemos
+        # algo que el modelo pueda explicar.
+        logger.exception("tool «%s» falló", name)
         return _error(
             "interno",
             f"Algo falló al ejecutar «{name}» ({type(e).__name__}).",
