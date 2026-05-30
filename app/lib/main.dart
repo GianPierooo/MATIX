@@ -85,31 +85,9 @@ class _MatixAppState extends ConsumerState<MatixApp> {
     // es 'briefing', abrimos la pantalla del briefing. Capa 8
     // reducida · Paso 1.
     final notis = ref.read(notificacionesServiceProvider);
-    notis.registrarOnTap((payload) {
-      if (payload == 'briefing') {
-        _navigatorKey.currentState?.push(
-          MaterialPageRoute(builder: (_) => const BriefingScreen()),
-        );
-      } else if (payload == 'cierre') {
-        _navigatorKey.currentState?.push(
-          MaterialPageRoute(builder: (_) => const CierreScreen()),
-        );
-      } else if (payload != null && payload.startsWith('evento:')) {
-        // Recordatorio de evento (Cal-2): abrimos su detalle/edición.
-        // El detalle es la propia pantalla de edición.
-        unawaited(_abrirEvento(payload.substring('evento:'.length)));
-      } else if (payload != null && payload.startsWith('tarea:')) {
-        // Nudge de urgencia (Urgencia-2) o recordatorio de tarea:
-        // tocar abre la tarea para actuar sobre ella.
-        _navigatorKey.currentState?.push(
-          MaterialPageRoute(
-            builder: (_) => NuevaTareaScreen(
-              tareaId: payload.substring('tarea:'.length),
-            ),
-          ),
-        );
-      }
-    });
+    // Mismo enrutado para el tap de una notificación local y para el de un
+    // push de FCM (que trae el deep link en `data['payload']`).
+    notis.registrarOnTap(_enrutarPayload);
     // Aseguramos la inicialización (carga timezones + plugin). Si
     // el usuario ya tiene la noti del briefing activa, el config
     // controller la reprograma al leer SharedPreferences.
@@ -117,6 +95,19 @@ class _MatixAppState extends ConsumerState<MatixApp> {
     // Push (FCM · Capa 1): pide permiso, registra el token en el cerebro y
     // escucha mensajes. Best-effort.
     unawaited(ref.read(pushServiceProvider).inicializar());
+    // Deep link de push (Capa 2): tocar un push (app en background/cerrada)
+    // enruta al evento/tarea. El payload viaja en `data['payload']`.
+    try {
+      FirebaseMessaging.onMessageOpenedApp.listen(
+        (m) => _enrutarPayload(m.data['payload'] as String?),
+      );
+      FirebaseMessaging.instance.getInitialMessage().then((m) {
+        if (m != null) _enrutarPayload(m.data['payload'] as String?);
+      });
+    } catch (_) {
+      // Firebase no inicializado (checkout sin google-services.json): sin
+      // deep link de push, la app sigue.
+    }
     // Refresca la ventana móvil de recordatorios de eventos (Cal-3):
     // las series recurrentes solo tienen agendados los próximos ~30
     // días, así que al abrir la app reagendamos para que la ventana
@@ -189,6 +180,30 @@ class _MatixAppState extends ConsumerState<MatixApp> {
       );
     } catch (e) {
       if (kDebugMode) debugPrint('Deep link evento falló: $e');
+    }
+  }
+
+  /// Enruta un payload de notificación/push a su pantalla. Lo comparten el
+  /// tap de una notificación local y el de un push de FCM.
+  void _enrutarPayload(String? payload) {
+    if (payload == 'briefing') {
+      _navigatorKey.currentState?.push(
+        MaterialPageRoute(builder: (_) => const BriefingScreen()),
+      );
+    } else if (payload == 'cierre') {
+      _navigatorKey.currentState?.push(
+        MaterialPageRoute(builder: (_) => const CierreScreen()),
+      );
+    } else if (payload != null && payload.startsWith('evento:')) {
+      unawaited(_abrirEvento(payload.substring('evento:'.length)));
+    } else if (payload != null && payload.startsWith('tarea:')) {
+      _navigatorKey.currentState?.push(
+        MaterialPageRoute(
+          builder: (_) => NuevaTareaScreen(
+            tareaId: payload.substring('tarea:'.length),
+          ),
+        ),
+      );
     }
   }
 

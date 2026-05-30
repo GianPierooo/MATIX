@@ -10,7 +10,6 @@ import '../../../core/notif_id.dart';
 import '../../../core/notificaciones_service.dart';
 import '../../nudges/data/nudges_prefs.dart';
 import '../../nudges/domain/nudges.dart';
-import '../domain/selectores.dart';
 import '../domain/tarea.dart';
 
 /// Wrapper sobre `MatixClient` para las rutas `/api/v1/tareas` y
@@ -141,24 +140,13 @@ class TareasRepository {
   /// silenciosamente. Si lo niega, la notif simplemente no llega —
   /// la app sigue funcionando.
   Future<void> _reprogramarRecordatorio(Tarea t) async {
-    // Las notificaciones son un efecto secundario: si fallan (plugin con
-    // caché ilegible, permiso raro de un OEM), NO deben tumbar el CRUD ni
-    // el "aplicar plan del día". La tarea ya quedó guardada en el cerebro.
-    await _notifSeguro(() async {
-      final nid = notifIdDe(t.id);
-      await _notif.cancelar(nid);
-      if (t.completada) return;
-      final r = t.recordarEn;
-      if (r == null) return;
-      await _notif.pedirPermisos();
-      await _notif.programar(
-        id: nid,
-        titulo: t.titulo,
-        cuerpo: _cuerpoRecordatorio(t),
-        cuando: r.toLocal(),
-        payload: 'tarea:${t.id}',
-      );
-    });
+    // El recordatorio de la tarea ahora lo manda el CEREBRO por push (FCM,
+    // Push Capa 2): las alarmas locales no disparan en los OEM que matan el
+    // segundo plano. Acá solo cancelamos cualquier alarma local previa (de
+    // versiones viejas de la app) para no dejar basura. Los nudges
+    // escalados (Urgencia-2) siguen locales por ahora — su migración a push
+    // es Capa 3.
+    await _notifSeguro(() => _notif.cancelar(notifIdDe(t.id)));
   }
 
   /// Corre un efecto de notificaciones sin dejar que su error escale.
@@ -222,82 +210,6 @@ class TareasRepository {
     }
   }
 
-  String _cuerpoRecordatorio(Tarea t) {
-    final cuando = _cuandoLegible(t.venceEn);
-    final ctx = _contextoLegible(t);
-    if (ctx == null) return cuando;
-    return '$ctx · $cuando';
-  }
-
-  String _cuandoLegible(DateTime? venceEn) {
-    if (venceEn == null) return 'Recordatorio';
-    final v = venceEn.toLocal();
-    final ahora = DateTime.now();
-    final hoy = DateTime(ahora.year, ahora.month, ahora.day);
-    final dia = DateTime(v.year, v.month, v.day);
-    final diff = dia.difference(hoy).inDays;
-    final hora =
-        '${v.hour.toString().padLeft(2, '0')}:${v.minute.toString().padLeft(2, '0')}';
-    if (diff == 0) return 'Vence hoy a las $hora';
-    if (diff == 1) return 'Vence mañana a las $hora';
-    if (diff > 1) return 'Vence en $diff días';
-    return 'Estaba para hace ${-diff} días';
-  }
-
-  /// Si la tarea cuelga de un proyecto / curso / categoría, devuelve
-  /// el nombre para meterlo en el cuerpo de la notif. Se calcula
-  /// barato: consulta los selectores cacheados. Si no hay nada
-  /// asociado, devuelve `null`.
-  String? _contextoLegible(Tarea t) {
-    // Usamos los selectores que ya están cargados por el
-    // SelectoresRepository — si no, hacemos best-effort y dejamos
-    // el cuerpo sin prefijo.
-    final ctx = _ultimoSelectoresCache;
-    if (ctx == null) return null;
-    if (t.proyectoId != null) {
-      final p = ctx.proyectos.firstWhere(
-        (x) => x.id == t.proyectoId,
-        orElse: () => const ProyectoRef(
-            id: '', nombre: '', estado: 'activo'),
-      );
-      if (p.nombre.isNotEmpty) return p.nombre;
-    }
-    if (t.cursoId != null) {
-      final c = ctx.cursos.firstWhere(
-        (x) => x.id == t.cursoId,
-        orElse: () => const CursoRef(id: '', nombre: ''),
-      );
-      if (c.nombre.isNotEmpty) return c.nombre;
-    }
-    if (t.categoriaId != null) {
-      final c = ctx.categorias.firstWhere(
-        (x) => x.id == t.categoriaId,
-        orElse: () => const CategoriaRef(id: '', nombre: ''),
-      );
-      if (c.nombre.isNotEmpty) return c.nombre;
-    }
-    return null;
-  }
-
-  /// Snapshot de selectores que el provider rellena. Nullable; si no
-  /// está cargado el contexto, la notif simplemente sale sin prefijo.
-  static _SelectoresSnapshot? _ultimoSelectoresCache;
-
-  /// Llamado por `tareas_providers.dart` para inyectar el snapshot
-  /// actualizado de selectores. Es estático para evitar circular
-  /// dependency entre repo y providers.
-  static void actualizarSelectoresCache({
-    required List<CategoriaRef> categorias,
-    required List<CursoRef> cursos,
-    required List<ProyectoRef> proyectos,
-  }) {
-    _ultimoSelectoresCache = _SelectoresSnapshot(
-      categorias: categorias,
-      cursos: cursos,
-      proyectos: proyectos,
-    );
-  }
-
   // ─── Subtareas ───────────────────────────────────────────────────────
 
   /// Subtareas de una tarea concreta. El filtro se aplica en el
@@ -334,15 +246,4 @@ class TareasRepository {
   Future<void> borrarSubtarea(String id) async {
     await _client.delete('/api/v1/subtareas/$id');
   }
-}
-
-class _SelectoresSnapshot {
-  _SelectoresSnapshot({
-    required this.categorias,
-    required this.cursos,
-    required this.proyectos,
-  });
-  final List<CategoriaRef> categorias;
-  final List<CursoRef> cursos;
-  final List<ProyectoRef> proyectos;
 }

@@ -69,37 +69,17 @@ final subtareasDeProvider =
   return out;
 });
 
-final categoriasProvider = FutureProvider<List<CategoriaRef>>((ref) async {
-  final lista = await ref.watch(selectoresRepositoryProvider).categorias();
-  _publicarSnapshotIfReady(ref);
-  return lista;
+final categoriasProvider = FutureProvider<List<CategoriaRef>>((ref) {
+  return ref.watch(selectoresRepositoryProvider).categorias();
 });
 
-final cursosProvider = FutureProvider<List<CursoRef>>((ref) async {
-  final lista = await ref.watch(selectoresRepositoryProvider).cursos();
-  _publicarSnapshotIfReady(ref);
-  return lista;
+final cursosProvider = FutureProvider<List<CursoRef>>((ref) {
+  return ref.watch(selectoresRepositoryProvider).cursos();
 });
 
-final proyectosProvider = FutureProvider<List<ProyectoRef>>((ref) async {
-  final lista = await ref.watch(selectoresRepositoryProvider).proyectos();
-  _publicarSnapshotIfReady(ref);
-  return lista;
+final proyectosProvider = FutureProvider<List<ProyectoRef>>((ref) {
+  return ref.watch(selectoresRepositoryProvider).proyectos();
 });
-
-/// Cuando los 3 selectores están cargados, publicamos el snapshot al
-/// `TareasRepository` para que los cuerpos de notificación tengan el
-/// nombre del curso/proyecto/categoría sin tener que pasarles `ref`.
-void _publicarSnapshotIfReady(Ref ref) {
-  final c = ref.read(categoriasProvider).valueOrNull;
-  final cu = ref.read(cursosProvider).valueOrNull;
-  final p = ref.read(proyectosProvider).valueOrNull;
-  if (c != null && cu != null && p != null) {
-    TareasRepository.actualizarSelectoresCache(
-      categorias: c, cursos: cu, proyectos: p,
-    );
-  }
-}
 
 // ───────────────────── Vista activa y filtros ─────────────────────────────
 

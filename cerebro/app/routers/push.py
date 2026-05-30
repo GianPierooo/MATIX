@@ -100,3 +100,13 @@ async def probar(
             detalle.append(f"fail:{type(e).__name__}")
 
     return {"enviados": enviados, "fallidos": fallidos, "detalle": detalle}
+
+
+@router.post("/revisar")
+async def revisar(db: Postgrest = Depends(get_db)) -> dict:
+    """Corre AHORA un tick del scheduler de recordatorios (Push Capa 2), sin
+    esperar el minuto. Útil para probar: crea un evento/tarea con
+    recordatorio cercano y llama a esto. Devuelve cuántos mandó."""
+    from ..matix.recordatorios import revisar_y_enviar
+
+    return await revisar_y_enviar(db)

@@ -28,6 +28,9 @@ dependencies = [
     # tokens de dispositivo. Se configura con el service account de
     # Firebase vía FIREBASE_SERVICE_ACCOUNT_JSON.
     "firebase-admin>=6.5",
+    # Scheduler de recordatorios por push (Push Capa 2): un job cada minuto
+    # dentro del proceso de FastAPI (AsyncIOScheduler).
+    "apscheduler>=3.10,<4",
 ]
 
 [dependency-groups]

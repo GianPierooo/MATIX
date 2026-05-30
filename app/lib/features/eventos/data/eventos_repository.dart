@@ -121,39 +121,13 @@ class EventosRepository {
     }
   }
 
-  /// Cancela y reagenda los recordatorios de un evento. Primero limpia la
-  /// ventana completa (cubre reglas previas que cambiaron — p. ej. una serie
-  /// acortada o vuelta única) y luego agenda los de la ventana actual.
-  ///
-  /// Todo va dentro de `_notifSeguro`: las notificaciones son un efecto
-  /// secundario; si el plugin falla (caché ilegible, OEM raro) NO debe
-  /// tumbar el CRUD de eventos — el evento ya quedó guardado en el cerebro.
+  /// Los recordatorios de evento ahora los manda el CEREBRO por push (FCM,
+  /// Push Capa 2): las alarmas locales no disparan en los OEM que matan el
+  /// segundo plano. Acá solo cancelamos las alarmas locales previas (de
+  /// versiones viejas de la app) para no dejar basura — ya no agendamos
+  /// nada local. El cerebro lee `recordar_en` del evento y dispara el push.
   Future<void> _sincronizarRecordatorios(Evento e) async {
-    await _notifSeguro(() async {
-      await _cancelarRecordatorios(e.id);
-      final recordatorios = recordatoriosVentana(
-        eventoId: e.id,
-        regla: e.regla,
-        inicioSerie: e.iniciaEn.toLocal(),
-        offsetMin: e.recordatorioOffsetMin,
-        ahora: DateTime.now(),
-      );
-      if (recordatorios.isEmpty) return;
-      await _notif.pedirPermisos();
-      final cuerpo = e.ubicacion?.isNotEmpty == true
-          ? e.ubicacion!
-          : 'Tu evento está por empezar.';
-      for (final r in recordatorios) {
-        await _notif.programar(
-          id: r.notifId,
-          titulo: e.titulo,
-          cuerpo: cuerpo,
-          cuando: r.cuando,
-          exacto: true,
-          payload: 'evento:${e.id}',
-        );
-      }
-    });
+    await _cancelarRecordatorios(e.id);
   }
 
   /// Cancela todos los ids que el evento pudo agendar en la ventana (id base

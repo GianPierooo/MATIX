@@ -88,9 +88,18 @@ async def lifespan(_: FastAPI):
         settings.matix_env,
         len(settings.cors_origins_list),
     )
+    # Scheduler de recordatorios por push (Push Capa 2). Solo arranca si
+    # FCM está configurado. Best-effort: si falla, el cerebro sigue.
+    from .matix import recordatorios
+
+    try:
+        recordatorios.iniciar(db)
+    except Exception:  # noqa: BLE001
+        logger.exception("no pude iniciar el scheduler de recordatorios")
     try:
         yield
     finally:
+        recordatorios.detener()
         await db.aclose()
 
 

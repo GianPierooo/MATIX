@@ -59,10 +59,19 @@ class TokenInvalido(Exception):
     """El token ya no es válido (desinstalado/expirado): hay que borrarlo."""
 
 
-def enviar_push(token: str, *, titulo: str, cuerpo: str) -> str:
+def enviar_push(
+    token: str,
+    *,
+    titulo: str,
+    cuerpo: str,
+    data: dict[str, str] | None = None,
+) -> str:
     """Manda un push a un token. Devuelve el message id de FCM.
 
-    Es **bloqueante** (firebase_admin usa requests por debajo): el router
+    `data` viaja como datos (ej. `{"payload": "evento:<id>"}`) para el deep
+    link: la app lo lee al tocar la notificación y abre el evento/tarea.
+
+    Es **bloqueante** (firebase_admin usa requests por debajo): el caller
     lo corre en un thread aparte con `asyncio.to_thread` para no bloquear
     el event loop. Si el token es inválido, lanza [TokenInvalido].
     """
@@ -72,6 +81,7 @@ def enviar_push(token: str, *, titulo: str, cuerpo: str) -> str:
     mensaje = messaging.Message(
         notification=messaging.Notification(title=titulo, body=cuerpo),
         token=token,
+        data=data or {},
         android=messaging.AndroidConfig(
             priority="high",
             notification=messaging.AndroidNotification(
