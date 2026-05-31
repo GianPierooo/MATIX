@@ -22,7 +22,9 @@ descalibrado dispare herramientas en bucle.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from ..db import Postgrest
 from . import llm, memoria, modos
@@ -35,6 +37,28 @@ from .tools import TABLAS_AFECTADAS, TOOL_DEFINITIONS, ejecutar_tool
 # margen. Si se alcanza, devolvemos lo último que dijo el modelo y
 # cortamos.
 _MAX_VUELTAS = 6
+
+_LIMA = ZoneInfo("America/Lima")
+_DIAS_ES = [
+    "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo",
+]
+_MESES_ES = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+    "septiembre", "octubre", "noviembre", "diciembre",
+]
+
+
+def _ahora_lima_es() -> str:
+    """Fecha y hora actuales en Lima, en español y 12h (ej.
+    'lunes 9 de febrero de 2026, 9:03 a. m.'). El cerebro la calcula
+    explícita — no asume el reloj del sistema."""
+    a = datetime.now(timezone.utc).astimezone(_LIMA)
+    h12 = a.hour % 12 or 12
+    ampm = "a. m." if a.hour < 12 else "p. m."
+    return (
+        f"{_DIAS_ES[a.weekday()]} {a.day} de {_MESES_ES[a.month - 1]} "
+        f"de {a.year}, {h12}:{a.minute:02d} {ampm}"
+    )
 
 
 async def conversar(
@@ -66,6 +90,21 @@ async def conversar(
         {"role": "system", "content": fijo},
         {"role": "system", "content": contexto},
     ]
+
+    # Conciencia temporal: la hora y fecha actuales en Lima, explícitas y en
+    # español, para que Matix las use en la conversación (no solo para las
+    # notificaciones). Ej.: notar que piden el "cierre del día" en la mañana.
+    mensajes.append(
+        {
+            "role": "system",
+            "content": (
+                f"Hora y fecha actuales (America/Lima): {_ahora_lima_es()}. "
+                "Tenlas presentes y úsalas: si algo no cuadra con la hora "
+                "(p. ej. pedir el «cierre del día» en plena mañana), nótalo "
+                "con tino y ofrece lo apropiado."
+            ),
+        }
+    )
 
     # Memoria personal (Capa Memoria): el bloque compacto "lo que sé de ti"
     # con los hechos esenciales del usuario, junto al contexto vivo. Si no
