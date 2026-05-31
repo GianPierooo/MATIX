@@ -47,6 +47,28 @@ async def _contar_activos(db: Postgrest, *, excluir_id: str | None = None) -> in
     return len(activos)
 
 
+def _msg_prioridad(n: int) -> str:
+    return (
+        f"Ya tienes un proyecto activo con el número {n}. "
+        "Elige otro o libera ese primero."
+    )
+
+
+async def _prioridad_ocupada(
+    db: Postgrest, prioridad: int, *, excluir_id: str | None = None
+) -> bool:
+    """`True` si OTRO proyecto activo ya usa ese número de orden. El
+    `prioridad` es el ranking 1/2/3 entre los activos y no puede
+    repetirse — cada activo ocupa una posición distinta."""
+    activos = await db.list(TABLE, filters={"estado": "activo"})
+    for p in activos:
+        if excluir_id and p["id"] == excluir_id:
+            continue
+        if p.get("prioridad") == prioridad:
+            return True
+    return False
+
+
 async def _validar_acc_siguiente(
     db: Postgrest, tarea_id: str, *, proyecto_id: str | None
 ) -> dict:
@@ -121,6 +143,13 @@ async def crear_proyecto(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail=MSG_TOPE
             )
+        # El número de orden (prioridad) no se repite entre activos.
+        prio = payload.get("prioridad")
+        if prio is not None and await _prioridad_ocupada(db, prio):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_msg_prioridad(prio),
+            )
 
     # Coherencia acción siguiente — en creación el proyecto aún no
     # existe, así que solo verificamos que la tarea no esté ya colgada
@@ -180,6 +209,22 @@ async def actualizar_proyecto(
         else:
             # Aparcar o terminar: marcar momento
             payload["inactivo_desde"] = _ahora_iso()
+
+    # El número de orden no se repite entre activos. Calculamos el estado
+    # y la prioridad RESULTANTES tras este PATCH y, si el proyecto queda
+    # activo con un número ya ocupado por OTRO activo, lo rechazamos.
+    estado_resultante = nuevo_estado if nuevo_estado is not None else estado_actual
+    prioridad_resultante = (
+        payload["prioridad"] if "prioridad" in payload else actual.get("prioridad")
+    )
+    if estado_resultante == "activo" and prioridad_resultante is not None:
+        if await _prioridad_ocupada(
+            db, prioridad_resultante, excluir_id=str(proyecto_id)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_msg_prioridad(prioridad_resultante),
+            )
 
     # Coherencia acción siguiente
     tarea_siguiente: dict | None = None

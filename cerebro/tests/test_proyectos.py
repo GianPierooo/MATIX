@@ -432,3 +432,46 @@ async def test_acc_siguiente_tarea_de_otro_proyecto_devuelve_409(
         await client.delete(f"/api/v1/tareas/{tarea}/permanente")
         await client.delete(f"/api/v1/proyectos/{proy_b}")
         await client.delete(f"/api/v1/proyectos/{proy_a}")
+
+
+# ------------------- número de orden (prioridad) único --------------------
+
+
+async def test_prioridad_no_se_repite_entre_activos(
+    client: AsyncClient,
+) -> None:
+    """Dos activos no pueden compartir el número de orden. Crear/editar
+    con un número ya ocupado por otro activo → 409."""
+    originales = await _aparcar_originales(client)
+    creados: list[str] = []
+    try:
+        r1 = await client.post(
+            "/api/v1/proyectos",
+            json={"nombre": "_test_prio_uno", "prioridad": 1},
+        )
+        assert r1.status_code == 201, r1.text
+        creados.append(r1.json()["id"])
+
+        # Otro activo con el MISMO #1 → 409.
+        r2 = await client.post(
+            "/api/v1/proyectos",
+            json={"nombre": "_test_prio_dos", "prioridad": 1},
+        )
+        assert r2.status_code == 409, r2.text
+
+        # Con #2 libre → ok.
+        r3 = await client.post(
+            "/api/v1/proyectos",
+            json={"nombre": "_test_prio_tres", "prioridad": 2},
+        )
+        assert r3.status_code == 201, r3.text
+        creados.append(r3.json()["id"])
+
+        # Editar el segundo a #1 (ocupado) → 409.
+        r4 = await client.patch(
+            f"/api/v1/proyectos/{creados[1]}", json={"prioridad": 1}
+        )
+        assert r4.status_code == 409, r4.text
+    finally:
+        await _borrar(client, creados)
+        await _reactivar(client, originales)

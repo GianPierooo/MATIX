@@ -191,16 +191,26 @@ class _NuevoProyectoScreenState extends ConsumerState<NuevoProyectoScreen> {
                           letterSpacing: 1.0,
                           color: MatixColors.muted,
                         )),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 2),
+                    const Text(
+                      'El número de orden entre tus activos. No puede '
+                      'repetirse: los ya usados salen deshabilitados.',
+                      style: TextStyle(fontSize: 12, color: MatixColors.muted),
+                    ),
+                    const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
                       children: [1, 2, 3].map((p) {
                         final sel = _prioridad == p;
+                        // Números ya tomados por OTRO proyecto activo.
+                        final tomado = activos.any((a) => a.prioridad == p);
                         return ChoiceChip(
-                          label: Text('#$p'),
+                          label: Text(tomado ? '#$p (en uso)' : '#$p'),
                           selected: sel,
-                          onSelected: (_) =>
-                              setState(() => _prioridad = sel ? null : p),
+                          onSelected: tomado
+                              ? null
+                              : (_) =>
+                                  setState(() => _prioridad = sel ? null : p),
                         );
                       }).toList(),
                     ),
