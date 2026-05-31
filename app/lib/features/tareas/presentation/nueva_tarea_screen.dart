@@ -142,7 +142,7 @@ class _NuevaTareaScreenState extends ConsumerState<NuevaTareaScreen> {
       builder: (_) => AlertDialog(
         title: const Text('Borrar tarea'),
         content: const Text(
-          'La tarea se mueve a la papelera. Podés restaurarla desde '
+          'La tarea se mueve a la papelera. Puedes restaurarla desde '
           'Ajustes → Papelera.',
         ),
         actions: [

@@ -14,7 +14,7 @@ Decisiones (ver `docs/Plan_Capa8.md`):
   horario en la agenda de hoy. Más alertas en pasos siguientes.
 
 Si el día está vacío (sin eventos, sin tareas hoy, sin alertas),
-el saludo es "Hoy tenés la agenda libre" y las listas vienen vacías;
+el saludo es "Hoy tienes la agenda libre" y las listas vienen vacías;
 la app no debe forzar contenido inventado.
 """
 from __future__ import annotations

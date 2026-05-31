@@ -6,7 +6,7 @@ para soltar antes de dormir.
 
 Tono deliberado — **de cierre, no de exigencia**. No es una lista de
 deberes pendientes que generan culpa; es un repaso amable. Lo que
-quedó sin hacer se enmarca como "mañana seguís", no como "te falta".
+quedó sin hacer se enmarca como "mañana sigues", no como "te falta".
 
 Reusa los helpers de zona horaria y formato de `armar.py` (mismo
 paquete) para no duplicar la lógica de Lima/UTC.

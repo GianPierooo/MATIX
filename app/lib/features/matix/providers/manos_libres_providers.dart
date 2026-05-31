@@ -364,7 +364,7 @@ String _mensajeDeError(Object e) {
       return 'La voz no está disponible ahora mismo. (${e.message})';
     }
     if (e.statusCode == 413) {
-      return 'Hablaste muy largo. Probá decirlo en fragmentos más cortos.';
+      return 'Hablaste muy largo. Intenta decirlo en fragmentos más cortos.';
     }
     if (e.statusCode == 0) {
       return 'No pude llegar al cerebro. ¿Está corriendo?';

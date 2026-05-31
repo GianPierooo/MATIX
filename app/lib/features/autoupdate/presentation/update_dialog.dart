@@ -133,7 +133,7 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Tenés: build ${widget.buildLocal} · '
+            'Tienes: build ${widget.buildLocal} · '
             'Nueva: build ${widget.info.buildNumber} (${widget.info.version})',
             style: MatixText.small,
           ),

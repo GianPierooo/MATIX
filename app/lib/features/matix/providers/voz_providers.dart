@@ -132,7 +132,7 @@ class VozNotifier extends AutoDisposeNotifier<EstadoVoz> {
     if (grab.duracion < const Duration(milliseconds: 400)) {
       state = const EstadoVoz(
         fase: FaseVoz.error,
-        error: 'Grabación demasiado corta. Mantené el botón un '
+        error: 'Grabación demasiado corta. Mantén el botón un '
             'instante más.',
       );
       try {
@@ -186,7 +186,7 @@ String _mensajeDeError(MatixApiException e) {
     return 'La voz no está disponible ahora mismo. (${e.message})';
   }
   if (e.statusCode == 413) {
-    return 'El audio quedó muy largo. Hablá un fragmento más corto.';
+    return 'El audio quedó muy largo. Habla un fragmento más corto.';
   }
   if (e.statusCode == 0) {
     return 'No pude llegar al cerebro. ¿Está corriendo?';

@@ -177,8 +177,8 @@ class _BriefingBody extends StatelessWidget {
             titulo: 'Vencidas',
             child: Text(
               briefing.tareasVencidasTotal == 1
-                  ? 'Tenés 1 tarea vencida (hace ${briefing.tareasVencidasMasAntiguaDias} días).'
-                  : 'Tenés ${briefing.tareasVencidasTotal} tareas vencidas. '
+                  ? 'Tienes 1 tarea vencida (hace ${briefing.tareasVencidasMasAntiguaDias} días).'
+                  : 'Tienes ${briefing.tareasVencidasTotal} tareas vencidas. '
                       'La más antigua es de hace '
                       '${briefing.tareasVencidasMasAntiguaDias} días.',
               style: const TextStyle(
@@ -479,7 +479,7 @@ class _DiaLibre extends StatelessWidget {
           Icon(Icons.wb_sunny_outlined, color: MatixColors.green, size: 36),
           SizedBox(height: 8),
           Text(
-            'Tenés la agenda libre',
+            'Tienes la agenda libre',
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w600,

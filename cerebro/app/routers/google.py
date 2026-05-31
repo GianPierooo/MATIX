@@ -276,7 +276,7 @@ def _pagina_resultado(*, ok: bool, mensaje: str) -> str:
   <div class="card">
     <h1 class="titulo">{titulo}</h1>
     <p class="mensaje">{mensaje}</p>
-    <p class="cta">Podés cerrar esta pestaña y volver a la app.</p>
+    <p class="cta">Puedes cerrar esta pestaña y volver a la app.</p>
   </div>
 </body>
 </html>
