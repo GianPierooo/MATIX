@@ -27,7 +27,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..db import Postgrest
-from . import llm, memoria, modos
+from . import llm, memoria, modelos_llm, modos
 from .contexto import contexto_vivo
 from .system_prompt import system_prompt_fijo
 from .tools import TABLAS_AFECTADAS, TOOL_DEFINITIONS, ejecutar_tool
@@ -154,10 +154,21 @@ async def conversar(
     # Universidad"). Gana la última llamada a `navegar` del turno.
     navegacion: str | None = None
 
+    # Modelo (y por ende proveedor) del CHAT: se resuelve UNA sola vez al
+    # arrancar el turno y se usa en TODAS las vueltas del loop. Crítico: si el
+    # usuario cambia de modelo a mitad de conversación, el cambio aplica desde
+    # el PRÓXIMO turno; dentro de un turno el proveedor no cambia, así el
+    # `raw` (formato nativo del proveedor) que se re-inyecta siempre encaja.
+    # El historial entre turnos se reconstruye desde los campos NEUTROS
+    # ({rol, contenido} de texto) — nunca se reusa el `raw` de otro proveedor.
+    modelo = await modelos_llm.modelo_seleccionado(db)
+
     ultima_respuesta = ""
 
     for _ in range(_MAX_VUELTAS):
-        salida = await llm.responder_con_tools(mensajes, TOOL_DEFINITIONS)
+        salida = await llm.responder_con_tools(
+            mensajes, TOOL_DEFINITIONS, model=modelo
+        )
 
         if salida["tipo"] == "texto":
             ultima_respuesta = salida["contenido"]
@@ -257,6 +268,7 @@ async def capturar_apunte(db: Postgrest, *, texto: str) -> dict[str, Any]:
     salida = await llm.responder_con_tools(
         mensajes,
         TOOL_DEFINITIONS,
+        model=await modelos_llm.modelo_seleccionado(db),
         tool_choice=_TOOL_CHOICE_CREAR_APUNTE,
     )
 

@@ -17,6 +17,7 @@ import '../features/cierre/presentation/cierre_screen.dart';
 import '../features/cierre/providers/cierre_providers.dart';
 import '../features/google/presentation/conexion_google_tile.dart';
 import '../features/memoria/presentation/sobre_mi_screen.dart';
+import '../features/modelos/presentation/modelo_screen.dart';
 import '../features/nudges/providers/nudges_providers.dart';
 import '../features/papelera/presentation/papelera_screen.dart';
 import '../features/planificador/application/plan_dia_controller.dart';
@@ -213,6 +214,14 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
             subtitle: 'Lo que Matix sabe de ti. Míralo, edítalo o bórralo.',
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const SobreMiScreen()),
+            ),
+          ),
+          _Accion(
+            label: 'Modelo',
+            icon: Icons.memory_outlined,
+            subtitle: 'Qué modelo de IA usa Matix para conversar.',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ModeloScreen()),
             ),
           ),
 

@@ -27,6 +27,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from ..config import settings
+from . import modelos_llm
 from .uso import medidor
 
 # Tope de tokens de salida para Anthropic (OpenAI no lo exige). Holgado
@@ -72,8 +73,10 @@ def _get_anthropic_client() -> Any:
 # ─────────────────────────────────────────────────────────────────────
 
 
-def _usar_anthropic() -> bool:
-    return settings.matix_llm_provider.strip().lower() == "anthropic"
+def _es_anthropic(model: str) -> bool:
+    """Proveedor del modelo: se INFIERE del id (claude-* → anthropic;
+    gpt-*/o* → openai), con el env como último fallback."""
+    return modelos_llm.proveedor_de_id(model) == "anthropic"
 
 
 def _modelo_chat(model: str | None) -> str:
@@ -81,21 +84,37 @@ def _modelo_chat(model: str | None) -> str:
     return model or settings.matix_llm_model or "gpt-4o-mini"
 
 
-def _registrar_uso_anthropic(usage: Any) -> None:
+def _registrar_chat_openai(usage: Any, model: str) -> None:
+    """Registra el uso de un chat OpenAI con el precio del MODELO usado."""
+    precios = modelos_llm.precios_de(model)
+    if precios:
+        medidor.registrar_chat(
+            usage, precio_input_por_m=precios[0], precio_output_por_m=precios[1]
+        )
+    else:
+        medidor.registrar_chat(usage)
+
+
+def _registrar_uso_anthropic(usage: Any, model: str) -> None:
     """Normaliza el `usage` de Anthropic (input/output/cache) al shape que
-    espera `medidor.registrar_chat` (que lee como OpenAI)."""
+    espera `medidor.registrar_chat`, con el precio del MODELO usado."""
     if usage is None:
         return
     inp = getattr(usage, "input_tokens", 0) or 0
     out = getattr(usage, "output_tokens", 0) or 0
     cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
-    medidor.registrar_chat(
-        {
-            "prompt_tokens": inp + cache_read,
-            "completion_tokens": out,
-            "prompt_tokens_details": {"cached_tokens": cache_read},
-        }
-    )
+    normalizado = {
+        "prompt_tokens": inp + cache_read,
+        "completion_tokens": out,
+        "prompt_tokens_details": {"cached_tokens": cache_read},
+    }
+    precios = modelos_llm.precios_de(model)
+    if precios:
+        medidor.registrar_chat(
+            normalizado, precio_input_por_m=precios[0], precio_output_por_m=precios[1]
+        )
+    else:
+        medidor.registrar_chat(normalizado)
 
 
 def _imagen_a_anthropic(url: str) -> dict[str, Any]:
@@ -228,7 +247,7 @@ async def responder(
     """Versión simple sin tools (compat/debugging). Enruta al proveedor
     activo. El flujo real de Matix usa `responder_con_tools`."""
     model = _modelo_chat(model)
-    if _usar_anthropic():
+    if _es_anthropic(model):
         return await _anthropic_texto(messages, model=model, temperature=temperature)
     return await _openai_texto(messages, model=model, temperature=temperature)
 
@@ -261,7 +280,7 @@ async def responder_con_tools(
     `raw` siempre encaja.
     """
     model = _modelo_chat(model)
-    if _usar_anthropic():
+    if _es_anthropic(model):
         return await _anthropic_con_tools(
             messages, tools, model=model, temperature=temperature, tool_choice=tool_choice
         )
@@ -277,7 +296,7 @@ async def _chat_json(
     crudo. OpenAI usa su modo JSON; Anthropic, prefill con `{`. El parseo
     y la validación los hace cada extractor (son tolerantes a fallos)."""
     model = _modelo_chat(model)
-    if _usar_anthropic():
+    if _es_anthropic(model):
         return await _anthropic_json(messages, model=model, temperature=temperature)
     return await _openai_json(messages, model=model, temperature=temperature)
 
@@ -290,7 +309,7 @@ async def _openai_texto(messages, *, model, temperature) -> str:
     resp = await client.chat.completions.create(
         model=model, messages=messages, temperature=temperature
     )
-    medidor.registrar_chat(resp.usage)
+    _registrar_chat_openai(resp.usage, model)
     return (resp.choices[0].message.content or "").strip()
 
 
@@ -303,7 +322,7 @@ async def _openai_con_tools(messages, tools, *, model, temperature, tool_choice)
         tools=tools,
         tool_choice=tool_choice,
     )
-    medidor.registrar_chat(resp.usage)
+    _registrar_chat_openai(resp.usage, model)
     msg = resp.choices[0].message
     if msg.tool_calls:
         calls = []
@@ -333,7 +352,7 @@ async def _openai_json(messages, *, model, temperature) -> str:
         temperature=temperature,
         response_format={"type": "json_object"},
     )
-    medidor.registrar_chat(resp.usage)
+    _registrar_chat_openai(resp.usage, model)
     return resp.choices[0].message.content or "{}"
 
 
@@ -352,7 +371,7 @@ async def _anthropic_texto(messages, *, model, temperature) -> str:
     if system:
         kwargs["system"] = system
     resp = await client.messages.create(**kwargs)
-    _registrar_uso_anthropic(resp.usage)
+    _registrar_uso_anthropic(resp.usage, model)
     return _texto_de_anthropic(resp.content).strip()
 
 
@@ -370,7 +389,7 @@ async def _anthropic_con_tools(messages, tools, *, model, temperature, tool_choi
     if system:
         kwargs["system"] = system
     resp = await client.messages.create(**kwargs)
-    _registrar_uso_anthropic(resp.usage)
+    _registrar_uso_anthropic(resp.usage, model)
 
     calls: list[dict] = []
     textos: list[str] = []
@@ -410,7 +429,7 @@ async def _anthropic_json(messages, *, model, temperature) -> str:
     if system:
         kwargs["system"] = system
     resp = await client.messages.create(**kwargs)
-    _registrar_uso_anthropic(resp.usage)
+    _registrar_uso_anthropic(resp.usage, model)
     return "{" + _texto_de_anthropic(resp.content)
 
 

@@ -54,6 +54,10 @@ class _Snapshot:
     prompt_tokens: int = 0
     cached_prompt_tokens: int = 0
     completion_tokens: int = 0
+    # Costo del chat acumulado en USD. Se suma POR REQUEST con el precio del
+    # modelo que se usó (puede variar si el usuario cambia de modelo), en vez
+    # de recomputarlo al final con un precio fijo.
+    costo_chat_usd: float = 0.0
     llamadas_chat: int = 0
     segundos_whisper: float = 0.0
     llamadas_whisper: int = 0
@@ -71,24 +75,45 @@ class MedidorUso:
         self._s = _Snapshot()
         self._lock = Lock()
 
-    def registrar_chat(self, usage: Any) -> None:
-        """Acepta el objeto `usage` de OpenAI (puede ser pydantic-like
-        con atributos o un dict). Es tolerante: si falta algún campo,
-        no rompe."""
+    def registrar_chat(
+        self,
+        usage: Any,
+        *,
+        precio_input_por_m: float | None = None,
+        precio_output_por_m: float | None = None,
+        precio_cached_por_m: float | None = None,
+    ) -> None:
+        """Acepta el `usage` de un chat (objeto OpenAI o dict; tolerante a
+        campos faltantes). Acumula tokens (para mostrar) y el COSTO del
+        request con el precio del MODELO usado. Si no se pasan precios, usa
+        los de gpt-4o-mini (compat)."""
         if usage is None:
             return
-        prompt = _get(usage, "prompt_tokens", 0)
-        completion = _get(usage, "completion_tokens", 0)
-        # Detalle de cached tokens — soportado por gpt-4o-mini cuando
-        # el prompt caching aplica.
+        prompt = int(_get(usage, "prompt_tokens", 0) or 0)
+        completion = int(_get(usage, "completion_tokens", 0) or 0)
+        # Detalle de cached tokens — soportado cuando el prompt caching aplica.
         cached = 0
         details = _get(usage, "prompt_tokens_details", None)
         if details is not None:
-            cached = _get(details, "cached_tokens", 0) or 0
+            cached = int(_get(details, "cached_tokens", 0) or 0)
+
+        p_in = _PRECIO_INPUT_POR_M if precio_input_por_m is None else precio_input_por_m
+        p_out = _PRECIO_OUTPUT_POR_M if precio_output_por_m is None else precio_output_por_m
+        # El input cacheado suele costar la mitad; si no nos dan precio, lo
+        # derivamos del de input.
+        p_cached = (
+            (p_in / 2.0) if precio_cached_por_m is None else precio_cached_por_m
+        )
+        no_cache = max(0, prompt - cached)
+        inc = (
+            no_cache * p_in + cached * p_cached + completion * p_out
+        ) / 1_000_000
+
         with self._lock:
-            self._s.prompt_tokens += int(prompt or 0)
-            self._s.completion_tokens += int(completion or 0)
-            self._s.cached_prompt_tokens += int(cached or 0)
+            self._s.prompt_tokens += prompt
+            self._s.completion_tokens += completion
+            self._s.cached_prompt_tokens += cached
+            self._s.costo_chat_usd += inc
             self._s.llamadas_chat += 1
 
     def registrar_whisper(self, segundos: float) -> None:
@@ -116,11 +141,10 @@ class MedidorUso:
         """Devuelve el estado actual + costo estimado en USD."""
         with self._lock:
             s = _Snapshot(**self._s.__dict__)
-        no_cache = max(0, s.prompt_tokens - s.cached_prompt_tokens)
+        # El costo del CHAT ya viene acumulado por request con el precio del
+        # modelo usado. Whisper/TTS/embeddings son siempre OpenAI a precio fijo.
         costo = (
-            no_cache * _PRECIO_INPUT_POR_M / 1_000_000
-            + s.cached_prompt_tokens * _PRECIO_INPUT_CACHED_POR_M / 1_000_000
-            + s.completion_tokens * _PRECIO_OUTPUT_POR_M / 1_000_000
+            s.costo_chat_usd
             + (s.segundos_whisper / 60.0) * _PRECIO_WHISPER_POR_MIN
             + s.caracteres_tts * _PRECIO_TTS_POR_M_CHARS / 1_000_000
             + s.tokens_embedding * _PRECIO_EMBED_POR_M / 1_000_000

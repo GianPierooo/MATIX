@@ -187,25 +187,30 @@ async def test_anthropic_json_usa_prefill(monkeypatch):
     assert cap["messages"][-1] == {"role": "assistant", "content": "{"}
 
 
-# ── Selección de proveedor por env ──────────────────────────────────
+# ── Ruteo por ID del modelo (no por env) ────────────────────────────
 
 
-async def test_dispatch_por_provider(monkeypatch):
-    # openai por defecto
-    monkeypatch.setattr(llm.settings, "matix_llm_provider", "openai")
-    cap_o: dict = {}
-    monkeypatch.setattr(llm, "_get_openai_client", lambda: _fake_openai(_openai_resp(content="oai"), cap_o))
-    out = await llm.responder_con_tools([], [])
+async def test_dispatch_se_infiere_del_id_del_modelo(monkeypatch):
+    # id gpt-* → OpenAI
+    monkeypatch.setattr(llm, "_get_openai_client", lambda: _fake_openai(_openai_resp(content="oai"), {}))
+    out = await llm.responder_con_tools([], [], model="gpt-4o-mini")
     assert out["contenido"] == "oai"
 
-    # anthropic opt-in
-    monkeypatch.setattr(llm.settings, "matix_llm_provider", "anthropic")
+    # id claude-* → Anthropic (sin tocar ninguna env var)
     monkeypatch.setattr(llm, "_get_anthropic_client", lambda: _fake_anthropic(_anth_resp([_anth_block(type="text", text="claude")]), {}))
-    out2 = await llm.responder_con_tools([{"role": "user", "content": "x"}], [])
+    out2 = await llm.responder_con_tools([{"role": "user", "content": "x"}], [], model="claude-opus-4-8")
     assert out2["contenido"] == "claude"
 
 
+def test_es_anthropic_por_id():
+    assert llm._es_anthropic("claude-opus-4-8") is True
+    assert llm._es_anthropic("claude-sonnet-4-6") is True
+    assert llm._es_anthropic("gpt-5.5") is False
+    assert llm._es_anthropic("gpt-4o-mini") is False
+    assert llm._es_anthropic("o3") is False
+
+
 def test_modelo_chat_resuelve_env(monkeypatch):
-    monkeypatch.setattr(llm.settings, "matix_llm_model", "claude-3-5-haiku-latest")
-    assert llm._modelo_chat(None) == "claude-3-5-haiku-latest"
+    monkeypatch.setattr(llm.settings, "matix_llm_model", "claude-opus-4-8")
+    assert llm._modelo_chat(None) == "claude-opus-4-8"
     assert llm._modelo_chat("explicito") == "explicito"
