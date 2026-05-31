@@ -16,6 +16,7 @@ import '../features/cierre/presentation/cierre_dia_screen.dart';
 import '../features/cierre/presentation/cierre_screen.dart';
 import '../features/cierre/providers/cierre_providers.dart';
 import '../features/google/presentation/conexion_google_tile.dart';
+import '../features/memoria/presentation/sobre_mi_screen.dart';
 import '../features/nudges/providers/nudges_providers.dart';
 import '../features/papelera/presentation/papelera_screen.dart';
 import '../features/planificador/application/plan_dia_controller.dart';
@@ -205,6 +206,16 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
         children: [
+          const _Seccion('Matix'),
+          _Accion(
+            label: 'Sobre mí',
+            icon: Icons.psychology_outlined,
+            subtitle: 'Lo que Matix sabe de ti. Míralo, edítalo o bórralo.',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SobreMiScreen()),
+            ),
+          ),
+
           const _Seccion('Conexión'),
           _Fila(
             label: 'URL del cerebro',

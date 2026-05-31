@@ -7,6 +7,7 @@ import '../../apuntes/providers/apuntes_providers.dart';
 import '../../cierre/providers/cierres_providers.dart';
 import '../../eventos/providers/eventos_providers.dart';
 import '../../finanzas/providers/movimientos_providers.dart';
+import '../../memoria/data/memoria_repository.dart';
 import '../../modos/providers/modos_providers.dart';
 import '../../proyectos/providers/proyectos_providers.dart';
 import '../../tareas/providers/tareas_providers.dart';
@@ -186,6 +187,8 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
           ref.invalidate(proyectosListProvider);
         case 'movimientos':
           ref.invalidate(movimientosListProvider);
+        case 'memoria':
+          ref.invalidate(memoriaListProvider);
         case 'cierres_dia':
           ref.invalidate(cierresListProvider);
         // Tabla desconocida → ignoramos en silencio; nuevas tablas

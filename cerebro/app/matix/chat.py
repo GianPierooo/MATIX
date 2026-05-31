@@ -25,7 +25,7 @@ import json
 from typing import Any
 
 from ..db import Postgrest
-from . import llm, modos
+from . import llm, memoria, modos
 from .contexto import contexto_vivo
 from .system_prompt import system_prompt_fijo
 from .tools import TABLAS_AFECTADAS, TOOL_DEFINITIONS, ejecutar_tool
@@ -66,6 +66,13 @@ async def conversar(
         {"role": "system", "content": fijo},
         {"role": "system", "content": contexto},
     ]
+
+    # Memoria personal (Capa Memoria): el bloque compacto "lo que sé de ti"
+    # con los hechos esenciales del usuario, junto al contexto vivo. Si no
+    # hay nada, no inyecta nada. Lo extenso se recupera con `buscar_memoria`.
+    bloque_mem = await memoria.bloque_memoria(db)
+    if bloque_mem:
+        mensajes.append({"role": "system", "content": bloque_mem})
 
     # Modo activo (Capa Modos): si hay uno, entra como `system` ADICIONAL,
     # encima del prompt base. Las reglas base e identidad de Matix mandan

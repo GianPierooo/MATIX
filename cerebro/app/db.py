@@ -58,6 +58,7 @@ class Postgrest:
         limit: int | None = None,
         filters: dict[str, str] | None = None,
         raw_filters: dict[str, str] | None = None,
+        select: str | None = None,
     ) -> list[dict[str, Any]]:
         """Lista filas. `filters` se traduce a `col=eq.valor` en query
         params (igualdad estricta), para no obligar al caller a conocer
@@ -67,8 +68,11 @@ class Postgrest:
         usa tal cual, e.g. `{"eliminado_en": "is.null"}` o
         `{"vence_en": "lt.2026-01-01"}`. Útil para la papelera
         (borrado suave) donde necesitamos `is.null` / `not.is.null`.
+
+        `select` acota las columnas (e.g. `"id,contenido"`), útil para no
+        traer columnas pesadas como un `embedding`. Default: todas (`*`).
         """
-        params: dict[str, str] = {"select": "*"}
+        params: dict[str, str] = {"select": select or "*"}
         if order:
             params["order"] = order
         if limit is not None:

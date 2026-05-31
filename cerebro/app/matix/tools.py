@@ -61,7 +61,7 @@ from ..schemas.eventos import EventoCreate, EventoUpdate
 from ..schemas.movimientos import MovimientoCreate, MovimientoUpdate
 from ..schemas.proyectos import ProyectoCreate, ProyectoUpdate
 from ..schemas.tareas import TareaCreate, TareaUpdate
-from . import modos
+from . import memoria, modos
 from .biblioteca import buscar_material as _buscar_material_rag
 from .indexador import buscar_apuntes as _buscar_apuntes_rag
 from .indexador import indexar_apunte
@@ -1115,6 +1115,109 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ── Memoria personal (lo que Matix sabe del usuario) ─────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "recordar",
+            "description": (
+                "Guarda un HECHO DURADERO sobre el usuario en la memoria "
+                "personal (quién es, sus metas, personas importantes, su "
+                "situación, preferencias, contexto de sus proyectos). Úsalo "
+                "cuando diga 'recuerda que…' O cuando cuente algo estable que "
+                "valga la pena recordar para personalizar. NO guardes cosas "
+                "efímeras (una tarea de hoy va a `crear_tarea`, no acá). "
+                "Confírmalo en una frase corta ('Anotado, lo recordaré'). "
+                "`esencial=true` (default) lo inyecto siempre; ponlo en false "
+                "para detalle largo que solo hace falta a veces."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "contenido": {
+                        "type": "string",
+                        "description": "El hecho, en una o pocas frases.",
+                    },
+                    "categoria": {
+                        "type": "string",
+                        "description": (
+                            "Para organizar: quien_soy, metas, personas, "
+                            "situacion, preferencias, proyectos… Opcional."
+                        ),
+                    },
+                    "esencial": {
+                        "type": "boolean",
+                        "description": "Si va siempre en el contexto. Default true.",
+                    },
+                },
+                "required": ["contenido"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "actualizar_memoria",
+            "description": (
+                "Actualiza un hecho de la memoria (cambió una meta, una "
+                "situación). Pásale el `memoria_id` (de `buscar_memoria`) y lo "
+                "que cambia."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "memoria_id": _UUID,
+                    "contenido": {"type": "string"},
+                    "categoria": {"type": "string"},
+                    "esencial": {"type": "boolean"},
+                },
+                "required": ["memoria_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "olvidar",
+            "description": (
+                "Borra un hecho de la memoria (PERMANENTE, sin papelera). Úsalo "
+                "cuando el usuario diga 'olvida que…'. Si no tienes el "
+                "`memoria_id`, primero `buscar_memoria` para encontrarlo. "
+                "Confírmalo ('Listo, lo olvidé')."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"memoria_id": _UUID},
+                "required": ["memoria_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "buscar_memoria",
+            "description": (
+                "Busca en la memoria personal por SIGNIFICADO (SOLO LECTURA). "
+                "Lo esencial ya lo tienes inyectado en «lo que sé de ti»; usa "
+                "esto para recuperar detalle que NO esté en ese bloque, o para "
+                "obtener el `memoria_id` antes de actualizar/olvidar un hecho."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "consulta": {
+                        "type": "string",
+                        "description": "Qué buscar, en lenguaje natural.",
+                    },
+                },
+                "required": ["consulta"],
                 "additionalProperties": False,
             },
         },
@@ -2518,6 +2621,88 @@ async def _desactivar_modo(db: Postgrest, _args: dict) -> dict[str, Any]:
     return _ok({"modo": None})
 
 
+# ── Memoria personal: recordar / actualizar / olvidar / buscar ──────
+
+
+async def _recordar(db: Postgrest, args: dict) -> dict[str, Any]:
+    contenido = (args.get("contenido") or "").strip()
+    if not contenido:
+        return _error("validacion", "No me dijiste qué recordar.")
+    esencial = args.get("esencial")
+    fila = await memoria.recordar(
+        db,
+        contenido=contenido,
+        categoria=args.get("categoria"),
+        esencial=True if esencial is None else bool(esencial),
+    )
+    return _ok(
+        {
+            "id": fila["id"],
+            "contenido": fila["contenido"],
+            "categoria": fila.get("categoria"),
+        }
+    )
+
+
+async def _actualizar_memoria(db: Postgrest, args: dict) -> dict[str, Any]:
+    memoria_id, err = _validar_uuid(args.get("memoria_id"), "memoria_id")
+    if err:
+        return err
+    campos = {k: v for k, v in args.items() if k != "memoria_id"}
+    if not campos:
+        return _error("validacion", "No me pasaste qué cambiar del recuerdo.")
+    fila = await memoria.actualizar(
+        db,
+        memoria_id=memoria_id,
+        contenido=campos.get("contenido"),
+        categoria=campos.get("categoria"),
+        esencial=campos.get("esencial"),
+    )
+    if fila is None:
+        return _error("no_existe", "Ese recuerdo ya no está en la memoria.")
+    return _ok({"id": memoria_id, "contenido": fila.get("contenido")})
+
+
+async def _olvidar(db: Postgrest, args: dict) -> dict[str, Any]:
+    memoria_id, err = _validar_uuid(args.get("memoria_id"), "memoria_id")
+    if err:
+        return err
+    actual = await db.get("memoria", memoria_id)
+    if actual is None:
+        return _error("no_existe", "Ese recuerdo ya no está en la memoria.")
+    ok = await memoria.olvidar(db, memoria_id=memoria_id)
+    if not ok:
+        return _error("interno", "No se pudo borrar el recuerdo.")
+    return _ok(
+        {"id": memoria_id, "contenido": actual.get("contenido"), "reversible": False}
+    )
+
+
+async def _buscar_memoria(db: Postgrest, args: dict) -> dict[str, Any]:
+    consulta = (args.get("consulta") or "").strip()
+    if not consulta:
+        return _error("validacion", "Falta la `consulta` (qué buscar).")
+    filas = await memoria.buscar(db, consulta=consulta, top_k=5)
+    return _ok(
+        {
+            "consulta": consulta,
+            "resultados": [
+                {
+                    "memoria_id": r["id"],
+                    "contenido": r["contenido"],
+                    "categoria": r.get("categoria"),
+                    "distancia": round(float(r["distancia"]), 4),
+                }
+                for r in filas
+            ],
+            "nota": (
+                "Si todo viene con distancia > 1.0, el match es débil — dilo "
+                "en vez de inventar."
+            ),
+        }
+    )
+
+
 # Mapa de nombre → handler. Mantener sincronizado con TOOL_DEFINITIONS.
 _HANDLERS = {
     # Crear
@@ -2554,7 +2739,12 @@ _HANDLERS = {
     # Modos de Matix
     "activar_modo": _activar_modo,
     "desactivar_modo": _desactivar_modo,
+    # Memoria personal
+    "recordar": _recordar,
+    "actualizar_memoria": _actualizar_memoria,
+    "olvidar": _olvidar,
     # Solo lectura
+    "buscar_memoria": _buscar_memoria,
     "consultar_apuntes": _consultar_apuntes,
     "consultar_movimientos": _consultar_movimientos,
     "buscar_apuntes": _buscar_apuntes,
@@ -2598,6 +2788,11 @@ TABLAS_AFECTADAS = {
     # Modos (el modo activo se surfacea aparte en la respuesta del chat)
     "activar_modo": [],
     "desactivar_modo": [],
+    # Memoria personal (la pantalla "Sobre mí" se refresca al cambiar)
+    "recordar": ["memoria"],
+    "actualizar_memoria": ["memoria"],
+    "olvidar": ["memoria"],
+    "buscar_memoria": [],  # solo lectura
     "consultar_apuntes": [],  # solo lectura
     "consultar_movimientos": [],  # solo lectura
     "buscar_apuntes": [],  # solo lectura
