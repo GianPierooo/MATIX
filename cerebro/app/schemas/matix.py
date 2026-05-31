@@ -278,3 +278,6 @@ class ChatResponse(BaseModel):
     respuesta: str
     tools_usadas: list[str] = Field(default_factory=list)
     tablas_cambiadas: list[str] = Field(default_factory=list)
+    # Sección a la que la app debe navegar si el usuario lo pidió
+    # («llévame a Universidad»). `null` si no hubo navegación.
+    navegacion: str | None = None

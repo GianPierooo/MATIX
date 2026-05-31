@@ -6,12 +6,17 @@ import '../config.dart';
 import '../features/autoupdate/data/update_service.dart';
 import '../features/autoupdate/presentation/update_dialog.dart';
 import '../features/autoupdate/providers/update_providers.dart';
+import '../features/apuntes/presentation/apuntes_list_screen.dart';
 import '../features/eventos/presentation/calendario_screen.dart';
+import '../features/finanzas/presentation/finanzas_screen.dart';
 import '../features/matix/presentation/matix_chat_screen.dart';
+import '../features/matix/providers/navegacion_matix_provider.dart';
 import '../features/proyectos/presentation/proyectos_list_screen.dart';
 import '../features/tareas/presentation/tareas_list_screen.dart';
 import '../theme/matix_colors.dart';
+import 'ajustes_screen.dart';
 import 'inicio_screen.dart';
+import 'universidad_screen.dart';
 
 /// Cáscara principal: bottom nav personalizado + IndexedStack que preserva
 /// el estado de cada sección al cambiar de pestaña.
@@ -52,6 +57,39 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _pingCerebro());
+  }
+
+  /// Abre la sección que pidió Matix desde el chat. Las cuatro de la
+  /// barra (Inicio, Tareas, Calendario, Proyectos) son un cambio de
+  /// pestaña; el resto (Universidad, Finanzas, Apuntes, Ajustes) se
+  /// empujan como ruta — igual que cuando se abren desde Inicio.
+  void _navegarMatix(SeccionMatix seccion) {
+    switch (seccion) {
+      case SeccionMatix.inicio:
+        setState(() => _index = 0);
+      case SeccionMatix.tareas:
+        setState(() => _index = 1);
+      case SeccionMatix.calendario:
+        setState(() => _index = 3);
+      case SeccionMatix.proyectos:
+        setState(() => _index = 4);
+      case SeccionMatix.universidad:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const UniversidadScreen()),
+        );
+      case SeccionMatix.finanzas:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const FinanzasScreen()),
+        );
+      case SeccionMatix.apuntes:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ApuntesListScreen()),
+        );
+      case SeccionMatix.ajustes:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const AjustesScreen()),
+        );
+    }
   }
 
   Future<void> _pingCerebro() async {
@@ -99,6 +137,17 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // chequeo. `watch` haría rebuild en cada cambio; con read solo
     // levantamos el FutureProvider la primera vez.
     ref.watch(updateCheckProvider);
+
+    // Navegación pedida desde el chat de Matix ("llévame a Universidad").
+    // One-shot: consumimos el objetivo y abrimos la sección tras el frame
+    // (evita navegar en medio del build).
+    ref.listen<SeccionMatix?>(objetivoNavegacionProvider, (_, next) {
+      if (next == null) return;
+      ref.read(objetivoNavegacionProvider.notifier).state = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _navegarMatix(next);
+      });
+    });
 
     return Scaffold(
       // Permite que el círculo elevado de Matix "sobresalga" sobre el body

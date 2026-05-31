@@ -6,10 +6,12 @@ import '../../../core/providers.dart';
 import '../../apuntes/providers/apuntes_providers.dart';
 import '../../cierre/providers/cierres_providers.dart';
 import '../../eventos/providers/eventos_providers.dart';
+import '../../finanzas/providers/movimientos_providers.dart';
 import '../../proyectos/providers/proyectos_providers.dart';
 import '../../tareas/providers/tareas_providers.dart';
 import '../data/matix_chat_repository.dart';
 import '../domain/mensaje.dart';
+import 'navegacion_matix_provider.dart';
 import 'uso_providers.dart';
 
 final matixChatRepositoryProvider = Provider<MatixChatRepository>((ref) {
@@ -141,6 +143,12 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
       );
       // Refrescar el hub si Matix tocó algo
       _invalidarProviders(turno.tablasCambiadas);
+      // Si pidió navegar, dejamos el objetivo para que el HomeShell abra
+      // la sección. One-shot: el shell lo consume y lo vuelve a null.
+      final destino = seccionMatixDeString(turno.navegacion);
+      if (destino != null) {
+        ref.read(objetivoNavegacionProvider.notifier).state = destino;
+      }
       // El medidor cambió: hubo al menos una llamada al modelo.
       ref.invalidate(usoSnapshotProvider);
     } catch (e) {
@@ -172,6 +180,8 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
           ref.invalidate(apuntesListProvider);
         case 'proyectos':
           ref.invalidate(proyectosListProvider);
+        case 'movimientos':
+          ref.invalidate(movimientosListProvider);
         case 'cierres_dia':
           ref.invalidate(cierresListProvider);
         // Tabla desconocida → ignoramos en silencio; nuevas tablas

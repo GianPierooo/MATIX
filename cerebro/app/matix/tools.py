@@ -58,6 +58,7 @@ from ..db import Postgrest
 from ..schemas.apuntes import ApunteCreate, ApunteUpdate
 from ..schemas.cierres_dia import CierreDiaCreate
 from ..schemas.eventos import EventoCreate, EventoUpdate
+from ..schemas.movimientos import MovimientoCreate, MovimientoUpdate
 from ..schemas.proyectos import ProyectoCreate, ProyectoUpdate
 from ..schemas.tareas import TareaCreate, TareaUpdate
 from .biblioteca import buscar_material as _buscar_material_rag
@@ -835,6 +836,168 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         ),
                     },
                 },
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ── Apuntes: listado plano (sin RAG) ─────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_apuntes",
+            "description": (
+                "Lista los apuntes del hub por título (SOLO LECTURA, sin "
+                "búsqueda semántica). Úsala para ENUMERAR apuntes y obtener "
+                "sus `apunte_id` cuando el usuario quiere editar o BORRAR uno "
+                "por su nombre (p.ej. «borra mi apunte de la lista de "
+                "compras»). Si pasas `texto`, filtra por coincidencia en el "
+                "título. Para buscar por SIGNIFICADO usa `buscar_apuntes`."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "texto": {
+                        "type": "string",
+                        "description": (
+                            "Filtro opcional: subcadena a buscar en el "
+                            "título (sin distinguir mayúsculas)."
+                        ),
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ── Finanzas: movimientos (CRUD completo) ────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "crear_movimiento",
+            "description": (
+                "Registra un movimiento de finanzas: un ingreso o un gasto. "
+                "El `monto` SIEMPRE es positivo; el signo lo da `tipo`. Si no "
+                "te dan fecha, se usa hoy. Categoría libre (p.ej. «Comida», "
+                "«Transporte», «Sueldo»); por defecto «General»."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tipo": {
+                        "type": "string",
+                        "enum": ["ingreso", "gasto"],
+                    },
+                    "monto": {
+                        "type": "number",
+                        "description": "Monto positivo en soles (S/).",
+                    },
+                    "categoria": {"type": "string"},
+                    "fecha": {
+                        "type": "string",
+                        "description": "Fecha ISO `YYYY-MM-DD`. Opcional.",
+                    },
+                    "nota": {"type": "string"},
+                },
+                "required": ["tipo", "monto"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_movimientos",
+            "description": (
+                "Consulta los movimientos de finanzas (SOLO LECTURA). "
+                "Devuelve los más recientes con su balance, ingresos y "
+                "gastos. Filtra por `tipo` si hace falta. RESUME en lenguaje "
+                "natural (no vuelques la tabla cruda)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tipo": {
+                        "type": "string",
+                        "enum": ["ingreso", "gasto", "todos"],
+                        "description": "Default 'todos'.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "editar_movimiento",
+            "description": (
+                "Edita un movimiento existente. Pásale el `movimiento_id` "
+                "(de `consultar_movimientos`) y solo los campos que cambian."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "movimiento_id": _UUID,
+                    "tipo": {
+                        "type": "string",
+                        "enum": ["ingreso", "gasto"],
+                    },
+                    "monto": {"type": "number"},
+                    "categoria": {"type": "string"},
+                    "fecha": {"type": "string"},
+                    "nota": {"type": "string"},
+                },
+                "required": ["movimiento_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "eliminar_movimiento",
+            "description": (
+                "Borra un movimiento de finanzas. OJO: es PERMANENTE (no hay "
+                "papelera para finanzas). Confirma con el usuario antes de "
+                "llamarla si hay cualquier duda."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"movimiento_id": _UUID},
+                "required": ["movimiento_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ── Navegación: llevar al usuario a una sección de la app ─────────
+    {
+        "type": "function",
+        "function": {
+            "name": "navegar",
+            "description": (
+                "Lleva al usuario a una sección de la app cuando lo pide "
+                "(«llévame a Universidad», «abre Finanzas», «vamos a "
+                "Tareas»). NO cambia datos: solo abre la pantalla. Después "
+                "confírmalo en una frase corta («Listo, te llevo a "
+                "Universidad»)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "seccion": {
+                        "type": "string",
+                        "enum": [
+                            "inicio",
+                            "tareas",
+                            "calendario",
+                            "proyectos",
+                            "universidad",
+                            "finanzas",
+                            "apuntes",
+                            "ajustes",
+                        ],
+                    },
+                },
+                "required": ["seccion"],
                 "additionalProperties": False,
             },
         },
@@ -1980,6 +2143,174 @@ async def _consultar_proyectos(db: Postgrest, args: dict) -> dict[str, Any]:
     )
 
 
+# ── Apuntes: listado plano sin RAG ──────────────────────────────────
+
+
+async def _consultar_apuntes(db: Postgrest, args: dict) -> dict[str, Any]:
+    """Lista los apuntes vivos por título, sin búsqueda semántica. Para
+    que el modelo pueda enumerar y obtener `apunte_id` (editar/borrar por
+    nombre) aunque el RAG no esté disponible."""
+    texto = (args.get("texto") or "").strip().lower()
+    filas = await db.list(
+        "apuntes", raw_filters={"eliminado_en": "is.null"}
+    )
+    if texto:
+        filas = [f for f in filas if texto in (f.get("titulo") or "").lower()]
+    # Más recientes primero (por actualizado_en si está, si no creado_en).
+    filas.sort(
+        key=lambda f: f.get("actualizado_en") or f.get("creado_en") or "",
+        reverse=True,
+    )
+    total = len(filas)
+    return _ok(
+        {
+            "total": total,
+            "apuntes": [
+                {
+                    "apunte_id": f["id"],
+                    "titulo": f.get("titulo"),
+                    "fragmento": ((f.get("contenido") or "")[:120]).strip(),
+                }
+                for f in filas[:40]
+            ],
+            "truncado": total > 40,
+        }
+    )
+
+
+# ── Finanzas: movimientos (crear / consultar / editar / eliminar) ────
+
+
+async def _crear_movimiento(db: Postgrest, args: dict) -> dict[str, Any]:
+    try:
+        body = MovimientoCreate(**args)
+    except ValidationError as e:
+        return _err_validacion(e)
+    payload = body.model_dump(mode="json", exclude_none=True)
+    fila = await db.insert("movimientos", payload)
+    return _ok(
+        {
+            "id": fila["id"],
+            "tipo": fila["tipo"],
+            "monto": fila["monto"],
+            "categoria": fila.get("categoria"),
+            "fecha": fila.get("fecha"),
+        }
+    )
+
+
+async def _consultar_movimientos(db: Postgrest, args: dict) -> dict[str, Any]:
+    tipo = args.get("tipo") or "todos"
+    if tipo not in ("ingreso", "gasto", "todos"):
+        tipo = "todos"
+    filas = await db.list("movimientos", order="fecha.desc")
+    if tipo != "todos":
+        filas = [m for m in filas if m.get("tipo") == tipo]
+    ingresos = sum(
+        float(m["monto"]) for m in filas if m.get("tipo") == "ingreso"
+    )
+    gastos = sum(
+        float(m["monto"]) for m in filas if m.get("tipo") == "gasto"
+    )
+    total = len(filas)
+    return _ok(
+        {
+            "total": total,
+            "ingresos": round(ingresos, 2),
+            "gastos": round(gastos, 2),
+            "balance": round(ingresos - gastos, 2),
+            "movimientos": [
+                {
+                    "id": m["id"],
+                    "tipo": m.get("tipo"),
+                    "monto": m.get("monto"),
+                    "categoria": m.get("categoria"),
+                    "fecha": m.get("fecha"),
+                    "nota": m.get("nota"),
+                }
+                for m in filas[:40]
+            ],
+            "truncado": total > 40,
+        }
+    )
+
+
+async def _editar_movimiento(db: Postgrest, args: dict) -> dict[str, Any]:
+    movimiento_id, err = _validar_uuid(args.get("movimiento_id"), "movimiento_id")
+    if err:
+        return err
+    campos = {k: v for k, v in args.items() if k != "movimiento_id"}
+    if not campos:
+        return _error(
+            "validacion", "No me pasaste qué campo cambiar del movimiento."
+        )
+    try:
+        body = MovimientoUpdate(**campos)
+    except ValidationError as e:
+        return _err_validacion(e)
+    payload = body.model_dump(mode="json", exclude_unset=True)
+    fila = await db.update("movimientos", movimiento_id, payload)
+    if fila is None:
+        return _error("no_existe", "Ese movimiento ya no está en el hub.")
+    return _ok(
+        {
+            "id": movimiento_id,
+            "tipo": fila.get("tipo"),
+            "monto": fila.get("monto"),
+            "categoria": fila.get("categoria"),
+        }
+    )
+
+
+async def _eliminar_movimiento(db: Postgrest, args: dict) -> dict[str, Any]:
+    movimiento_id, err = _validar_uuid(args.get("movimiento_id"), "movimiento_id")
+    if err:
+        return err
+    actual = await db.get("movimientos", movimiento_id)
+    if actual is None:
+        return _error("no_existe", "Ese movimiento ya no está en el hub.")
+    ok = await db.delete("movimientos", movimiento_id)
+    if not ok:
+        return _error("interno", "No se pudo borrar el movimiento.")
+    return _ok(
+        {
+            "id": movimiento_id,
+            "tipo": actual.get("tipo"),
+            "monto": actual.get("monto"),
+            # Finanzas no tiene papelera: el borrado es permanente.
+            "reversible": False,
+        }
+    )
+
+
+# ── Navegación: abrir una sección de la app ─────────────────────────
+
+_SECCIONES_NAVEGABLES = {
+    "inicio",
+    "tareas",
+    "calendario",
+    "proyectos",
+    "universidad",
+    "finanzas",
+    "apuntes",
+    "ajustes",
+}
+
+
+async def _navegar(_db: Postgrest, args: dict) -> dict[str, Any]:
+    """No toca datos: devuelve la sección a abrir. El chat la propaga a
+    la app, que cambia de pestaña o empuja la pantalla correspondiente."""
+    seccion = (args.get("seccion") or "").strip().lower()
+    if seccion not in _SECCIONES_NAVEGABLES:
+        return _error(
+            "validacion",
+            f"No conozco una sección «{seccion}». Las válidas son: "
+            + ", ".join(sorted(_SECCIONES_NAVEGABLES))
+            + ".",
+        )
+    return _ok({"seccion": seccion})
+
+
 # Mapa de nombre → handler. Mantener sincronizado con TOOL_DEFINITIONS.
 _HANDLERS = {
     # Crear
@@ -2006,7 +2337,15 @@ _HANDLERS = {
     # Acción siguiente + cierre
     "marcar_accion_siguiente_hecha": _marcar_accion_siguiente_hecha,
     "registrar_cierre": _registrar_cierre,
+    # Finanzas (movimientos)
+    "crear_movimiento": _crear_movimiento,
+    "editar_movimiento": _editar_movimiento,
+    "eliminar_movimiento": _eliminar_movimiento,
+    # Navegación (no toca datos)
+    "navegar": _navegar,
     # Solo lectura
+    "consultar_apuntes": _consultar_apuntes,
+    "consultar_movimientos": _consultar_movimientos,
     "buscar_apuntes": _buscar_apuntes,
     "buscar_material": _buscar_material,
     "leer_apunte": _leer_apunte,
@@ -2038,6 +2377,14 @@ TABLAS_AFECTADAS = {
     "reactivar_proyecto": ["proyectos"],
     "marcar_accion_siguiente_hecha": ["tareas", "proyectos"],
     "registrar_cierre": ["cierres_dia"],
+    # Finanzas
+    "crear_movimiento": ["movimientos"],
+    "editar_movimiento": ["movimientos"],
+    "eliminar_movimiento": ["movimientos"],
+    # Navegación (no cambia datos)
+    "navegar": [],
+    "consultar_apuntes": [],  # solo lectura
+    "consultar_movimientos": [],  # solo lectura
     "buscar_apuntes": [],  # solo lectura
     "buscar_material": [],  # solo lectura
     "leer_apunte": [],  # solo lectura

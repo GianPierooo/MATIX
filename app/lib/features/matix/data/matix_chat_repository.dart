@@ -18,11 +18,16 @@ class ChatTurno {
     required this.respuesta,
     required this.toolsUsadas,
     required this.tablasCambiadas,
+    this.navegacion,
   });
 
   final String respuesta;
   final List<String> toolsUsadas;
   final List<String> tablasCambiadas;
+
+  /// Sección a la que Matix pidió navegar este turno (o `null`). El
+  /// string viene del cerebro (`inicio`, `universidad`, `finanzas`…).
+  final String? navegacion;
 
   bool get huboCambios => tablasCambiadas.isNotEmpty;
 }
@@ -71,6 +76,7 @@ class MatixChatRepository {
       tablasCambiadas: (j['tablas_cambiadas'] as List? ?? const [])
           .map((e) => e.toString())
           .toList(growable: false),
+      navegacion: j['navegacion'] as String?,
     );
   }
 }

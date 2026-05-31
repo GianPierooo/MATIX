@@ -413,3 +413,69 @@ async def test_accion_siguiente_sin_definir(
         assert r["tipo"] == "sin_accion_siguiente"
     finally:
         await client.delete(f"/api/v1/proyectos/{pid}")
+
+
+# ── navegar (no toca datos) ─────────────────────────────────────────
+
+
+async def test_navegar_seccion_valida(_fresh_db: Postgrest) -> None:
+    r = await ejecutar_tool(_fresh_db, "navegar", {"seccion": "universidad"})
+    assert r["ok"], r
+    assert r["datos"]["seccion"] == "universidad"
+
+
+async def test_navegar_seccion_invalida(_fresh_db: Postgrest) -> None:
+    r = await ejecutar_tool(_fresh_db, "navegar", {"seccion": "marte"})
+    assert r["ok"] is False
+    assert r["tipo"] == "validacion"
+
+
+# ── Finanzas: movimientos CRUD ──────────────────────────────────────
+
+
+async def test_movimientos_crud(
+    _fresh_db: Postgrest, client: AsyncClient
+) -> None:
+    # Crear un gasto.
+    r = await ejecutar_tool(
+        _fresh_db,
+        "crear_movimiento",
+        {"tipo": "gasto", "monto": 30, "categoria": "_test_comida"},
+    )
+    assert r["ok"], r
+    mid = r["datos"]["id"]
+    assert r["datos"]["tipo"] == "gasto"
+
+    # Consultar: el movimiento aparece y el balance refleja el gasto.
+    cons = await ejecutar_tool(_fresh_db, "consultar_movimientos", {})
+    assert cons["ok"], cons
+    ids = {m["id"] for m in cons["datos"]["movimientos"]}
+    assert mid in ids
+
+    # Editar el monto.
+    ed = await ejecutar_tool(
+        _fresh_db, "editar_movimiento", {"movimiento_id": mid, "monto": 45}
+    )
+    assert ed["ok"], ed
+    assert float(ed["datos"]["monto"]) == 45
+
+    # Eliminar (permanente: finanzas no tiene papelera).
+    el = await ejecutar_tool(
+        _fresh_db, "eliminar_movimiento", {"movimiento_id": mid}
+    )
+    assert el["ok"], el
+    assert el["datos"]["reversible"] is False
+
+    # Ya no está.
+    got = await client.get(f"/api/v1/movimientos/{mid}")
+    assert got.status_code == 404
+
+
+async def test_eliminar_movimiento_inexistente(_fresh_db: Postgrest) -> None:
+    from uuid import uuid4
+
+    r = await ejecutar_tool(
+        _fresh_db, "eliminar_movimiento", {"movimiento_id": str(uuid4())}
+    )
+    assert r["ok"] is False
+    assert r["tipo"] == "no_existe"

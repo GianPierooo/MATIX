@@ -87,6 +87,9 @@ async def conversar(
 
     tools_usadas: list[str] = []
     tablas_cambiadas: list[str] = []
+    # Sección a la que llevar al usuario si pidió navegar ("llévame a
+    # Universidad"). Gana la última llamada a `navegar` del turno.
+    navegacion: str | None = None
 
     ultima_respuesta = ""
 
@@ -113,6 +116,9 @@ async def conversar(
                 for tabla in TABLAS_AFECTADAS.get(nombre, []):
                     if tabla not in tablas_cambiadas:
                         tablas_cambiadas.append(tabla)
+                # `navegar` no cambia datos: solo emite la sección a abrir.
+                if nombre == "navegar":
+                    navegacion = resultado.get("datos", {}).get("seccion")
 
             mensajes.append(
                 {
@@ -136,6 +142,7 @@ async def conversar(
         "respuesta": ultima_respuesta,
         "tools_usadas": tools_usadas,
         "tablas_cambiadas": tablas_cambiadas,
+        "navegacion": navegacion,
     }
 
 
