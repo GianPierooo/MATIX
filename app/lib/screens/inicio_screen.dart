@@ -36,9 +36,6 @@ import '../features/proyectos/providers/proyectos_providers.dart';
 import '../features/tareas/domain/tarea.dart';
 import '../features/tareas/presentation/nueva_tarea_screen.dart';
 import '../features/tareas/providers/tareas_providers.dart';
-import '../features/tracks/domain/track.dart';
-import '../features/tracks/presentation/tracks_screen.dart';
-import '../features/tracks/providers/tracks_providers.dart';
 import '../features/universidad/providers/universidad_providers.dart';
 import '../theme/matix_colors.dart';
 import '../theme/matix_spacing.dart';
@@ -279,7 +276,6 @@ class InicioScreen extends ConsumerWidget {
             _BloqueApuntesRecientes(),
             _BloqueReflote(),
             _BloqueProyectosActivos(),
-            _BloqueTracks(),
             _BloqueUniversidad(),
           ],
         ),
@@ -1451,143 +1447,6 @@ class _ProyectoMini extends StatelessWidget {
 }
 
 // ─── Bloque: Universidad (próxima clase o entrega) ──────────────
-// ─── Bloque: Aprendizaje (tracks activos) ───────────────────────
-//
-// Surfacea los tracks de aprendizaje (Fase 2) sin enterrarlos: muestra
-// los activos y en qué bloque vas. Siempre visible (con "Ver todos")
-// para poder crear/gestionar desde acá.
-class _BloqueTracks extends ConsumerWidget {
-  const _BloqueTracks();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(tracksListProvider);
-    final tracks = async.valueOrNull ?? const <Track>[];
-    final activos = tracksActivos(tracks);
-
-    void abrir() => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const TracksScreen()),
-        );
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionLabel(
-          label: 'Aprendizaje',
-          count: activos.isEmpty ? null : activos.length,
-          accionLabel: 'Ver todos',
-          onAccion: abrir,
-        ),
-        if (async.isLoading && tracks.isEmpty)
-          const _LoaderLinea()
-        else if (activos.isEmpty)
-          _TrackVacioMini(
-            texto: tracks.isEmpty
-                ? 'Empieza un track de aprendizaje.'
-                : 'Tus tracks están en pausa.',
-            onTap: abrir,
-          )
-        else
-          for (final t in activos) _TrackMini(track: t, onTap: abrir),
-      ],
-    );
-  }
-}
-
-class _TrackMini extends StatelessWidget {
-  const _TrackMini({required this.track, required this.onTap});
-  final Track track;
-  final VoidCallback onTap;
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 3, 16, 3),
-      child: Material(
-        color: MatixColors.card,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                const Icon(Icons.school_outlined,
-                    color: MatixColors.accent, size: 20),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        track.nombre,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: MatixColors.text,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        track.posicionLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 12, color: MatixColors.muted),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TrackVacioMini extends StatelessWidget {
-  const _TrackVacioMini({required this.texto, required this.onTap});
-  final String texto;
-  final VoidCallback onTap;
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 2, 16, 2),
-      child: Material(
-        color: MatixColors.card,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: MatixColors.hairline),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.add, color: MatixColors.muted, size: 18),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(texto,
-                      style: const TextStyle(
-                          fontSize: 13, color: MatixColors.muted)),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _BloqueUniversidad extends ConsumerWidget {
   const _BloqueUniversidad();
 
