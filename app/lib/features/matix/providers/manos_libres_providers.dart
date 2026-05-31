@@ -54,7 +54,7 @@ class EstadoManosLibres {
   final double nivelDb;
 
   /// Breve nota informativa para mostrar bajo el estado "en pausa".
-  /// Distingue "te escuchamos pero no oímos voz" de "vos tocaste
+  /// Distingue "te escuchamos pero no oímos voz" de "tú tocaste
   /// pausa".
   final String? notaPausa;
 
@@ -167,12 +167,12 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
       // Cortamos el VAD; el loop verá _saliendo=false pero la
       // próxima vuelta entrará en pausa por la nota.
       await _grab.cancelar();
-      _entrarEnPausa('Pausa manual. Tocá "Hablar" para seguir.');
+      _entrarEnPausa('Pausa manual. Toca "Hablar" para seguir.');
     } else if (state.fase == FaseManosLibres.hablando) {
       await _tts.detener();
       // Cuando termina el TTS naturalmente o por detener, el loop
       // sigue. Pero como el usuario quiso pausar, marcamos:
-      _entrarEnPausa('Pausa manual. Tocá "Hablar" para seguir.');
+      _entrarEnPausa('Pausa manual. Toca "Hablar" para seguir.');
     }
   }
 
@@ -189,6 +189,14 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
   Future<void> interrumpirHabla() async {
     if (state.fase != FaseManosLibres.hablando) return;
     await _tts.detener();
+  }
+
+  /// Mientras escucha, corta la escucha AHORA y transcribe lo dicho
+  /// hasta este punto (igual que la captura de apuntes). El loop sigue
+  /// solo: transcribe → Matix piensa → responde.
+  void detenerYTranscribir() {
+    if (state.fase != FaseManosLibres.escuchando) return;
+    _grab.cortarManual();
   }
 
   // ── Loop principal ────────────────────────────────────────────────
@@ -266,7 +274,7 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
     switch (esc.resultado) {
       case ResultadoEscucha.sinVoz:
         _entrarEnPausa(
-          'No escuché nada. Tocá "Hablar" cuando quieras retomar.',
+          'No escuché nada. Toca "Hablar" cuando quieras retomar.',
         );
         return;
       case ResultadoEscucha.cancelada:

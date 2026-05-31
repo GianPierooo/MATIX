@@ -116,7 +116,21 @@ class GrabacionVozService {
   String? _rutaActual;
   DateTime? _inicioActual;
 
+  /// Completer del VAD en curso (si hay uno). Permite que la UI corte la
+  /// escucha manualmente ("ya terminé, transcribe lo dicho").
+  Completer<ResultadoEscucha>? _vadCompleter;
+
   bool get estaGrabando => _inicioActual != null;
+
+  /// Corta la escucha con VAD AHORA y transcribe lo grabado hasta este
+  /// punto (como en la captura de apuntes). Si no hay VAD en curso, no
+  /// hace nada.
+  void cortarManual() {
+    final c = _vadCompleter;
+    if (c != null && !c.isCompleted) {
+      c.complete(ResultadoEscucha.cortada);
+    }
+  }
 
   Future<void> iniciar() async {
     // Permiso runtime
@@ -216,6 +230,7 @@ class GrabacionVozService {
     bool empezoAHablar = false;
     Duration silencioAcumulado = Duration.zero;
     final completer = Completer<ResultadoEscucha>();
+    _vadCompleter = completer;
 
     final timer = Timer.periodic(config.intervalo, (_) async {
       if (completer.isCompleted) return;
@@ -270,6 +285,7 @@ class GrabacionVozService {
       resultado = await completer.future;
     } finally {
       timer.cancel();
+      _vadCompleter = null;
     }
 
     if (resultado == ResultadoEscucha.sinVoz) {

@@ -171,7 +171,7 @@ class _TranscriptVacio extends StatelessWidget {
       padding: const EdgeInsets.all(MatixSpacing.xl2),
       child: Center(
         child: Text(
-          'Hablale a Matix. La conversación va a aparecer acá.',
+          'Háblale a Matix. La conversación aparecerá aquí.',
           textAlign: TextAlign.center,
           style: MatixText.small,
         ),
@@ -210,7 +210,7 @@ class _MensajeBurbuja extends StatelessWidget {
     final esUsuario = mensaje.rol == RolMensaje.usuario;
     final color = esUsuario ? MatixColors.accent : MatixColors.card;
     final colorTexto = esUsuario ? Colors.white : MatixColors.text;
-    final etiqueta = esUsuario ? 'Vos' : 'Matix';
+    final etiqueta = esUsuario ? 'Tú' : 'Matix';
     final etiquetaColor =
         esUsuario ? Colors.white.withValues(alpha: 0.7) : MatixColors.purple;
     return Padding(
@@ -271,14 +271,14 @@ class _IndicadorFase extends StatelessWidget {
       FaseManosLibres.iniciando => ('Preparando', 'Activando micrófono'),
       FaseManosLibres.escuchando => (
           'Escuchando',
-          'Hablá cuando quieras',
+          'Habla y dale a Enviar cuando termines',
         ),
       FaseManosLibres.transcribiendo => ('Transcribiendo', ''),
       FaseManosLibres.pensando => ('Pensando', ''),
       FaseManosLibres.hablando => ('Hablando', 'Matix te responde'),
       FaseManosLibres.enPausa => (
           'En pausa',
-          estado.notaPausa ?? 'Tocá "Hablar" para reanudar',
+          estado.notaPausa ?? 'Toca "Hablar" para reanudar',
         ),
       FaseManosLibres.error => ('Error', estado.error ?? 'Algo salió mal'),
     };
@@ -455,8 +455,7 @@ class _Acciones extends ConsumerWidget {
 
     final notifier = ref.read(manosLibresProvider.notifier);
     final puedeStop = estado.fase == FaseManosLibres.hablando;
-    final puedePausa = estado.fase == FaseManosLibres.escuchando ||
-        estado.fase == FaseManosLibres.hablando;
+    final escuchando = estado.fase == FaseManosLibres.escuchando;
     final enPausa = estado.fase == FaseManosLibres.enPausa;
 
     return Row(
@@ -510,12 +509,29 @@ class _Acciones extends ConsumerWidget {
               ),
             ),
           )
+        else if (escuchando)
+          // Cortar la escucha y transcribir lo dicho hasta acá (como en
+          // la captura de apuntes): no hay que esperar al silencio.
+          Expanded(
+            child: FilledButton.icon(
+              onPressed: notifier.detenerYTranscribir,
+              icon: const Icon(Icons.send_rounded),
+              label: const Text('Enviar'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  vertical: MatixSpacing.xl,
+                ),
+                backgroundColor: MatixColors.green,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          )
         else
           Expanded(
             child: FilledButton.icon(
-              onPressed: puedePausa ? notifier.pausar : null,
-              icon: const Icon(Icons.pause_circle_outline),
-              label: const Text('Pausar'),
+              onPressed: null,
+              icon: const Icon(Icons.send_rounded),
+              label: const Text('Enviar'),
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(
                   vertical: MatixSpacing.xl,
