@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -18,6 +20,19 @@ import 'nuevo_evento_screen.dart';
 /// Modo de visualización del calendario.
 enum VistaCalendario { mes, semana, dia }
 
+/// La hora actual en America/Lima (UTC-5 todo el año; Perú no usa horario
+/// de verano). La calculamos explícita para que el "palito" y el reloj
+/// marquen Lima aunque el teléfono esté en otra zona.
+DateTime horaLima() =>
+    DateTime.now().toUtc().subtract(const Duration(hours: 5));
+
+/// `true` si [d] (en hora de Lima) es el día de hoy en Lima.
+bool _esHoyLima(DateTime d) {
+  final hoy = horaLima();
+  final l = d;
+  return l.year == hoy.year && l.month == hoy.month && l.day == hoy.day;
+}
+
 class CalendarioScreen extends ConsumerStatefulWidget {
   const CalendarioScreen({super.key});
   @override
@@ -30,6 +45,24 @@ class _CalendarioScreenState extends ConsumerState<CalendarioScreen> {
   DateTime _dia = DateTime.now();
   VistaCalendario _vista = VistaCalendario.mes;
 
+  // Hace avanzar el "palito" de la hora actual y el reloj sin depender de
+  // un evento externo: cada 30 s repintamos.
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final eventos = ref.watch(eventosProvider);
@@ -38,7 +71,14 @@ class _CalendarioScreenState extends ConsumerState<CalendarioScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Calendario'),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Calendario'),
+            const SizedBox(width: 12),
+            _RelojLima(ahora: horaLima()),
+          ],
+        ),
         actions: [
           IconButton(
             tooltip: 'Hoy',
@@ -466,14 +506,22 @@ class _ListaDelDia extends StatelessWidget {
         ),
       );
     }
+    // "Palito" de la hora actual (solo si el día mostrado es hoy en Lima):
+    // se inserta entre los eventos ya pasados y los que vienen.
+    final mostrarAhora = _esHoyLima(dia);
+    final idxAhora = mostrarAhora ? _indiceLineaAhora(filas) : -1;
     return ListView.builder(
       // Calendario vive en el HomeShell (extendBody): sin este guard
       // inferior los últimos eventos quedan tapados por la barra de nav.
       padding: EdgeInsets.fromLTRB(0, 8, 0, MatixLayout.bottomNavGuard(context)),
-      itemCount: filas.length,
+      itemCount: filas.length + (mostrarAhora ? 1 : 0),
       itemBuilder: (context, i) {
-        final f = filas[i];
-        final tieneChoque = choca[i];
+        if (mostrarAhora && i == idxAhora) {
+          return _LineaAhora(ahora: horaLima());
+        }
+        final fi = (mostrarAhora && i > idxAhora) ? i - 1 : i;
+        final f = filas[fi];
+        final tieneChoque = choca[fi];
         final contenido = Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -820,6 +868,9 @@ class _DiaSemanaSeccion extends ConsumerWidget {
 
     final esHoy = _esHoy(dia);
     final nombreDia = DateFormat('EEEE', 'es').format(dia);
+    // "Palito" de la hora actual en la sección de HOY (Lima).
+    final mostrarAhora = _esHoyLima(dia);
+    final idxAhora = mostrarAhora ? _indiceLineaAhoraSemana(items) : -1;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -860,14 +911,20 @@ class _DiaSemanaSeccion extends ConsumerWidget {
             ),
           ),
         ),
-        if (items.isEmpty)
+        if (items.isEmpty && !mostrarAhora)
           const Padding(
             padding: EdgeInsets.fromLTRB(56, 0, 16, 8),
             child: Text('Sin eventos',
                 style: TextStyle(fontSize: 12.5, color: MatixColors.muted)),
           )
-        else
-          for (final it in items) _ItemSemanaTile(item: it),
+        else ...[
+          for (var k = 0; k < items.length; k++) ...[
+            if (mostrarAhora && k == idxAhora) _LineaAhora(ahora: horaLima()),
+            _ItemSemanaTile(item: items[k]),
+          ],
+          if (mostrarAhora && idxAhora >= items.length)
+            _LineaAhora(ahora: horaLima()),
+        ],
         const Divider(color: MatixColors.hairline, height: 1),
       ],
     );
@@ -967,4 +1024,111 @@ Color _colorEvento(Evento e, Map<String, Curso> cursos) {
   final curso = e.cursoId == null ? null : cursos[e.cursoId];
   if (curso?.color != null) return _colorCurso(curso!.color);
   return MatixColors.accent;
+}
+
+// ─── Indicador de hora actual ("palito") + reloj ─────────────────────
+
+int _minutosAhoraLima() {
+  final a = horaLima();
+  return a.hour * 60 + a.minute;
+}
+
+/// Índice donde cae "ahora" entre las filas del día (las ya pasadas
+/// quedan arriba). Salta los eventos de todo el día (no tienen hora).
+int _indiceLineaAhora(List<_Fila> filas) {
+  final ahoraMin = _minutosAhoraLima();
+  for (var i = 0; i < filas.length; i++) {
+    if (filas[i].todoElDia) continue;
+    if (filas[i].inicio.hour * 60 + filas[i].inicio.minute > ahoraMin) {
+      return i;
+    }
+  }
+  return filas.length;
+}
+
+/// Igual que `_indiceLineaAhora` pero para la vista semana (`_ItemSemana`).
+int _indiceLineaAhoraSemana(List<_ItemSemana> items) {
+  final ahoraMin = _minutosAhoraLima();
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].todoElDia) continue;
+    if (items[i].inicio.hour * 60 + items[i].inicio.minute > ahoraMin) {
+      return i;
+    }
+  }
+  return items.length;
+}
+
+/// Reloj en vivo (hora de Lima) para el AppBar. Recibe `ahora` como
+/// parámetro para que cada tick produzca un widget distinto y se
+/// repinte (un widget `const` sin args no se reconstruiría).
+class _RelojLima extends StatelessWidget {
+  const _RelojLima({required this.ahora});
+  final DateTime ahora;
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: MatixColors.accent.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.schedule, size: 13, color: MatixColors.accent),
+          const SizedBox(width: 4),
+          Text(
+            DateFormat.Hm().format(ahora),
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: MatixColors.accent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// El "palito" de la hora actual: un punto + la hora + una línea, en
+/// rojo, que se intercala entre los eventos pasados y los que vienen.
+/// `ahora` se pasa para forzar el repintado en cada tick.
+class _LineaAhora extends StatelessWidget {
+  const _LineaAhora({required this.ahora});
+  final DateTime ahora;
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 5, 16, 5),
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: const BoxDecoration(
+              color: MatixColors.red,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            DateFormat.Hm().format(ahora),
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: MatixColors.red,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Container(
+              height: 2,
+              color: MatixColors.red.withValues(alpha: 0.55),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
