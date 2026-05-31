@@ -23,8 +23,10 @@ class _FakeRepo implements RitualesRepository {
     required bool activo,
     required int hora,
     required int minuto,
+    int? diaSemana,
   }) async {
-    final c = (activo: activo, hora: hora, minuto: minuto);
+    final c =
+        (activo: activo, hora: hora, minuto: minuto, diaSemana: diaSemana);
     _actual = c;
     guardados.add(c);
   }
@@ -40,7 +42,7 @@ ProviderContainer _con(_FakeRepo repo) {
 
 void main() {
   test('carga la config del cerebro al arrancar', () async {
-    final c = _con(_FakeRepo((activo: false, hora: 7, minuto: 30)));
+    final c = _con(_FakeRepo((activo: false, hora: 7, minuto: 30, diaSemana: null)));
     await c.read(briefingConfigProvider.notifier).ready;
     final cfg = c.read(briefingConfigProvider);
     expect(cfg.activo, isFalse);
@@ -58,7 +60,7 @@ void main() {
   });
 
   test('activar(false) persiste activo=false en el cerebro', () async {
-    final repo = _FakeRepo((activo: true, hora: 8, minuto: 0));
+    final repo = _FakeRepo((activo: true, hora: 8, minuto: 0, diaSemana: null));
     final c = _con(repo);
     await c.read(briefingConfigProvider.notifier).ready;
 
@@ -69,7 +71,7 @@ void main() {
   });
 
   test('cambiarHora persiste la nueva hora en el cerebro', () async {
-    final repo = _FakeRepo((activo: true, hora: 8, minuto: 0));
+    final repo = _FakeRepo((activo: true, hora: 8, minuto: 0, diaSemana: null));
     final c = _con(repo);
     await c.read(briefingConfigProvider.notifier).ready;
 

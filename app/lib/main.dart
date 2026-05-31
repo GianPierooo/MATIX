@@ -14,6 +14,7 @@ import 'features/apuntes/presentation/editor_apunte_screen.dart';
 import 'features/apuntes/providers/apuntes_providers.dart';
 import 'features/briefing/presentation/briefing_screen.dart';
 import 'features/cierre/presentation/cierre_screen.dart';
+import 'features/repaso/presentation/repaso_semanal_screen.dart';
 import 'features/compartir/data/share_intent_service.dart';
 import 'features/eventos/presentation/nuevo_evento_screen.dart';
 import 'features/eventos/providers/eventos_providers.dart';
@@ -213,6 +214,10 @@ class _MatixAppState extends ConsumerState<MatixApp> {
     } else if (payload == 'cierre') {
       _navigatorKey.currentState?.push(
         MaterialPageRoute(builder: (_) => const CierreScreen()),
+      );
+    } else if (payload == 'repaso') {
+      _navigatorKey.currentState?.push(
+        MaterialPageRoute(builder: (_) => const RepasoSemanalScreen()),
       );
     } else if (payload != null && payload.startsWith('evento:')) {
       unawaited(_abrirEvento(payload.substring('evento:'.length)));

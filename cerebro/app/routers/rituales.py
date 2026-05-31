@@ -1,7 +1,9 @@
-"""Config de los rituales diarios (Push Capa 3a).
+"""Config de los rituales por push (Push Capa 3a + repaso semanal).
 
-- `GET /rituales` — lee la config de los dos rituales (briefing, cierre).
-- `PATCH /rituales/{ritual}` — cambia on/off y la hora.
+- `GET /rituales` — lee la config de los rituales (briefing, cierre,
+  repaso).
+- `PATCH /rituales/{ritual}` — cambia on/off, la hora y (para el repaso
+  semanal) el día de la semana.
 
 El scheduler del cerebro (matix/recordatorios.py) usa esta config para
 disparar los push a la hora correcta (America/Lima).
@@ -21,7 +23,7 @@ router = APIRouter(
 )
 
 TABLE = "config_rituales"
-_RITUALES = ("briefing", "cierre")
+_RITUALES = ("briefing", "cierre", "repaso")
 
 
 @router.get("", response_model=list[RitualConfigRead])

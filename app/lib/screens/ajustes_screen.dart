@@ -22,6 +22,7 @@ import '../features/planificador/application/plan_dia_controller.dart';
 import '../features/planificador/domain/disponibilidad.dart';
 import '../features/push/data/push_repository.dart';
 import '../features/repaso/presentation/repaso_semanal_screen.dart';
+import '../features/repaso/providers/repaso_providers.dart';
 import '../theme/matix_colors.dart';
 
 /// Pantalla de Ajustes — informativa en Capa 1.
@@ -346,8 +347,9 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
           ),
 
           const _Seccion('Repaso semanal'),
+          const _RepasoSemanalTile(),
           _Accion(
-            label: 'Repaso de la semana',
+            label: 'Ver repaso de la semana',
             icon: Icons.calendar_view_week_outlined,
             subtitle: 'Balance de la semana con Matix: qué se hizo, qué '
                 'quedó, qué priorizar.',
@@ -713,6 +715,166 @@ class _CierreDelDiaTile extends ConsumerWidget {
                     minimumSize: const Size(0, 32),
                   ),
                   child: const Text('Cambiar'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Ajuste del repaso semanal (4º ritual, por push). Como briefing/cierre
+/// pero SEMANAL: además de on/off y hora, deja elegir el DÍA. Default ON,
+/// domingo 20:00 (hora de Lima). El push lo dispara el scheduler del
+/// cerebro y abre la pantalla de repaso.
+class _RepasoSemanalTile extends ConsumerWidget {
+  const _RepasoSemanalTile();
+
+  Future<void> _elegirHora(
+    BuildContext context,
+    WidgetRef ref,
+    RepasoConfig actual,
+  ) async {
+    final t = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: actual.hora, minute: actual.minuto),
+      helpText: 'Hora del repaso',
+    );
+    if (t == null) return;
+    await ref.read(repasoConfigProvider.notifier).cambiarHora(t.hour, t.minute);
+  }
+
+  Future<void> _elegirDia(
+    BuildContext context,
+    WidgetRef ref,
+    RepasoConfig actual,
+  ) async {
+    const dias = [
+      (1, 'Lunes'),
+      (2, 'Martes'),
+      (3, 'Miércoles'),
+      (4, 'Jueves'),
+      (5, 'Viernes'),
+      (6, 'Sábado'),
+      (7, 'Domingo'),
+    ];
+    final elegido = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: MatixColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            for (final (iso, nombre) in dias)
+              ListTile(
+                title: Text(nombre),
+                trailing: actual.diaSemana == iso
+                    ? const Icon(Icons.check, color: MatixColors.accent)
+                    : null,
+                onTap: () => Navigator.pop(ctx, iso),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (elegido == null) return;
+    await ref.read(repasoConfigProvider.notifier).cambiarDia(elegido);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cfg = ref.watch(repasoConfigProvider);
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      padding: const EdgeInsets.fromLTRB(14, 4, 8, 4),
+      decoration: BoxDecoration(
+        color: MatixColors.card,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.calendar_view_week,
+                color: MatixColors.accent,
+                size: 22,
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Activar repaso semanal',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: MatixColors.text,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Te aviso una vez por semana para mirar atrás y '
+                      'planear la próxima.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: MatixColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: cfg.activo,
+                onChanged: (v) =>
+                    ref.read(repasoConfigProvider.notifier).activar(v),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(36, 4, 8, 8),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.event_outlined,
+                  color: MatixColors.muted,
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${cfg.diaNombre} · ${cfg.horaFormateada}',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: MatixColors.text,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => _elegirDia(context, ref, cfg),
+                  style: TextButton.styleFrom(
+                    foregroundColor: MatixColors.accent,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 32),
+                  ),
+                  child: const Text('Día'),
+                ),
+                TextButton(
+                  onPressed: () => _elegirHora(context, ref, cfg),
+                  style: TextButton.styleFrom(
+                    foregroundColor: MatixColors.accent,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 32),
+                  ),
+                  child: const Text('Hora'),
                 ),
               ],
             ),

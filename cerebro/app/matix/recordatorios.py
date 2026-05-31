@@ -216,23 +216,42 @@ async def revisar_y_enviar(db: Postgrest, *, ahora: datetime | None = None) -> d
     return {"candidatos": len(tareas) + len(eventos), "enviados": enviados_ok}
 
 
-# ─── Rituales diarios: briefing + cierre (Push Capa 3a) ──────────────────
+# ─── Rituales: briefing + cierre (diarios) + repaso (semanal) ────────────
+def _fecha_dedup(c: dict, local: datetime) -> str:
+    """Fecha clave del dedup en `rituales_enviados.fecha`:
+
+    - Rituales DIARIOS (sin `dia_semana`): hoy.
+    - Rituales SEMANALES (con `dia_semana`): el LUNES de la semana ISO
+      actual, así el ritual no se duplica dentro de la misma semana.
+    """
+    if c.get("dia_semana"):
+        lunes = local.date() - timedelta(days=local.isoweekday() - 1)
+        return lunes.isoformat()
+    return local.date().isoformat()
+
+
 def rituales_due(
     configs: list[dict],
-    enviados_hoy: set[str],
+    enviados: set[str],
     ahora: datetime,
 ) -> list[str]:
-    """PURO: dados la config de los rituales, cuáles ya se mandaron hoy y
-    `ahora`, devuelve qué rituales toca mandar. Un ritual se manda si está
-    activo, su hora ya pasó hoy y hace menos de `VENTANA_RITUAL` (catch-up),
-    y no se mandó aún hoy."""
+    """PURO: dados la config de los rituales, cuáles ya se mandaron en su
+    período actual (`enviados`, por nombre) y `ahora`, devuelve qué rituales
+    toca mandar. Un ritual se manda si está activo, su hora ya pasó y hace
+    menos de `VENTANA_RITUAL` (catch-up), y no se mandó aún en su período.
+
+    Un ritual SEMANAL (con `dia_semana`, ISO 1..7) solo se considera el día
+    que toca; el resto de días se ignora."""
     local = ahora.astimezone(LIMA)
     out: list[str] = []
     for c in configs:
         if not c.get("activo"):
             continue
         ritual = c.get("ritual")
-        if not ritual or ritual in enviados_hoy:
+        if not ritual or ritual in enviados:
+            continue
+        dia = c.get("dia_semana")
+        if dia and local.isoweekday() != int(dia):
             continue
         prog = local.replace(
             hour=int(c["hora"]), minute=int(c["minuto"]), second=0, microsecond=0
@@ -287,6 +306,12 @@ async def _contenido_ritual(
             "¿Qué aprendiste hoy? Anota 3 cosas que sí hiciste y haz tu "
             "descarga mental. Toca para cerrar el día.",
         )
+    if ritual == "repaso":
+        return (
+            "📊 Repaso de la semana",
+            "Mira cómo te fue esta semana y planifica la próxima. "
+            "Toca para abrir tu repaso con Matix.",
+        )
     nev, ntar = await _contar_hoy(db, ahora)
     if nev == 0 and ntar == 0:
         cuerpo = "Día despejado, nada agendado. Toca para ver tu resumen."
@@ -302,15 +327,27 @@ async def revisar_rituales(db: Postgrest, *, ahora: datetime | None = None) -> d
     """Un tick de rituales: si toca el briefing o el cierre (hora de Lima) y
     no se mandó hoy, manda el push. Best-effort."""
     ahora = ahora or datetime.now(timezone.utc)
-    hoy_iso = ahora.astimezone(LIMA).date().isoformat()
+    local = ahora.astimezone(LIMA)
 
     configs = await db.list("config_rituales", limit=10)
     if not configs:
         return {"rituales": 0}
+    cfg_por_ritual = {c["ritual"]: c for c in configs if c.get("ritual")}
+
+    # Leemos los envíos de la última semana (cubre el dedup diario de hoy y
+    # el semanal del lunes de esta semana ISO).
+    desde = (local.date() - timedelta(days=8)).isoformat()
     env_rows = await db.list(
-        "rituales_enviados", filters={"fecha": hoy_iso}, limit=10
+        "rituales_enviados", raw_filters={"fecha": f"gte.{desde}"}, limit=50
     )
-    enviados = {r["ritual"] for r in env_rows}
+    # "Enviado en su período actual": para cada ritual, comparamos contra su
+    # fecha de dedup (hoy si es diario, lunes de la semana si es semanal).
+    enviados = {
+        r["ritual"]
+        for r in env_rows
+        if r["ritual"] in cfg_por_ritual
+        and r["fecha"] == _fecha_dedup(cfg_por_ritual[r["ritual"]], local)
+    }
 
     due = rituales_due(configs, enviados, ahora)
     if not due:
@@ -347,12 +384,13 @@ async def revisar_rituales(db: Postgrest, *, ahora: datetime | None = None) -> d
 
         if algun_ok:
             try:
+                fecha_key = _fecha_dedup(cfg_por_ritual[ritual], local)
                 await db.insert(
-                    "rituales_enviados", {"ritual": ritual, "fecha": hoy_iso}
+                    "rituales_enviados", {"ritual": ritual, "fecha": fecha_key}
                 )
                 enviados_ok += 1
             except Exception:  # noqa: BLE001
-                logger.debug("ritual ya marcado hoy: %s", ritual)
+                logger.debug("ritual ya marcado en su período: %s", ritual)
 
     if enviados_ok:
         logger.info("scheduler: %d ritual(es) enviado(s) por push", enviados_ok)

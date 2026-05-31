@@ -50,3 +50,51 @@ def test_antes_de_la_hora_no_se_manda():
 def test_ritual_desactivado_no_se_manda():
     cfg = [{"ritual": "briefing", "activo": False, "hora": 8, "minuto": 0}]
     assert rituales_due(cfg, set(), _at(8, 0)) == []
+
+
+# ── repaso semanal (4º ritual, con dia_semana) ──────────────────────
+
+from app.matix.recordatorios import _fecha_dedup  # noqa: E402
+
+# 2026-05-31 es DOMINGO (isoweekday 7); 2026-05-30 SÁBADO (6).
+REPASO = [
+    {"ritual": "repaso", "activo": True, "hora": 20, "minuto": 0, "dia_semana": 7}
+]
+
+
+def _dom(hora: int, minuto: int) -> datetime:
+    return datetime(2026, 5, 31, hora, minuto, tzinfo=LIMA).astimezone(timezone.utc)
+
+
+def _sab(hora: int, minuto: int) -> datetime:
+    return datetime(2026, 5, 30, hora, minuto, tzinfo=LIMA).astimezone(timezone.utc)
+
+
+def test_repaso_solo_su_dia():
+    # Domingo 20:00 → toca; sábado a la misma hora → no (no es su día).
+    assert rituales_due(REPASO, set(), _dom(20, 0)) == ["repaso"]
+    assert rituales_due(REPASO, set(), _sab(20, 0)) == []
+
+
+def test_repaso_catch_up_y_ventana():
+    # 1.5h tarde sigue dentro de la ventana de 2h.
+    assert rituales_due(REPASO, set(), _dom(21, 30)) == ["repaso"]
+    # 2.5h tarde → fuera de ventana.
+    assert rituales_due(REPASO, set(), _dom(22, 30)) == []
+    # Antes de la hora → no.
+    assert rituales_due(REPASO, set(), _dom(19, 59)) == []
+
+
+def test_repaso_dedupe_y_off():
+    assert rituales_due(REPASO, {"repaso"}, _dom(20, 0)) == []
+    off = [{"ritual": "repaso", "activo": False, "hora": 20, "minuto": 0,
+            "dia_semana": 7}]
+    assert rituales_due(off, set(), _dom(20, 0)) == []
+
+
+def test_fecha_dedup_semanal_es_lunes_de_la_semana():
+    dom = datetime(2026, 5, 31, 20, 0, tzinfo=LIMA)  # domingo
+    # Lunes de esa semana ISO = 2026-05-25.
+    assert _fecha_dedup(REPASO[0], dom) == "2026-05-25"
+    # Un ritual diario usa el día mismo.
+    assert _fecha_dedup(CFG[0], dom) == "2026-05-31"
