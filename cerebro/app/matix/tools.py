@@ -159,6 +159,71 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "crear_tareas",
+            "description": (
+                "Crea VARIAS tareas de una sola vez (un lote), de forma "
+                "confiable. Úsala cuando el usuario aprueba una lista — "
+                "típico al armar las tareas de un bloque de material de "
+                "aprendizaje. Pasa `proyecto_id` (o `curso_id`) UNA vez y "
+                "aplica a todas; cada item puede sobrescribirlo. "
+                "GUARDRAIL: propón el siguiente trozo DIGERIBLE (la próxima "
+                "sesión o semana del bloque), NO todo el currículo. El lote "
+                "tiene un tope; si te pasas, la tool te lo dice para que lo "
+                "ofrezcas por partes."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tareas": {
+                        "type": "array",
+                        "description": (
+                            "Lista de tareas a crear. Cada una es accionable "
+                            "y concreta."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "titulo": {
+                                    "type": "string",
+                                    "description": "Título corto y accionable.",
+                                },
+                                "vence_en": _FECHA_HORA,
+                                "prioridad": _PRIORIDAD,
+                                "nota": {"type": "string"},
+                                "proyecto_id": _UUID,
+                                "curso_id": _UUID,
+                                "categoria_id": _UUID,
+                                "recordar_en": _FECHA_HORA,
+                            },
+                            "required": ["titulo"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "proyecto_id": {
+                        **_UUID,
+                        "description": (
+                            "Proyecto al que van TODAS las tareas del lote "
+                            "(p.ej. el proyecto de la skill). Cada item lo "
+                            "puede sobrescribir."
+                        ),
+                    },
+                    "curso_id": {
+                        **_UUID,
+                        "description": "Curso para TODAS, si aplica.",
+                    },
+                    "categoria_id": {
+                        **_UUID,
+                        "description": "Categoría para TODAS, si aplica.",
+                    },
+                },
+                "required": ["tareas"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "crear_evento",
             "description": (
                 "Agenda un evento en el calendario. NO usar para "
@@ -1079,6 +1144,75 @@ async def _crear_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
             "titulo": fila["titulo"],
             "vence_en_legible": _resumen_fecha(fila.get("vence_en")),
             "prioridad": fila["prioridad"],
+        }
+    )
+
+
+# Tope del lote: el guardrail "no vacíes todo el currículo". Si el modelo
+# intenta crear más de esto de una, lo paramos y le pedimos que ofrezca el
+# resto por partes (la próxima sesión/semana). A propósito: no enterrar al
+# usuario en tareas.
+_MAX_LOTE_TAREAS = 12
+
+
+async def _crear_tareas(db: Postgrest, args: dict) -> dict[str, Any]:
+    """Crea un lote de tareas en una sola acción. Valida TODAS antes de
+    insertar ninguna (o se crea el lote válido entero, o se reporta el
+    error sin crear nada a medias). Aplica los defaults de proyecto/curso/
+    categoría a los items que no los traigan."""
+    items = args.get("tareas")
+    if not isinstance(items, list) or not items:
+        return _error(
+            "validacion",
+            "Pásame `tareas`: una lista con al menos una tarea.",
+        )
+    if len(items) > _MAX_LOTE_TAREAS:
+        return _error(
+            "validacion",
+            f"Son {len(items)} tareas de una — demasiadas. Propón el "
+            f"siguiente trozo digerible (la próxima sesión o semana, hasta "
+            f"{_MAX_LOTE_TAREAS}) y ofrece el resto por partes.",
+        )
+
+    # Defaults del lote: se aplican a cada item que no traiga el suyo.
+    defaults = {
+        k: args.get(k)
+        for k in ("proyecto_id", "curso_id", "categoria_id")
+        if args.get(k)
+    }
+
+    # 1) Validar TODAS primero — fail fast, sin crear nada a medias.
+    validadas: list[dict[str, Any]] = []
+    for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            return _error(
+                "validacion", f"La tarea #{i + 1} no es un objeto válido."
+            )
+        combinado = {**defaults, **item}
+        try:
+            body = TareaCreate(**combinado)
+        except ValidationError as e:
+            val = _err_validacion(e)
+            val["mensaje"] = f"Tarea #{i + 1}: {val['mensaje']}"
+            return val
+        validadas.append(body.model_dump(mode="json", exclude_none=True))
+
+    # 2) Insertar el lote completo.
+    creadas: list[dict[str, Any]] = []
+    for payload in validadas:
+        fila = await db.insert("tareas", payload)
+        creadas.append(
+            {
+                "id": fila["id"],
+                "titulo": fila["titulo"],
+                "vence_en_legible": _resumen_fecha(fila.get("vence_en")),
+            }
+        )
+    return _ok(
+        {
+            "total": len(creadas),
+            "proyecto_id": defaults.get("proyecto_id"),
+            "tareas": creadas,
         }
     )
 
@@ -2315,6 +2449,7 @@ async def _navegar(_db: Postgrest, args: dict) -> dict[str, Any]:
 _HANDLERS = {
     # Crear
     "crear_tarea": _crear_tarea,
+    "crear_tareas": _crear_tareas,
     "crear_evento": _crear_evento,
     "crear_apunte": _crear_apunte,
     "crear_proyecto": _crear_proyecto,
@@ -2360,6 +2495,7 @@ _HANDLERS = {
 # app Flutter sepa qué providers invalidar.
 TABLAS_AFECTADAS = {
     "crear_tarea": ["tareas"],
+    "crear_tareas": ["tareas"],
     "crear_evento": ["eventos"],
     "crear_apunte": ["apuntes"],
     "crear_proyecto": ["proyectos"],

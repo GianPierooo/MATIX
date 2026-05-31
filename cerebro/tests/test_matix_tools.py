@@ -479,3 +479,56 @@ async def test_eliminar_movimiento_inexistente(_fresh_db: Postgrest) -> None:
     )
     assert r["ok"] is False
     assert r["tipo"] == "no_existe"
+
+
+# ── crear_tareas (lote) ─────────────────────────────────────────────
+
+
+async def test_crear_tareas_lote(
+    _fresh_db: Postgrest, client: AsyncClient
+) -> None:
+    # Proyecto contenedor (simula el de la skill).
+    pr = await client.post(
+        "/api/v1/proyectos", json={"nombre": "_test_lote_skill"}
+    )
+    pid = pr.json()["id"]
+    r = await ejecutar_tool(
+        _fresh_db,
+        "crear_tareas",
+        {
+            "proyecto_id": pid,
+            "tareas": [
+                {"titulo": "_test_lote_s1"},
+                {"titulo": "_test_lote_s2", "prioridad": "alta"},
+                {"titulo": "_test_lote_s3"},
+            ],
+        },
+    )
+    assert r["ok"], r
+    assert r["datos"]["total"] == 3
+    ids = [t["id"] for t in r["datos"]["tareas"]]
+    try:
+        # Todas quedaron en BD y en el proyecto indicado.
+        for tid in ids:
+            got = await client.get(f"/api/v1/tareas/{tid}")
+            assert got.status_code == 200
+            assert got.json()["proyecto_id"] == pid
+    finally:
+        for tid in ids:
+            await client.delete(f"/api/v1/tareas/{tid}/permanente")
+        await client.delete(f"/api/v1/proyectos/{pid}")
+
+
+async def test_crear_tareas_vacia_falla(_fresh_db: Postgrest) -> None:
+    r = await ejecutar_tool(_fresh_db, "crear_tareas", {"tareas": []})
+    assert r["ok"] is False
+    assert r["tipo"] == "validacion"
+
+
+async def test_crear_tareas_tope_guardrail(_fresh_db: Postgrest) -> None:
+    from app.matix.tools import _MAX_LOTE_TAREAS
+
+    muchas = [{"titulo": f"t{i}"} for i in range(_MAX_LOTE_TAREAS + 1)]
+    r = await ejecutar_tool(_fresh_db, "crear_tareas", {"tareas": muchas})
+    assert r["ok"] is False
+    assert r["tipo"] == "validacion"
