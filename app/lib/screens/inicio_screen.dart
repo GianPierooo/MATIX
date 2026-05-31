@@ -450,24 +450,45 @@ class _CapturaApunteState extends ConsumerState<_CapturaApunte> {
     super.dispose();
   }
 
-  // ── Texto: apunte general, vía rápida sin clasificar ──
+  // ── Texto: captura clasificada (igual que la voz) ──
+  //
+  // Pasa el texto por el mismo flujo que la voz (`capturar`): Matix lo
+  // clasifica a proyecto/curso/general y el snackbar dice DÓNDE quedó.
+  // Si el modelo falla (sin red / sin API key), caemos a un guardado
+  // general confiable para no perder la nota — "confiable sobre seamless".
   Future<void> _guardarTexto() async {
     final texto = _ctrl.text.trim();
     if (texto.isEmpty || _estado != _EstadoCaptura.idle) return;
     setState(() => _estado = _EstadoCaptura.procesando);
+    try {
+      final apunte = await ref.read(capturaApunteRepoProvider).capturar(texto);
+      _ctrl.clear();
+      ref.invalidate(apuntesListProvider);
+      if (!mounted) return;
+      FocusScope.of(context).unfocus();
+      _mostrarGuardado(apunte);
+    } catch (_) {
+      // Fallback confiable: guardar como general aunque el modelo falle.
+      await _guardarTextoGeneral(texto);
+    } finally {
+      _aIdle();
+    }
+  }
+
+  /// Plan B cuando la clasificación falla: crea un apunte general directo
+  /// (sin modelo) para que la nota nunca se pierda, y avisa dónde quedó.
+  Future<void> _guardarTextoGeneral(String texto) async {
     try {
       await ref.read(apuntesRepoProvider).crear(titulo: texto);
       _ctrl.clear();
       ref.invalidate(apuntesListProvider);
       if (!mounted) return;
       FocusScope.of(context).unfocus();
-      _mostrar('Apunte guardado');
+      _mostrar('Guardado como apunte general');
     } on MatixApiException catch (e) {
       _mostrar('No pude guardar: ${e.message}');
     } catch (e) {
       _mostrar('No pude guardar: $e');
-    } finally {
-      _aIdle();
     }
   }
 
@@ -516,6 +537,23 @@ class _CapturaApunteState extends ConsumerState<_CapturaApunte> {
       await _borrar(grab.archivo);
       _aIdle();
       _mostrar('Muy corto. Mantén el micrófono un instante más.');
+      return;
+    }
+    // Diagnóstico: si la grabación salió vacía (el mic no capturó nada,
+    // pasa en algunos Android que matan el micro en segundo plano), el
+    // archivo pesa casi nada. Lo distinguimos de un fallo de transcripción
+    // para que el aviso sea claro y accionable.
+    int bytes = 0;
+    try {
+      bytes = await grab.archivo.length();
+    } catch (_) {
+      bytes = 0;
+    }
+    if (bytes < 1024) {
+      await _borrar(grab.archivo);
+      _aIdle();
+      _mostrar('La grabación salió vacía. Revisa el permiso del micrófono '
+          'e intenta de nuevo.');
       return;
     }
 

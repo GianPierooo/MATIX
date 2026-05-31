@@ -28,6 +28,11 @@ class MainActivity : FlutterActivity() {
         // Captura el texto del intent que ARRANCÓ la app (compartir con
         // la app cerrada), antes de que Flutter lo pida.
         textoInicialCompartido = extraerTextoCompartido(intent)
+        // Consumimos el intent: si la Activity se recrea (rotación,
+        // restauración de proceso, volver desde Recientes) NO debe
+        // volver a leer el mismo ACTION_SEND y reabrir el aviso una y
+        // otra vez. Ese replay era lo que dejaba el snackbar "pegado".
+        if (textoInicialCompartido != null) consumirIntent()
 
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, canal).also {
             it.setMethodCallHandler { call, result ->
@@ -51,7 +56,17 @@ class MainActivity : FlutterActivity() {
         val texto = extraerTextoCompartido(intent)
         if (texto != null) {
             channel?.invokeMethod("onSharedText", texto)
+            // Consumido: que una recreación posterior no lo reprocese.
+            consumirIntent()
         }
+    }
+
+    /** Neutraliza el intent actual de la Activity para que un compartido
+     * ya capturado no se vuelva a leer si la Activity se recrea. */
+    private fun consumirIntent() {
+        val limpio = Intent(Intent.ACTION_MAIN)
+        limpio.setPackage(packageName)
+        setIntent(limpio)
     }
 
     /** Devuelve el texto compartido si el intent es un ACTION_SEND de

@@ -55,6 +55,40 @@ router = APIRouter(
 # vez de propagar un error opaco de OpenAI.
 _MAX_AUDIO_BYTES = 24 * 1024 * 1024
 
+# Mime por extensión de archivo de audio. La app sube m4a/AAC, pero el
+# `Content-Type` del multipart a veces llega como `application/octet-stream`
+# (el mapa de mimes del cliente no siempre conoce `.m4a`). Whisper puede
+# rechazar un octet-stream genérico, así que inferimos un mime de audio
+# correcto a partir de la extensión del nombre de archivo.
+_MIME_POR_EXT = {
+    "m4a": "audio/mp4",
+    "mp4": "audio/mp4",
+    "mp3": "audio/mpeg",
+    "wav": "audio/wav",
+    "webm": "audio/webm",
+    "ogg": "audio/ogg",
+    "oga": "audio/ogg",
+    "flac": "audio/flac",
+    "aac": "audio/aac",
+    "mpga": "audio/mpeg",
+    "mpeg": "audio/mpeg",
+}
+
+
+def _mime_audio(nombre: str, content_type: str | None) -> str:
+    """Mime de audio fiable para mandar a Whisper.
+
+    Prioriza la extensión del nombre (la app graba `.m4a`); si no la
+    reconoce, usa el `content_type` del multipart salvo que sea el
+    genérico `application/octet-stream`; en último caso, `audio/mp4`.
+    """
+    ext = nombre.rsplit(".", 1)[-1].lower() if "." in nombre else ""
+    if ext in _MIME_POR_EXT:
+        return _MIME_POR_EXT[ext]
+    if content_type and content_type != "application/octet-stream":
+        return content_type
+    return "audio/mp4"
+
 
 # Tope blando de la imagen del chat (data URL base64). ~5 MB de imagen
 # ≈ 6.7M chars; dejamos margen. La app además comprime antes de mandar.
@@ -363,7 +397,7 @@ async def transcribir(
         )
 
     nombre = file.filename or "audio.m4a"
-    mime = file.content_type or "audio/mp4"
+    mime = _mime_audio(nombre, file.content_type)
 
     try:
         texto = await llm.transcribir(

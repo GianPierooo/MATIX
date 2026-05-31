@@ -130,10 +130,26 @@ class _MatixAppState extends ConsumerState<MatixApp> {
     if (texto != null) await _capturarCompartido(texto);
   }
 
+  /// Último compartido procesado, para deduplicar re-entregas.
+  String? _ultimoCompartido;
+  DateTime? _ultimoCompartidoEn;
+
   /// Guarda lo compartido (texto o URL) como apunte clasificado,
   /// reusando el flujo del Paso C (`/matix/capturar-apunte`). Da
   /// feedback de una línea; si algo falla, lo dice — nada en silencio.
   Future<void> _capturarCompartido(String texto) async {
+    // Dedup: Android puede re-entregar el MISMO compartido (recreación
+    // de la Activity, o las dos vías inicial + onNewIntent). Si llega el
+    // mismo texto en una ventana corta, lo ignoramos: así no duplicamos
+    // el apunte ni reabrimos el aviso (era lo que lo dejaba "pegado").
+    final ahora = DateTime.now();
+    if (_ultimoCompartido == texto &&
+        _ultimoCompartidoEn != null &&
+        ahora.difference(_ultimoCompartidoEn!) < const Duration(seconds: 30)) {
+      return;
+    }
+    _ultimoCompartido = texto;
+    _ultimoCompartidoEn = ahora;
     try {
       final apunte = await ref.read(capturaApunteRepoProvider).capturar(texto);
       // Refresca Apuntes (y el "Hoy" de Inicio) para que aparezca ya.
@@ -151,6 +167,10 @@ class _MatixAppState extends ConsumerState<MatixApp> {
       ?..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
+          // Duración explícita: el aviso se cierra solo aunque no toques
+          // "Abrir" (antes parecía quedarse pegado por las re-entregas
+          // del compartido; ya deduplicadas).
+          duration: const Duration(seconds: 5),
           content: Text(a.destinoLabel),
           action: SnackBarAction(
             label: 'Abrir',
