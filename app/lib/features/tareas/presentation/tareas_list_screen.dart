@@ -86,6 +86,11 @@ class TareasListScreen extends ConsumerWidget {
               ],
             ),
           ),
+          IconButton(
+            tooltip: 'Nueva tarea',
+            onPressed: () => _abrirNueva(context),
+            icon: const Icon(Icons.add),
+          ),
           const SizedBox(width: 4),
         ],
       ),
@@ -157,13 +162,11 @@ class TareasListScreen extends ConsumerWidget {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _abrirNueva(context),
-        backgroundColor: MatixColors.accent,
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.add),
-        label: const Text('Nueva tarea'),
-      ),
+      // El botón "Nueva tarea" vive en el AppBar (igual que "Nuevo
+      // evento" y "Nuevo proyecto"). NO usamos un FAB acá: esta pantalla
+      // vive en el HomeShell con `extendBody`, así que un FAB queda
+      // tapado detrás de la barra de navegación elevada (el botón de
+      // Matix) y se vuelve invisible e intocable.
     );
   }
 
