@@ -11,6 +11,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../theme/matix_colors.dart';
 import '../../../theme/matix_spacing.dart';
 import '../../../theme/matix_typography.dart';
+import '../../modos/providers/modos_providers.dart';
 import '../data/uso_repository.dart';
 import '../domain/mensaje.dart';
 import '../providers/matix_chat_providers.dart';
@@ -256,6 +257,87 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
     );
   }
 
+  /// Hoja para elegir/cambiar/salir del modo de Matix. La fuente de verdad
+  /// es el cerebro; al elegir, persistimos ahí y el indicador se actualiza.
+  void _mostrarModos(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: MatixColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Consumer(
+        builder: (ctx, ref2, _) {
+          final modos = ref2.watch(modosProvider);
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 16, 20, 4),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Modo de Matix',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: MatixColors.text,
+                      ),
+                    ),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Ajusta el tono y el enfoque. Matix también puede '
+                      'cambiarlo solo, siempre avisándote.',
+                      style: TextStyle(fontSize: 12, color: MatixColors.muted),
+                    ),
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.chat_bubble_outline,
+                      color: MatixColors.muted),
+                  title: const Text('Modo normal'),
+                  subtitle: const Text('Matix general, sin enfoque especial'),
+                  trailing: modos.activo == null
+                      ? const Icon(Icons.check, color: MatixColors.accent)
+                      : null,
+                  onTap: () {
+                    ref2.read(modosProvider.notifier).desactivar();
+                    Navigator.of(ctx).pop();
+                  },
+                ),
+                for (final m in modos.disponibles)
+                  ListTile(
+                    leading: Icon(
+                      Icons.auto_awesome,
+                      color: modos.activo == m.nombre
+                          ? MatixColors.accent
+                          : MatixColors.muted,
+                    ),
+                    title: Text(m.etiqueta),
+                    subtitle: m.descripcion.isEmpty ? null : Text(m.descripcion),
+                    trailing: modos.activo == m.nombre
+                        ? const Icon(Icons.check, color: MatixColors.accent)
+                        : null,
+                    onTap: () {
+                      ref2.read(modosProvider.notifier).activar(m.nombre);
+                      Navigator.of(ctx).pop();
+                    },
+                  ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final estado = ref.watch(chatMatixProvider);
@@ -284,6 +366,11 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
         title: const Text('Matix'),
         actions: [
           IconButton(
+            tooltip: 'Modo de Matix',
+            icon: const Icon(Icons.tune),
+            onPressed: () => _mostrarModos(context),
+          ),
+          IconButton(
             tooltip: 'Modo manos libres',
             icon: const Icon(Icons.headphones),
             onPressed: () => Navigator.of(context).push(
@@ -301,6 +388,7 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
         child: Column(
           children: [
             const _MedidorBanner(),
+            _ModoIndicador(onTocar: () => _mostrarModos(context)),
             Expanded(
               child: vacio
                   ? const _EstadoInicial()
@@ -1107,6 +1195,60 @@ class _PuntoRojoPalpitanteState extends State<_PuntoRojoPalpitante>
 /// hacer la franja visible siempre: estado de cero, de cargando y
 /// de error tienen cada uno su renderizado y son verificables a
 /// simple vista.
+/// Indicador del modo activo, justo bajo el medidor. Solo se muestra cuando
+/// hay un modo activo: una píldora "Modo X" con una ✕ para salir y tap para
+/// cambiarlo. Cuando es modo normal, no ocupa espacio.
+class _ModoIndicador extends ConsumerWidget {
+  const _ModoIndicador({required this.onTocar});
+  final VoidCallback onTocar;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final modo = ref.watch(modosProvider).modoActivo;
+    if (modo == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+      child: Material(
+        color: MatixColors.accent.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: onTocar,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                const Icon(Icons.auto_awesome,
+                    size: 16, color: MatixColors.accent),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Modo ${modo.etiqueta}',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: MatixColors.accent,
+                    ),
+                  ),
+                ),
+                InkWell(
+                  onTap: () =>
+                      ref.read(modosProvider.notifier).desactivar(),
+                  borderRadius: BorderRadius.circular(99),
+                  child: const Padding(
+                    padding: EdgeInsets.all(2),
+                    child: Icon(Icons.close, size: 16, color: MatixColors.accent),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _MedidorBanner extends ConsumerWidget {
   const _MedidorBanner();
 

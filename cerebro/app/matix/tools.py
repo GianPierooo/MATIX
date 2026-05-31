@@ -61,6 +61,7 @@ from ..schemas.eventos import EventoCreate, EventoUpdate
 from ..schemas.movimientos import MovimientoCreate, MovimientoUpdate
 from ..schemas.proyectos import ProyectoCreate, ProyectoUpdate
 from ..schemas.tareas import TareaCreate, TareaUpdate
+from . import modos
 from .biblioteca import buscar_material as _buscar_material_rag
 from .indexador import buscar_apuntes as _buscar_apuntes_rag
 from .indexador import indexar_apunte
@@ -93,6 +94,17 @@ _PRIORIDAD = {
     "enum": ["alta", "media", "baja"],
     "description": "Prioridad de la tarea. Por defecto 'media'.",
 }
+
+# Parámetro `modo` de `activar_modo`: el enum se arma desde los .md del
+# repo (app/matix/modos/), así agregar un modo = agregar un .md, sin tocar
+# este schema. Si por alguna razón no hay .md, omitimos el enum (string libre).
+_MODOS_NOMBRES = [m["nombre"] for m in modos.listar_modos()]
+_PARAM_MODO: dict[str, Any] = {
+    "type": "string",
+    "description": "Nombre del modo a activar.",
+}
+if _MODOS_NOMBRES:
+    _PARAM_MODO["enum"] = _MODOS_NOMBRES
 
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -1063,6 +1075,46 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["seccion"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ── Modos de Matix (tono + conocimiento + prioridades) ───────────
+    {
+        "type": "function",
+        "function": {
+            "name": "activar_modo",
+            "description": (
+                "Activa un MODO de Matix, que ajusta tu tono, tu conocimiento "
+                "y tus prioridades. Úsalo cuando el usuario lo pida ('ponte en "
+                "modo tesis') O cuando DETECTES el contexto (habla de su tesis, "
+                "de estudiar, está desanimado y necesita empuje). REGLA: "
+                "SIEMPRE avísale en una frase corta que lo activaste ('Activé "
+                "el modo tesis, te ayudo con eso'); NUNCA cambies de modo en "
+                "silencio. El modo se queda activo hasta que lo cambies o lo "
+                "apagues con `desactivar_modo`."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"modo": _PARAM_MODO},
+                "required": ["modo"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desactivar_modo",
+            "description": (
+                "Vuelve al modo NORMAL (sin modo). Úsalo cuando el usuario diga "
+                "'sal del modo', 'modo normal', o cuando el tema del modo "
+                "claramente terminó y conviene volver a lo general. Avísale en "
+                "una frase corta que volviste a normal."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
                 "additionalProperties": False,
             },
         },
@@ -2445,6 +2497,27 @@ async def _navegar(_db: Postgrest, args: dict) -> dict[str, Any]:
     return _ok({"seccion": seccion})
 
 
+# ── Modos de Matix: activar / desactivar ────────────────────────────
+
+
+async def _activar_modo(db: Postgrest, args: dict) -> dict[str, Any]:
+    modo = (args.get("modo") or "").strip().lower()
+    if not modos.existe_modo(modo):
+        disp = ", ".join(m["nombre"] for m in modos.listar_modos()) or "(ninguno)"
+        return _error(
+            "validacion",
+            f"No conozco el modo «{modo}». Los modos son: {disp}.",
+        )
+    await modos.set_modo_activo(db, modo)
+    meta = modos.meta_modo(modo) or {}
+    return _ok({"modo": modo, "etiqueta": meta.get("etiqueta", modo)})
+
+
+async def _desactivar_modo(db: Postgrest, _args: dict) -> dict[str, Any]:
+    await modos.set_modo_activo(db, None)
+    return _ok({"modo": None})
+
+
 # Mapa de nombre → handler. Mantener sincronizado con TOOL_DEFINITIONS.
 _HANDLERS = {
     # Crear
@@ -2478,6 +2551,9 @@ _HANDLERS = {
     "eliminar_movimiento": _eliminar_movimiento,
     # Navegación (no toca datos)
     "navegar": _navegar,
+    # Modos de Matix
+    "activar_modo": _activar_modo,
+    "desactivar_modo": _desactivar_modo,
     # Solo lectura
     "consultar_apuntes": _consultar_apuntes,
     "consultar_movimientos": _consultar_movimientos,
@@ -2519,6 +2595,9 @@ TABLAS_AFECTADAS = {
     "eliminar_movimiento": ["movimientos"],
     # Navegación (no cambia datos)
     "navegar": [],
+    # Modos (el modo activo se surfacea aparte en la respuesta del chat)
+    "activar_modo": [],
+    "desactivar_modo": [],
     "consultar_apuntes": [],  # solo lectura
     "consultar_movimientos": [],  # solo lectura
     "buscar_apuntes": [],  # solo lectura

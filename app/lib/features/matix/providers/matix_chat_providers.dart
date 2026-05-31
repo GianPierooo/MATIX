@@ -7,6 +7,7 @@ import '../../apuntes/providers/apuntes_providers.dart';
 import '../../cierre/providers/cierres_providers.dart';
 import '../../eventos/providers/eventos_providers.dart';
 import '../../finanzas/providers/movimientos_providers.dart';
+import '../../modos/providers/modos_providers.dart';
 import '../../proyectos/providers/proyectos_providers.dart';
 import '../../tareas/providers/tareas_providers.dart';
 import '../data/matix_chat_repository.dart';
@@ -149,6 +150,9 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
       if (destino != null) {
         ref.read(objetivoNavegacionProvider.notifier).state = destino;
       }
+      // Sincroniza el indicador de modo: el modelo pudo activar/desactivar
+      // un modo con una tool este turno. Refleja el estado post-turno.
+      ref.read(modosProvider.notifier).sincronizar(turno.modoActivo);
       // El medidor cambió: hubo al menos una llamada al modelo.
       ref.invalidate(usoSnapshotProvider);
     } catch (e) {

@@ -19,6 +19,7 @@ class ChatTurno {
     required this.toolsUsadas,
     required this.tablasCambiadas,
     this.navegacion,
+    this.modoActivo,
   });
 
   final String respuesta;
@@ -28,6 +29,10 @@ class ChatTurno {
   /// Sección a la que Matix pidió navegar este turno (o `null`). El
   /// string viene del cerebro (`inicio`, `universidad`, `finanzas`…).
   final String? navegacion;
+
+  /// Modo de Matix activo DESPUÉS del turno (el modelo pudo cambiarlo con
+  /// `activar_modo`/`desactivar_modo`). `null` = modo normal.
+  final String? modoActivo;
 
   bool get huboCambios => tablasCambiadas.isNotEmpty;
 }
@@ -77,6 +82,7 @@ class MatixChatRepository {
           .map((e) => e.toString())
           .toList(growable: false),
       navegacion: j['navegacion'] as String?,
+      modoActivo: j['modo_activo'] as String?,
     );
   }
 }

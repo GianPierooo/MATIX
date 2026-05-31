@@ -281,3 +281,6 @@ class ChatResponse(BaseModel):
     # Sección a la que la app debe navegar si el usuario lo pidió
     # («llévame a Universidad»). `null` si no hubo navegación.
     navegacion: str | None = None
+    # Modo de Matix activo DESPUÉS del turno (tono/conocimiento/prioridades).
+    # `null` = modo normal. La app lo usa para el indicador del chat.
+    modo_activo: str | None = None

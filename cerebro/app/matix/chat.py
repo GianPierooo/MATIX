@@ -25,7 +25,7 @@ import json
 from typing import Any
 
 from ..db import Postgrest
-from . import llm
+from . import llm, modos
 from .contexto import contexto_vivo
 from .system_prompt import system_prompt_fijo
 from .tools import TABLAS_AFECTADAS, TOOL_DEFINITIONS, ejecutar_tool
@@ -66,6 +66,23 @@ async def conversar(
         {"role": "system", "content": fijo},
         {"role": "system", "content": contexto},
     ]
+
+    # Modo activo (Capa Modos): si hay uno, entra como `system` ADICIONAL,
+    # encima del prompt base. Las reglas base e identidad de Matix mandan
+    # siempre — el envoltorio se lo recuerda al modelo. El modo activo al
+    # ARRANCAR el turno es el que se inyecta; si el modelo lo cambia con
+    # `activar_modo`/`desactivar_modo`, aplica desde el próximo turno (y ya
+    # avisó al usuario).
+    modo = await modos.modo_activo(db)
+    if modo:
+        contenido_modo = modos.cargar_modo(modo)
+        if contenido_modo:
+            mensajes.append(
+                {
+                    "role": "system",
+                    "content": modos.envoltura_modo(modo, contenido_modo),
+                }
+            )
     for m in historial:
         rol = m.get("rol") or m.get("role")
         if rol not in ("user", "assistant"):
@@ -138,11 +155,16 @@ async def conversar(
             "Revisá el hub: lo último debería estar reflejado."
         )
 
+    # Modo activo DESPUÉS del turno (el modelo pudo cambiarlo con
+    # activar_modo/desactivar_modo). La app lo usa para el indicador.
+    modo_final = await modos.modo_activo(db)
+
     return {
         "respuesta": ultima_respuesta,
         "tools_usadas": tools_usadas,
         "tablas_cambiadas": tablas_cambiadas,
         "navegacion": navegacion,
+        "modo_activo": modo_final,
     }
 
 
