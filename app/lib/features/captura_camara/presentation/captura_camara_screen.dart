@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +10,8 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../theme/matix_colors.dart';
 import '../../../theme/matix_spacing.dart';
 import '../../../theme/matix_typography.dart';
+import '../../matix/presentation/matix_chat_screen.dart';
+import '../../matix/providers/matix_chat_providers.dart';
 import '../application/captura_controller.dart';
 import 'resultado_ocr_screen.dart';
 
@@ -163,6 +168,39 @@ class _CapturaCamaraScreenState extends ConsumerState<CapturaCamaraScreen>
     await ref.read(capturaControllerProvider.notifier).procesarFoto(picked.path);
   }
 
+  /// "Pregúntale a Matix qué ve": toma una foto y la manda al chat de
+  /// Matix (que SÍ ve imágenes, vía el modelo de visión), luego abre el
+  /// chat para ver la respuesta. Distinto del OCR on-device: acá la
+  /// imagen sí viaja al cerebro, a propósito, para que Matix la entienda.
+  Future<void> _preguntarAMatix() async {
+    final c = _camara;
+    if (c == null || !c.value.isInitialized || _capturando) return;
+    setState(() => _capturando = true);
+    try {
+      final foto = await c.takePicture();
+      final bytes = await File(foto.path).readAsBytes();
+      final dataUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+      // Disparamos el turno (sin await) y abrimos el chat para verlo
+      // pensar y responder. El provider del chat es global, así que el
+      // turno se completa aunque dejemos esta pantalla.
+      ref.read(chatMatixProvider.notifier).enviar(
+            '¿Qué ves en esta foto?',
+            imagenDataUrl: dataUrl,
+            imagenPath: foto.path,
+          );
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const MatixChatScreen()),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No pude enviar la foto a Matix: $e')),
+      );
+      setState(() => _capturando = false);
+    }
+  }
+
   void _escribirAMano(String aviso) {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
@@ -220,6 +258,11 @@ class _CapturaCamaraScreenState extends ConsumerState<CapturaCamaraScreen>
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Pregúntale a Matix qué ve',
+            icon: const Icon(Icons.auto_awesome),
+            onPressed: ocupado || _capturando ? null : _preguntarAMatix,
+          ),
           IconButton(
             tooltip: 'Elegir de la galería',
             icon: const Icon(Icons.photo_library_outlined),
