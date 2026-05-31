@@ -8,8 +8,19 @@ class Settings(BaseSettings):
     supabase_project_ref: str = ""            # ref del proyecto Supabase
     matix_api_key: str = ""
     matix_env: str = "dev"
-    # LLM provider (Capa 2). Decisión: OpenAI como único proveedor.
+
+    # LLM del CHAT — intercambiable por env (default OpenAI). Toda la
+    # lógica de proveedor vive en `app/matix/llm.py`; ningún otro módulo
+    # sabe del proveedor.
+    #   MATIX_LLM_PROVIDER: "openai" | "anthropic" (default "openai").
+    #   MATIX_LLM_MODEL: id del modelo del proveedor elegido (default el
+    #     gpt-4o-mini actual). Para Claude, p.ej. "claude-3-5-haiku-latest".
+    matix_llm_provider: str = "openai"
+    matix_llm_model: str = "gpt-4o-mini"
+    # Keys (solo de env; NUNCA en el repo). Whisper, TTS y los embeddings
+    # del RAG SIEMPRE usan OpenAI, sea cual sea el proveedor del chat.
     openai_api_key: str = ""
+    anthropic_api_key: str = ""
     # CORS: lista separada por coma. Vacío = deny-all browser (la app
     # Android no es navegador y no la necesita). Se pone solo si en
     # el futuro hay un cliente web.

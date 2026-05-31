@@ -1,16 +1,22 @@
 """Único punto de entrada al modelo de lenguaje.
 
-**Ningún otro módulo del cerebro importa `openai`.** Esto es por
-diseño: si en el futuro cambia el proveedor (Claude, Gemini, modelo
-local), se reescribe este archivo y nada más. Los demás módulos
-reciben `dict`s simples — incluso los tool calls se devuelven en
-formato neutro para no acoplar `chat.py` a la SDK.
+**Ningún otro módulo del cerebro importa `openai` ni `anthropic`.** Esto
+es por diseño: el proveedor del LLM de chat es intercambiable por env, y
+toda la lógica vive acá. Los demás módulos reciben `dict`s simples —
+incluso los tool calls se devuelven en formato neutro para no acoplar
+`chat.py` a ninguna SDK.
 
-Decisión: OpenAI como único proveedor (2026-05-26). Modelo por
-defecto `gpt-4o-mini` por costo bajo; se puede subir a `gpt-4o` para
-mejor razonamiento. El **prompt caching** de OpenAI es automático
-para prefijos repetidos ≥1024 tokens — basta con poner el system
-prompt al inicio y mantenerlo estable.
+Proveedores del CHAT (env `MATIX_LLM_PROVIDER`, default `openai`):
+- `openai`  → modelos GPT (function calling + visión + JSON nativo).
+- `anthropic` → modelos Claude (tool use + visión; JSON por prefill).
+`MATIX_LLM_MODEL` fija el modelo del proveedor elegido (default el
+`gpt-4o-mini` de siempre).
+
+SIEMPRE OpenAI, sin importar el proveedor del chat (Anthropic no tiene
+equivalentes): transcripción (Whisper), TTS y los embeddings del RAG.
+
+Las API keys se leen SOLO de variables de entorno (`OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`); nunca del código ni del repo.
 """
 from __future__ import annotations
 
@@ -23,91 +29,282 @@ from openai import AsyncOpenAI
 from ..config import settings
 from .uso import medidor
 
-_client: AsyncOpenAI | None = None
+# Tope de tokens de salida para Anthropic (OpenAI no lo exige). Holgado
+# para una respuesta de chat o un lote de tool calls.
+_MAX_TOKENS_ANTHROPIC = 4096
+
+_openai_client: AsyncOpenAI | None = None
+_anthropic_client: Any = None
 
 
-def _get_client() -> AsyncOpenAI:
-    """Cliente lazy. Si la `OPENAI_API_KEY` no está, falla con
-    mensaje claro en vez de un error confuso de la SDK."""
-    global _client
-    if _client is None:
+def _get_openai_client() -> AsyncOpenAI:
+    """Cliente OpenAI lazy. Lo usan el chat (proveedor openai) y SIEMPRE
+    Whisper/TTS/embeddings. Falla claro si falta la key."""
+    global _openai_client
+    if _openai_client is None:
         if not settings.openai_api_key:
             raise RuntimeError(
                 "OPENAI_API_KEY no está configurada en cerebro/.env"
             )
-        _client = AsyncOpenAI(api_key=settings.openai_api_key)
-    return _client
+        _openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
+    return _openai_client
+
+
+def _get_anthropic_client() -> Any:
+    """Cliente Anthropic lazy. Solo se importa/crea si el proveedor de
+    chat es `anthropic` — así el camino default (OpenAI) no depende de
+    que la SDK esté presente en runtime."""
+    global _anthropic_client
+    if _anthropic_client is None:
+        if not settings.anthropic_api_key:
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY no está configurada (necesaria con "
+                "MATIX_LLM_PROVIDER=anthropic)."
+            )
+        from anthropic import AsyncAnthropic
+
+        _anthropic_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+    return _anthropic_client
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Capa de proveedor: selección + traducción de formatos
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _usar_anthropic() -> bool:
+    return settings.matix_llm_provider.strip().lower() == "anthropic"
+
+
+def _modelo_chat(model: str | None) -> str:
+    """El modelo del chat: el explícito si se pasó, si no el de env."""
+    return model or settings.matix_llm_model or "gpt-4o-mini"
+
+
+def _registrar_uso_anthropic(usage: Any) -> None:
+    """Normaliza el `usage` de Anthropic (input/output/cache) al shape que
+    espera `medidor.registrar_chat` (que lee como OpenAI)."""
+    if usage is None:
+        return
+    inp = getattr(usage, "input_tokens", 0) or 0
+    out = getattr(usage, "output_tokens", 0) or 0
+    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    medidor.registrar_chat(
+        {
+            "prompt_tokens": inp + cache_read,
+            "completion_tokens": out,
+            "prompt_tokens_details": {"cached_tokens": cache_read},
+        }
+    )
+
+
+def _imagen_a_anthropic(url: str) -> dict[str, Any]:
+    """Convierte un `data:image/...;base64,...` (formato OpenAI/visión) a un
+    bloque `image` de Anthropic."""
+    cabecera, _, datos = url.partition(",")
+    media = "image/jpeg"
+    if cabecera.startswith("data:") and ";" in cabecera:
+        media = cabecera[len("data:"):].split(";", 1)[0] or "image/jpeg"
+    return {
+        "type": "image",
+        "source": {"type": "base64", "media_type": media, "data": datos},
+    }
+
+
+def _contenido_usuario_anthropic(content: Any) -> Any:
+    """Contenido de un mensaje de usuario: texto plano tal cual, o lista
+    multimodal [texto, imagen] traducida a bloques de Anthropic."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        bloques: list[dict[str, Any]] = []
+        for parte in content:
+            if not isinstance(parte, dict):
+                continue
+            if parte.get("type") == "text":
+                bloques.append({"type": "text", "text": parte.get("text", "")})
+            elif parte.get("type") == "image_url":
+                url = (parte.get("image_url") or {}).get("url", "")
+                if url:
+                    bloques.append(_imagen_a_anthropic(url))
+        return bloques or ""
+    return content or ""
+
+
+def _a_anthropic(messages: list[dict]) -> tuple[str, list[dict]]:
+    """Traduce los mensajes en shape OpenAI (lo que arma `chat.py`) a
+    (system, messages) de Anthropic:
+
+    - los `system` se concatenan en el parámetro `system` aparte,
+    - los resultados de tool (`role:tool`) se agrupan en UN mensaje `user`
+      con bloques `tool_result` (Anthropic lo exige así),
+    - el `raw` re-inyectado (assistant con content lista de bloques) pasa
+      tal cual,
+    - las imágenes de un user multimodal se traducen a bloques `image`.
+    """
+    system_partes: list[str] = []
+    out: list[dict] = []
+    tool_results: list[dict] = []
+
+    def _flush() -> None:
+        nonlocal tool_results
+        if tool_results:
+            out.append({"role": "user", "content": tool_results})
+            tool_results = []
+
+    for m in messages:
+        rol = m.get("role")
+        if rol == "system":
+            c = m.get("content")
+            if isinstance(c, str) and c.strip():
+                system_partes.append(c)
+            continue
+        if rol == "tool":
+            contenido = m.get("content")
+            if not isinstance(contenido, str):
+                contenido = json.dumps(contenido, ensure_ascii=False)
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": m.get("tool_call_id"),
+                    "content": contenido,
+                }
+            )
+            continue
+        _flush()
+        if rol == "assistant":
+            contenido = m.get("content")
+            # `raw` re-inyectado: ya viene como lista de bloques Anthropic.
+            out.append({"role": "assistant", "content": contenido if isinstance(contenido, list) else (contenido or "")})
+        else:  # user
+            out.append(
+                {"role": "user", "content": _contenido_usuario_anthropic(m.get("content"))}
+            )
+    _flush()
+    return "\n\n".join(system_partes), out
+
+
+def _tools_a_anthropic(tools: list[dict]) -> list[dict]:
+    """Traduce las definiciones de tools de OpenAI (`function`/`parameters`)
+    al formato de Anthropic (`input_schema`)."""
+    out: list[dict] = []
+    for t in tools:
+        f = t.get("function", t)
+        out.append(
+            {
+                "name": f["name"],
+                "description": f.get("description", ""),
+                "input_schema": f.get("parameters")
+                or {"type": "object", "properties": {}},
+            }
+        )
+    return out
+
+
+def _tool_choice_a_anthropic(tool_choice: Any) -> dict[str, Any]:
+    if isinstance(tool_choice, dict):
+        nombre = (tool_choice.get("function") or {}).get("name")
+        if nombre:
+            return {"type": "tool", "name": nombre}
+    return {"type": "auto"}
+
+
+def _texto_de_anthropic(content: Any) -> str:
+    partes = []
+    for b in content or []:
+        if getattr(b, "type", None) == "text":
+            partes.append(b.text or "")
+        elif isinstance(b, dict) and b.get("type") == "text":
+            partes.append(b.get("text", ""))
+    return "".join(partes)
 
 
 async def responder(
     messages: list[dict],
     *,
-    model: str = "gpt-4o-mini",
+    model: str | None = None,
     temperature: float = 0.6,
 ) -> str:
-    """Versión simple sin tools. Quedó como compat / debugging — el
-    flujo real de Matix usa `responder_con_tools`."""
-    client = _get_client()
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=messages,  # type: ignore[arg-type]
-        temperature=temperature,
-    )
-    medidor.registrar_chat(resp.usage)
-    return (resp.choices[0].message.content or "").strip()
+    """Versión simple sin tools (compat/debugging). Enruta al proveedor
+    activo. El flujo real de Matix usa `responder_con_tools`."""
+    model = _modelo_chat(model)
+    if _usar_anthropic():
+        return await _anthropic_texto(messages, model=model, temperature=temperature)
+    return await _openai_texto(messages, model=model, temperature=temperature)
 
 
 async def responder_con_tools(
     messages: list[dict],
     tools: list[dict],
     *,
-    model: str = "gpt-4o-mini",
+    model: str | None = None,
     temperature: float = 0.6,
     tool_choice: Any = "auto",
 ) -> dict[str, Any]:
-    """Llama al modelo dándole acceso a `tools` (lista de schemas
-    OpenAI). Devuelve un dict neutro que `chat.py` puede consumir sin
-    importar `openai`:
+    """Llama al modelo del CHAT con acceso a `tools` (definiciones en el
+    formato de OpenAI; el proveedor las traduce). Devuelve un dict NEUTRO
+    que `chat.py` consume sin saber del proveedor:
 
-    `tool_choice` por defecto `"auto"` (el modelo decide). Para forzar
-    una herramienta concreta se pasa
-    `{"type": "function", "function": {"name": "crear_apunte"}}` —
-    así la captura rápida de Inicio garantiza que el modelo guarde el
-    apunte en vez de ponerse a conversar.
+        {"tipo": "texto", "contenido": "...", "raw": <opaco>}
+    o
+        {"tipo": "tool_calls",
+         "tool_calls": [{"id", "nombre", "args"}...],
+         "raw": <opaco>}
 
-        {
-            "tipo": "texto",
-            "contenido": "...",
-            "raw": <mensaje original, opaco>
-        }
+    `tool_choice` por defecto `"auto"`. Para forzar una herramienta:
+    `{"type": "function", "function": {"name": "crear_apunte"}}` (formato
+    OpenAI; el proveedor Anthropic lo traduce a `{"type":"tool","name":…}`).
 
-    o bien:
-
-        {
-            "tipo": "tool_calls",
-            "tool_calls": [
-                {"id": "call_abc", "nombre": "crear_tarea", "args": {...}},
-                ...
-            ],
-            "raw": <mensaje original, opaco>
-        }
-
-    El campo `raw` se vuelve a inyectar tal cual cuando se construye
-    el siguiente turno (los modelos necesitan ver su propio mensaje
-    con los `tool_call_id`s para enlazar las respuestas). Es opaco
-    para `chat.py`.
+    `raw` es el mensaje del asistente en el formato NATIVO del proveedor
+    activo; `chat.py` lo re-inyecta tal cual en el siguiente turno (opaco
+    para él). Como el proveedor no cambia dentro de un mismo request, el
+    `raw` siempre encaja.
     """
-    client = _get_client()
+    model = _modelo_chat(model)
+    if _usar_anthropic():
+        return await _anthropic_con_tools(
+            messages, tools, model=model, temperature=temperature, tool_choice=tool_choice
+        )
+    return await _openai_con_tools(
+        messages, tools, model=model, temperature=temperature, tool_choice=tool_choice
+    )
+
+
+async def _chat_json(
+    messages: list[dict], *, model: str | None, temperature: float
+) -> str:
+    """Pide al modelo del chat una respuesta JSON y devuelve el string
+    crudo. OpenAI usa su modo JSON; Anthropic, prefill con `{`. El parseo
+    y la validación los hace cada extractor (son tolerantes a fallos)."""
+    model = _modelo_chat(model)
+    if _usar_anthropic():
+        return await _anthropic_json(messages, model=model, temperature=temperature)
+    return await _openai_json(messages, model=model, temperature=temperature)
+
+
+# ── Implementación OpenAI ───────────────────────────────────────────
+
+
+async def _openai_texto(messages, *, model, temperature) -> str:
+    client = _get_openai_client()
+    resp = await client.chat.completions.create(
+        model=model, messages=messages, temperature=temperature
+    )
+    medidor.registrar_chat(resp.usage)
+    return (resp.choices[0].message.content or "").strip()
+
+
+async def _openai_con_tools(messages, tools, *, model, temperature, tool_choice) -> dict:
+    client = _get_openai_client()
     resp = await client.chat.completions.create(
         model=model,
-        messages=messages,  # type: ignore[arg-type]
+        messages=messages,
         temperature=temperature,
-        tools=tools,  # type: ignore[arg-type]
-        tool_choice=tool_choice,  # type: ignore[arg-type]
+        tools=tools,
+        tool_choice=tool_choice,
     )
     medidor.registrar_chat(resp.usage)
     msg = resp.choices[0].message
-
     if msg.tool_calls:
         calls = []
         for tc in msg.tool_calls:
@@ -115,20 +312,12 @@ async def responder_con_tools(
                 args = json.loads(tc.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
-            calls.append(
-                {
-                    "id": tc.id,
-                    "nombre": tc.function.name,
-                    "args": args,
-                }
-            )
+            calls.append({"id": tc.id, "nombre": tc.function.name, "args": args})
         return {
             "tipo": "tool_calls",
             "tool_calls": calls,
-            # El SDK acepta volver a pasarle el mensaje como dict.
             "raw": msg.model_dump(exclude_none=True),
         }
-
     return {
         "tipo": "texto",
         "contenido": (msg.content or "").strip(),
@@ -136,11 +325,100 @@ async def responder_con_tools(
     }
 
 
+async def _openai_json(messages, *, model, temperature) -> str:
+    client = _get_openai_client()
+    resp = await client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        response_format={"type": "json_object"},
+    )
+    medidor.registrar_chat(resp.usage)
+    return resp.choices[0].message.content or "{}"
+
+
+# ── Implementación Anthropic (Claude) ───────────────────────────────
+
+
+async def _anthropic_texto(messages, *, model, temperature) -> str:
+    client = _get_anthropic_client()
+    system, msgs = _a_anthropic(messages)
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "max_tokens": _MAX_TOKENS_ANTHROPIC,
+        "temperature": temperature,
+        "messages": msgs,
+    }
+    if system:
+        kwargs["system"] = system
+    resp = await client.messages.create(**kwargs)
+    _registrar_uso_anthropic(resp.usage)
+    return _texto_de_anthropic(resp.content).strip()
+
+
+async def _anthropic_con_tools(messages, tools, *, model, temperature, tool_choice) -> dict:
+    client = _get_anthropic_client()
+    system, msgs = _a_anthropic(messages)
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "max_tokens": _MAX_TOKENS_ANTHROPIC,
+        "temperature": temperature,
+        "messages": msgs,
+        "tools": _tools_a_anthropic(tools),
+        "tool_choice": _tool_choice_a_anthropic(tool_choice),
+    }
+    if system:
+        kwargs["system"] = system
+    resp = await client.messages.create(**kwargs)
+    _registrar_uso_anthropic(resp.usage)
+
+    calls: list[dict] = []
+    textos: list[str] = []
+    raw_bloques: list[dict] = []
+    for b in resp.content:
+        bloque = b.model_dump() if hasattr(b, "model_dump") else dict(b)
+        raw_bloques.append(bloque)
+        if bloque.get("type") == "tool_use":
+            calls.append(
+                {
+                    "id": bloque.get("id"),
+                    "nombre": bloque.get("name"),
+                    "args": bloque.get("input") or {},
+                }
+            )
+        elif bloque.get("type") == "text":
+            textos.append(bloque.get("text", ""))
+
+    raw = {"role": "assistant", "content": raw_bloques}
+    if calls:
+        return {"tipo": "tool_calls", "tool_calls": calls, "raw": raw}
+    return {"tipo": "texto", "contenido": "".join(textos).strip(), "raw": raw}
+
+
+async def _anthropic_json(messages, *, model, temperature) -> str:
+    client = _get_anthropic_client()
+    system, msgs = _a_anthropic(messages)
+    # Prefill con `{` para forzar una respuesta JSON: Claude continúa el
+    # objeto. El resultado completo es "{" + lo que devolvió.
+    msgs = [*msgs, {"role": "assistant", "content": "{"}]
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "max_tokens": _MAX_TOKENS_ANTHROPIC,
+        "temperature": temperature,
+        "messages": msgs,
+    }
+    if system:
+        kwargs["system"] = system
+    resp = await client.messages.create(**kwargs)
+    _registrar_uso_anthropic(resp.usage)
+    return "{" + _texto_de_anthropic(resp.content)
+
+
 async def extraer_tareas_json(
     texto: str,
     *,
     hoy: str,
-    model: str = "gpt-4o-mini",
+    model: str | None = None,
 ) -> list[dict]:
     """Extrae tareas accionables de un texto libre y las devuelve
     estructuradas (Capa 7-B). El texto suele venir del OCR de una foto
@@ -167,7 +445,6 @@ async def extraer_tareas_json(
     router). Esto mantiene la función pura y testeable: misma entrada,
     misma salida, sin depender del reloj del proceso.
     """
-    client = _get_client()
     system = (
         "Eres un extractor de tareas. Recibes un texto libre que puede "
         "venir del escaneo (OCR) de una foto: una lista escrita a mano, "
@@ -189,18 +466,14 @@ async def extraer_tareas_json(
         'Responde SOLO un objeto JSON con esta forma exacta:\n'
         '{"tareas": [{"titulo": "...", "vence_en": "YYYY-MM-DD" | null}]}'
     )
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=[
+    contenido = await _chat_json(
+        [
             {"role": "system", "content": system},
             {"role": "user", "content": texto},
         ],
+        model=model,
         temperature=0.2,
-        response_format={"type": "json_object"},
     )
-    medidor.registrar_chat(resp.usage)
-
-    contenido = resp.choices[0].message.content or "{}"
     try:
         datos = json.loads(contenido)
     except json.JSONDecodeError:
@@ -227,7 +500,7 @@ async def extraer_tareas_json(
 async def clasificar_captura_json(
     texto: str,
     *,
-    model: str = "gpt-4o-mini",
+    model: str | None = None,
 ) -> str:
     """Clasifica el texto de una captura (OCR de una foto) en uno de los
     cuatro destinos de la cámara inteligente:
@@ -246,7 +519,6 @@ async def clasificar_captura_json(
     corregir el tipo. Usa el **modo JSON** de OpenAI para forzar un
     objeto válido; cualquier respuesta inválida cae a ``"apunte"``.
     """
-    client = _get_client()
     system = (
         "Eres un clasificador de capturas. Recibes el texto que un OCR "
         "extrajo de una foto y decides a cuál de cuatro destinos "
@@ -268,18 +540,14 @@ async def clasificar_captura_json(
         'JSON con esta forma exacta:\n'
         '{"tipo": "tareas" | "eventos" | "recibo" | "apunte"}'
     )
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=[
+    contenido = await _chat_json(
+        [
             {"role": "system", "content": system},
             {"role": "user", "content": texto},
         ],
+        model=model,
         temperature=0,
-        response_format={"type": "json_object"},
     )
-    medidor.registrar_chat(resp.usage)
-
-    contenido = resp.choices[0].message.content or "{}"
     try:
         datos = json.loads(contenido)
     except json.JSONDecodeError:
@@ -294,7 +562,7 @@ async def extraer_recibo_json(
     texto: str,
     *,
     hoy: str,
-    model: str = "gpt-4o-mini",
+    model: str | None = None,
 ) -> dict:
     """Extrae los datos de un recibo (OCR de una boleta/ticket, ya
     corregido) para proponer un GASTO en Finanzas (Finanzas-2).
@@ -312,7 +580,6 @@ async def extraer_recibo_json(
     `hoy` (``YYYY-MM-DD`, hora de Lima) se pasa como referencia para
     fechas relativas; la mayoría de recibos traen fecha absoluta.
     """
-    client = _get_client()
     system = (
         "Eres un extractor de recibos. Recibes el texto que un OCR sacó "
         "de la foto de una boleta, factura o ticket de compra. Puede "
@@ -334,18 +601,14 @@ async def extraer_recibo_json(
         '{"monto": number | null, "fecha": "YYYY-MM-DD" | null, '
         '"comercio": string | null, "categoria": string | null}'
     )
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=[
+    contenido = await _chat_json(
+        [
             {"role": "system", "content": system},
             {"role": "user", "content": texto},
         ],
+        model=model,
         temperature=0,
-        response_format={"type": "json_object"},
     )
-    medidor.registrar_chat(resp.usage)
-
-    contenido = resp.choices[0].message.content or "{}"
     try:
         datos = json.loads(contenido)
     except json.JSONDecodeError:
@@ -380,7 +643,7 @@ async def extraer_recibo_json(
 async def estimar_duraciones_json(
     tareas: list[dict],
     *,
-    model: str = "gpt-4o-mini",
+    model: str | None = None,
 ) -> dict[str, int]:
     """Estima cuántos minutos toma cada tarea, por su título (Urgencia-3).
 
@@ -402,7 +665,6 @@ async def estimar_duraciones_json(
     if not items:
         return {}
 
-    client = _get_client()
     system = (
         "Eres un planificador. Recibes una lista de tareas (id + título) "
         "y estimas cuánto tiempo de trabajo enfocado toma cada una.\n\n"
@@ -416,18 +678,14 @@ async def estimar_duraciones_json(
         '{"duraciones": [{"tarea_id": "...", "minutos": 45}]}'
     )
     user = json.dumps({"tareas": items}, ensure_ascii=False)
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=[
+    contenido = await _chat_json(
+        [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
+        model=model,
         temperature=0.2,
-        response_format={"type": "json_object"},
     )
-    medidor.registrar_chat(resp.usage)
-
-    contenido = resp.choices[0].message.content or "{}"
     try:
         datos = json.loads(contenido)
     except json.JSONDecodeError:
@@ -458,7 +716,7 @@ async def desglosar_tarea_json(
     titulo: str,
     *,
     contexto: str | None = None,
-    model: str = "gpt-4o-mini",
+    model: str | None = None,
 ) -> dict:
     """Parte una tarea en pasos accionables, en orden lógico, cada uno
     etiquetado por horizonte (Capa 7 · Desglose).
@@ -471,7 +729,6 @@ async def desglosar_tarea_json(
     Honestidad: si la tarea YA es un paso concreto y atómico, el modelo
     devuelve `es_atomica=True` y `pasos=[]` — no infla pasos de relleno.
     """
-    client = _get_client()
     system = (
         "Eres un asistente que parte tareas en pasos accionables. "
         "Recibes el título de una tarea (y a veces una nota con "
@@ -495,18 +752,14 @@ async def desglosar_tarea_json(
     if contexto and contexto.strip():
         user += f"\n\nContexto: {contexto.strip()}"
 
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=[
+    contenido = await _chat_json(
+        [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
+        model=model,
         temperature=0.3,
-        response_format={"type": "json_object"},
     )
-    medidor.registrar_chat(resp.usage)
-
-    contenido = resp.choices[0].message.content or "{}"
     try:
         datos = json.loads(contenido)
     except json.JSONDecodeError:
@@ -559,7 +812,7 @@ async def extraer_eventos_json(
     texto: str,
     *,
     hoy: str,
-    model: str = "gpt-4o-mini",
+    model: str | None = None,
 ) -> list[dict]:
     """Extrae eventos del texto de un SÍLABO u HORARIO (Cámara · sílabo).
 
@@ -574,7 +827,6 @@ async def extraer_eventos_json(
     `hoy` (YYYY-MM-DD, Lima) ancla las fechas relativas; lo pasa el
     router para que la función sea pura.
     """
-    client = _get_client()
     system = (
         "Eres un extractor de eventos académicos. Recibes el texto (a "
         "veces de un OCR) de un SÍLABO u HORARIO de curso, ya corregido "
@@ -599,18 +851,14 @@ async def extraer_eventos_json(
         '"hora_fin": "12:00"}, {"tipo": "unico", "titulo": "...", '
         '"fecha": "YYYY-MM-DD", "hora_inicio": null, "hora_fin": null}]}'
     )
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=[
+    contenido = await _chat_json(
+        [
             {"role": "system", "content": system},
             {"role": "user", "content": texto},
         ],
+        model=model,
         temperature=0.2,
-        response_format={"type": "json_object"},
     )
-    medidor.registrar_chat(resp.usage)
-
-    contenido = resp.choices[0].message.content or "{}"
     try:
         datos = json.loads(contenido)
     except json.JSONDecodeError:
@@ -674,7 +922,7 @@ async def extraer_eventos_json(
 async def repaso_semanal_json(
     datos: dict,
     *,
-    model: str = "gpt-4o-mini",
+    model: str | None = None,
 ) -> dict:
     """Sintetiza el repaso semanal a partir de un resumen de la semana
     (Capa 8 · Repaso). Tono: balance honesto y cercano, SIN reproche
@@ -686,7 +934,6 @@ async def repaso_semanal_json(
     `{"resumen": str, "focos": [str]}`. El encaje/lectura del hub lo
     hace el cerebro; esto solo redacta. Lanza RuntimeError si falta la
     API key (el caller cae a un resumen determinístico)."""
-    client = _get_client()
     system = (
         "Eres Matix haciendo el repaso semanal con el usuario. Tono: "
         "balance honesto y cercano, SIN reproche (como un cierre de "
@@ -700,18 +947,14 @@ async def repaso_semanal_json(
         '{"resumen": "...", "focos": ["...", "..."]}'
     )
     user = json.dumps(datos, ensure_ascii=False)
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=[
+    contenido = await _chat_json(
+        [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
+        model=model,
         temperature=0.4,
-        response_format={"type": "json_object"},
     )
-    medidor.registrar_chat(resp.usage)
-
-    contenido = resp.choices[0].message.content or "{}"
     try:
         out = json.loads(contenido)
     except json.JSONDecodeError as e:
@@ -755,7 +998,7 @@ async def transcribir(
       poco y Whisper devuelve vacío, devolvemos string vacío y el
       caller decide qué hacer.
     """
-    client = _get_client()
+    client = _get_openai_client()
     # OpenAI SDK acepta `file=(filename, bytes, content_type)`.
     resp = await client.audio.transcriptions.create(
         model=model,
@@ -819,7 +1062,7 @@ async def embebir(
     """
     if not textos:
         return []
-    client = _get_client()
+    client = _get_openai_client()
     resp = await client.embeddings.create(model=model, input=textos)
     medidor.registrar_embedding(resp.usage.total_tokens)
     # OpenAI devuelve los embeddings en el mismo orden del input.
@@ -846,7 +1089,7 @@ async def hablar(
     sirve al cliente como `audio/mpeg`. Registra el consumo en el
     medidor (cobra por caracteres del input).
     """
-    client = _get_client()
+    client = _get_openai_client()
     resp = await client.audio.speech.create(
         model=model,
         voice=voz,

@@ -31,6 +31,7 @@ dependencies = [
     # Scheduler de recordatorios por push (Push Capa 2): un job cada minuto
     # dentro del proceso de FastAPI (AsyncIOScheduler).
     "apscheduler>=3.10,<4",
+    "anthropic>=0.40",
 ]
 
 [dependency-groups]
