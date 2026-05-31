@@ -20,6 +20,8 @@ class ChatTurno {
     required this.tablasCambiadas,
     this.navegacion,
     this.modoActivo,
+    this.modeloUsado,
+    this.auto = false,
   });
 
   final String respuesta;
@@ -33,6 +35,14 @@ class ChatTurno {
   /// Modo de Matix activo DESPUÉS del turno (el modelo pudo cambiarlo con
   /// `activar_modo`/`desactivar_modo`). `null` = modo normal.
   final String? modoActivo;
+
+  /// Id del modelo que respondió este turno (transparencia). `null` si el
+  /// cerebro no lo reportó (versión vieja).
+  final String? modeloUsado;
+
+  /// `true` si el modelo lo eligió el modo Automático. La app muestra la
+  /// etiqueta del modelo usado sobre todo en este caso.
+  final bool auto;
 
   bool get huboCambios => tablasCambiadas.isNotEmpty;
 }
@@ -83,6 +93,8 @@ class MatixChatRepository {
           .toList(growable: false),
       navegacion: j['navegacion'] as String?,
       modoActivo: j['modo_activo'] as String?,
+      modeloUsado: j['modelo_usado'] as String?,
+      auto: (j['auto'] as bool?) ?? false,
     );
   }
 }

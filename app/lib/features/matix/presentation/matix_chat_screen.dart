@@ -11,6 +11,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../theme/matix_colors.dart';
 import '../../../theme/matix_spacing.dart';
 import '../../../theme/matix_typography.dart';
+import '../../modelos/providers/modelos_providers.dart';
 import '../../modos/providers/modos_providers.dart';
 import '../data/uso_repository.dart';
 import '../domain/mensaje.dart';
@@ -414,6 +415,12 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
                               i == estado.mensajes.length - 1;
                           final mostrarChip = esUltimoAsistente &&
                               estado.accionesUltimoTurno.isNotEmpty;
+                          // Transparencia: bajo el último turno del
+                          // asistente mostramos qué modelo respondió cuando
+                          // lo eligió el modo Automático.
+                          final mostrarModelo = esUltimoAsistente &&
+                              estado.autoUltimoTurno &&
+                              estado.modeloUltimoTurno != null;
                           return Column(
                             crossAxisAlignment:
                                 CrossAxisAlignment.stretch,
@@ -422,6 +429,10 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
                               if (mostrarChip)
                                 _ChipAcciones(
                                   acciones: estado.accionesUltimoTurno,
+                                ),
+                              if (mostrarModelo)
+                                _ModeloUsadoEtiqueta(
+                                  modeloId: estado.modeloUltimoTurno!,
                                 ),
                             ],
                           );
@@ -732,6 +743,40 @@ class _ErrorInline extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── Transparencia del modelo (modo Automático) ──────────────────────────
+
+/// Etiqueta pequeña bajo el último turno cuando el modo Automático eligió el
+/// modelo: "Automático · GPT-4o mini". Deja ver qué se usó para que el
+/// usuario pueda ajustar el par desde Ajustes › Modelo.
+class _ModeloUsadoEtiqueta extends ConsumerWidget {
+  const _ModeloUsadoEtiqueta({required this.modeloId});
+  final String modeloId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final etiqueta = ref.watch(modelosProvider).etiquetaDe(modeloId);
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, left: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.auto_awesome, size: 12, color: MatixColors.muted),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              'Automático · $etiqueta',
+              style: MatixText.caption.copyWith(
+                color: MatixColors.muted,
+                fontSize: 10.5,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

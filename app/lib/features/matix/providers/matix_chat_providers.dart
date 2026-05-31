@@ -39,6 +39,8 @@ class EstadoChatMatix {
     this.enviando = false,
     this.errorUltimoEnvio,
     this.accionesUltimoTurno = const <String>[],
+    this.modeloUltimoTurno,
+    this.autoUltimoTurno = false,
   });
 
   final List<Mensaje> mensajes;
@@ -46,11 +48,20 @@ class EstadoChatMatix {
   final String? errorUltimoEnvio;
   final List<String> accionesUltimoTurno;
 
+  /// Id del modelo que respondió el último turno (transparencia). `null`
+  /// si aún no hubo respuesta o el cerebro no lo reportó.
+  final String? modeloUltimoTurno;
+
+  /// `true` si ese modelo lo eligió el modo Automático.
+  final bool autoUltimoTurno;
+
   EstadoChatMatix copyWith({
     List<Mensaje>? mensajes,
     bool? enviando,
     Object? errorUltimoEnvio = _kSentinel,
     List<String>? accionesUltimoTurno,
+    Object? modeloUltimoTurno = _kSentinel,
+    bool? autoUltimoTurno,
   }) {
     return EstadoChatMatix(
       mensajes: mensajes ?? this.mensajes,
@@ -59,6 +70,10 @@ class EstadoChatMatix {
           ? this.errorUltimoEnvio
           : errorUltimoEnvio as String?,
       accionesUltimoTurno: accionesUltimoTurno ?? this.accionesUltimoTurno,
+      modeloUltimoTurno: identical(modeloUltimoTurno, _kSentinel)
+          ? this.modeloUltimoTurno
+          : modeloUltimoTurno as String?,
+      autoUltimoTurno: autoUltimoTurno ?? this.autoUltimoTurno,
     );
   }
 
@@ -142,6 +157,8 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
         mensajes: [...state.mensajes, ans],
         enviando: false,
         accionesUltimoTurno: turno.toolsUsadas,
+        modeloUltimoTurno: turno.modeloUsado,
+        autoUltimoTurno: turno.auto,
       );
       // Refrescar el hub si Matix tocó algo
       _invalidarProviders(turno.tablasCambiadas);

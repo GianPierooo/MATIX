@@ -27,7 +27,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..db import Postgrest
-from . import llm, memoria, modelos_llm, modos
+from . import enrutador, llm, memoria, modelos_llm, modos
 from .contexto import contexto_vivo
 from .system_prompt import system_prompt_fijo
 from .tools import TABLAS_AFECTADAS, TOOL_DEFINITIONS, ejecutar_tool
@@ -161,7 +161,22 @@ async def conversar(
     # `raw` (formato nativo del proveedor) que se re-inyecta siempre encaja.
     # El historial entre turnos se reconstruye desde los campos NEUTROS
     # ({rol, contenido} de texto) — nunca se reusa el `raw` de otro proveedor.
-    modelo = await modelos_llm.modelo_seleccionado(db)
+    #
+    # Modo Automático: si la selección es "auto", el enrutador por reglas
+    # elige el modelo SEGÚN ESTE MENSAJE (sin llamada extra a ningún modelo).
+    # Se decide acá, una vez, así que el turno entero —incluido su loop de
+    # tools— se queda en el modelo elegido; el ruteo solo cambia entre turnos,
+    # que es exactamente donde la reconstrucción de historial lo soporta.
+    seleccion = await modelos_llm.seleccion_guardada(db)
+    auto = seleccion == modelos_llm.AUTO
+    if auto:
+        barato, fuerte = await modelos_llm.par_barato_fuerte(db)
+        decision = enrutador.elegir(
+            mensaje, modo_activo=modo, barato=barato, fuerte=fuerte
+        )
+        modelo = decision.modelo
+    else:
+        modelo = seleccion
 
     ultima_respuesta = ""
 
@@ -222,6 +237,11 @@ async def conversar(
         "tablas_cambiadas": tablas_cambiadas,
         "navegacion": navegacion,
         "modo_activo": modo_final,
+        # Transparencia: qué modelo respondió este turno y si lo eligió el
+        # modo Automático. La app lo muestra (sobre todo en auto) para que
+        # el usuario vea qué se usó y pueda ajustar el par.
+        "modelo_usado": modelo,
+        "auto": auto,
     }
 
 

@@ -284,3 +284,8 @@ class ChatResponse(BaseModel):
     # Modo de Matix activo DESPUÉS del turno (tono/conocimiento/prioridades).
     # `null` = modo normal. La app lo usa para el indicador del chat.
     modo_activo: str | None = None
+    # Transparencia del modelo: qué modelo (id del catálogo) respondió este
+    # turno, y si lo eligió el modo Automático. La app muestra una etiqueta
+    # pequeña — sobre todo cuando `auto` — para ver qué se usó.
+    modelo_usado: str | None = None
+    auto: bool = False

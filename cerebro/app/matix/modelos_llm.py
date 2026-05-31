@@ -50,6 +50,17 @@ MODELOS: list[ModeloLLM] = [
 
 _POR_ID = {m.id: m for m in MODELOS}
 
+# Selección especial "Automático": el cerebro elige el modelo por mensaje
+# (ver `enrutador.py`). Se guarda LITERAL en config_matix.modelo_chat.
+AUTO = "auto"
+
+# Defaults del par barato/fuerte que usa el modo Automático. Editables desde
+# la app (config_matix.modelo_barato/modelo_fuerte); estos son el fallback.
+#   barato = comandos/CRUD/preguntas rápidas y todo el texto de fondo.
+#   fuerte = escritura/razonamiento/análisis y los modos pesados.
+DEFAULT_BARATO = "gpt-4o-mini"
+DEFAULT_FUERTE = "claude-sonnet-4-6"
+
 
 def proveedor_de_id(modelo_id: str | None) -> str:
     """Infiere el proveedor del id del modelo. Si no se reconoce, cae al
@@ -93,23 +104,92 @@ async def _fila(db: Postgrest) -> dict | None:
     return filas[0] if filas else None
 
 
-async def modelo_seleccionado(db: Postgrest) -> str:
-    """El modelo de chat ACTIVO: lo que eligió la app (config_matix), o el
-    del env (`MATIX_LLM_MODEL`) como fallback, o gpt-4o-mini en último caso.
-    Si el guardado ya no está en el catálogo (se quitó), cae al fallback."""
-    fila = await _fila(db)
-    guardado = (fila or {}).get("modelo_chat")
-    if guardado and guardado in _POR_ID:
+def _fallback_concreto() -> str:
+    """El modelo concreto por defecto (nunca 'auto'): el del env o gpt-4o-mini."""
+    env = settings.matix_llm_model
+    return env if env and env in _POR_ID else DEFAULT_BARATO
+
+
+async def seleccion_guardada(db: Postgrest) -> str:
+    """Lo que el usuario tiene seleccionado: un id del catálogo o el literal
+    `"auto"` (modo Automático). Si el guardado ya no es válido, cae a un
+    modelo concreto de fallback. Esto es lo que la app muestra como
+    "seleccionado" y lo que `chat.py` consulta para saber si rutear."""
+    guardado = ((await _fila(db)) or {}).get("modelo_chat")
+    if guardado == AUTO or (guardado and guardado in _POR_ID):
         return guardado
-    return settings.matix_llm_model or "gpt-4o-mini"
+    return _fallback_concreto()
 
 
-async def set_modelo(db: Postgrest, modelo_id: str) -> None:
-    """Fija el modelo de chat en config_matix. Valida contra el catálogo."""
-    if modelo_id not in _POR_ID:
-        raise ValueError(f"Modelo desconocido: {modelo_id}")
+async def modelo_seleccionado(db: Postgrest) -> str:
+    """Un modelo CONCRETO (nunca 'auto') para tareas que no son la
+    conversación con ruteo — captura rápida, etc. Si la selección es
+    Automático, devuelve el modelo barato del par (clasificar/CRUD no
+    necesita el fuerte y así no disparamos el costo)."""
+    sel = await seleccion_guardada(db)
+    if sel == AUTO:
+        barato, _ = await par_barato_fuerte(db)
+        return barato
+    return sel
+
+
+async def par_barato_fuerte(db: Postgrest) -> tuple[str, str]:
+    """El par (barato, fuerte) que usa el modo Automático. Se lee de
+    config_matix; cada lado cae a su default si está vacío o ya no existe."""
+    fila = await _fila(db) or {}
+    barato = fila.get("modelo_barato")
+    fuerte = fila.get("modelo_fuerte")
+    return (
+        barato if barato in _POR_ID else DEFAULT_BARATO,
+        fuerte if fuerte in _POR_ID else DEFAULT_FUERTE,
+    )
+
+
+async def modelo_fondo(db: Postgrest) -> str:
+    """El modelo para TODO el texto de fondo (briefing, repaso, nudges…):
+    SIEMPRE el barato, nunca el auto ni el fuerte, para no disparar el
+    costo en lo que se genera sin que el usuario esté mirando."""
+    barato, _ = await par_barato_fuerte(db)
+    return barato
+
+
+def es_seleccion_valida(valor: str) -> bool:
+    return valor == AUTO or valor in _POR_ID
+
+
+async def set_seleccion(db: Postgrest, valor: str) -> None:
+    """Fija la selección en config_matix: un id del catálogo o `"auto"`."""
+    if not es_seleccion_valida(valor):
+        raise ValueError(f"Selección desconocida: {valor}")
     fila = await _fila(db)
     if fila is None:
-        await db.insert("config_matix", {"modelo_chat": modelo_id})
+        await db.insert("config_matix", {"modelo_chat": valor})
     else:
-        await db.update("config_matix", fila["id"], {"modelo_chat": modelo_id})
+        await db.update("config_matix", fila["id"], {"modelo_chat": valor})
+
+
+# Alias retro-compat (el router viejo llamaba `set_modelo`).
+set_modelo = set_seleccion
+
+
+async def set_par(
+    db: Postgrest, *, barato: str | None = None, fuerte: str | None = None
+) -> None:
+    """Cambia el par barato/fuerte del modo Automático. Valida cada id
+    contra el catálogo; ignora los `None` (cambio parcial)."""
+    payload: dict[str, str] = {}
+    if barato is not None:
+        if barato not in _POR_ID:
+            raise ValueError(f"Modelo barato desconocido: {barato}")
+        payload["modelo_barato"] = barato
+    if fuerte is not None:
+        if fuerte not in _POR_ID:
+            raise ValueError(f"Modelo fuerte desconocido: {fuerte}")
+        payload["modelo_fuerte"] = fuerte
+    if not payload:
+        return
+    fila = await _fila(db)
+    if fila is None:
+        await db.insert("config_matix", payload)
+    else:
+        await db.update("config_matix", fila["id"], payload)

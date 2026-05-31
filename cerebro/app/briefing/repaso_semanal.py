@@ -20,7 +20,7 @@ from datetime import timedelta
 from typing import Any
 
 from ..db import Postgrest
-from ..matix import llm
+from ..matix import llm, modelos_llm
 from .armar import _a_lima, _ahora_lima
 
 logger = logging.getLogger("matix.repaso")
@@ -125,7 +125,11 @@ async def armar_repaso(db: Postgrest) -> dict[str, Any]:
         "titulos_apuntes": titulos_apuntes,
     }
 
-    resumen, focos = await _sintetizar(datos, len(vencidas))
+    # El repaso es texto de FONDO (lo dispara el scheduler, el usuario no
+    # está escribiendo): siempre el modelo barato, nunca el auto ni el
+    # fuerte, para no disparar el costo.
+    modelo_fondo = await modelos_llm.modelo_fondo(db)
+    resumen, focos = await _sintetizar(datos, len(vencidas), modelo_fondo)
 
     return {
         "semana_desde": desde.isoformat(),
@@ -140,12 +144,13 @@ async def armar_repaso(db: Postgrest) -> dict[str, Any]:
 
 
 async def _sintetizar(
-    datos: dict[str, Any], n_vencidas: int
+    datos: dict[str, Any], n_vencidas: int, modelo: str
 ) -> tuple[str, list[str]]:
-    """Pide al LLM el resumen + focos. Si falla (sin API key, sin red,
-    JSON inválido), cae a un resumen determinístico honesto."""
+    """Pide al LLM el resumen + focos con el modelo de fondo (barato). Si
+    falla (sin API key, sin red, JSON inválido), cae a un resumen
+    determinístico honesto."""
     try:
-        out = await llm.repaso_semanal_json(datos)
+        out = await llm.repaso_semanal_json(datos, model=modelo)
         return out["resumen"], out["focos"]
     except Exception as e:  # noqa: BLE001
         logger.warning("repaso semanal: LLM no disponible (%s)", type(e).__name__)

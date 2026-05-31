@@ -56,11 +56,12 @@ async def test_modelo_seleccionado_y_continuidad_al_cambiar_proveedor(monkeypatc
     async def sel_oai(db):
         return "gpt-4o-mini"
 
-    monkeypatch.setattr(chat_mod.modelos_llm, "modelo_seleccionado", sel_oai)
+    monkeypatch.setattr(chat_mod.modelos_llm, "seleccion_guardada", sel_oai)
     r1 = await chat_mod.conversar(None, historial=historial, mensaje="¿qué tal?")
     assert r1["respuesta"] == "ok"
     # Pasó el modelo seleccionado a responder_con_tools.
     assert capturas[-1]["model"] == "gpt-4o-mini"
+    assert r1["modelo_usado"] == "gpt-4o-mini" and r1["auto"] is False
     # El historial se reconstruyó desde el texto neutro.
     contenidos = [m["content"] for m in capturas[-1]["messages"] if m.get("role") in ("user", "assistant")]
     assert "hola" in contenidos and "hey, dime" in contenidos
@@ -70,7 +71,7 @@ async def test_modelo_seleccionado_y_continuidad_al_cambiar_proveedor(monkeypatc
     async def sel_anth(db):
         return "claude-opus-4-8"
 
-    monkeypatch.setattr(chat_mod.modelos_llm, "modelo_seleccionado", sel_anth)
+    monkeypatch.setattr(chat_mod.modelos_llm, "seleccion_guardada", sel_anth)
     r2 = await chat_mod.conversar(None, historial=historial, mensaje="sigue")
     assert r2["respuesta"] == "ok"
     assert capturas[-1]["model"] == "claude-opus-4-8"
@@ -78,3 +79,42 @@ async def test_modelo_seleccionado_y_continuidad_al_cambiar_proveedor(monkeypatc
     contenidos2 = [m["content"] for m in capturas[-1]["messages"] if m.get("role") in ("user", "assistant")]
     assert "hola" in contenidos2
     assert not _bloques_tool_use(capturas[-1]["messages"])
+
+
+async def test_auto_rutea_por_mensaje(monkeypatch):
+    """En modo Automático, el modelo lo elige el enrutador SEGÚN el mensaje:
+    barato para un comando corto, fuerte para razonamiento. Y el turno
+    reporta `auto=True` con el modelo que realmente respondió."""
+    capturas: list[dict] = []
+
+    async def fake_resp(messages, tools, *, model=None, temperature=0.6, tool_choice="auto"):
+        capturas.append({"model": model})
+        return {"tipo": "texto", "contenido": "ok", "raw": {"role": "assistant", "content": "ok"}}
+
+    monkeypatch.setattr(chat_mod.llm, "responder_con_tools", fake_resp)
+    monkeypatch.setattr(chat_mod, "contexto_vivo", _sin_contexto)
+    monkeypatch.setattr(chat_mod.memoria, "bloque_memoria", _sin_memoria)
+    monkeypatch.setattr(chat_mod.modos, "modo_activo", _sin_modo)
+
+    async def sel_auto(db):
+        return chat_mod.modelos_llm.AUTO
+
+    async def par(db):
+        return ("gpt-4o-mini", "claude-sonnet-4-6")
+
+    monkeypatch.setattr(chat_mod.modelos_llm, "seleccion_guardada", sel_auto)
+    monkeypatch.setattr(chat_mod.modelos_llm, "par_barato_fuerte", par)
+
+    # Comando corto → barato.
+    r1 = await chat_mod.conversar(None, historial=[], mensaje="crea una tarea comprar pan")
+    assert r1["auto"] is True
+    assert r1["modelo_usado"] == "gpt-4o-mini"
+    assert capturas[-1]["model"] == "gpt-4o-mini"
+
+    # Razonamiento/escritura a fondo → fuerte.
+    r2 = await chat_mod.conversar(
+        None, historial=[], mensaje="analiza a fondo y compara estas dos teorías"
+    )
+    assert r2["auto"] is True
+    assert r2["modelo_usado"] == "claude-sonnet-4-6"
+    assert capturas[-1]["model"] == "claude-sonnet-4-6"
