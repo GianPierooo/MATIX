@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../theme/matix_colors.dart';
+import '../../../widgets/pantalla_scroll.dart';
 import '../data/modelos_repository.dart';
 import '../providers/modelos_providers.dart';
 
@@ -296,43 +297,39 @@ class _ConfigAuto extends ConsumerWidget {
   }) async {
     final id = await showModalBottomSheet<String>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: MatixColors.bg,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Text(
-                titulo,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: MatixColors.text,
-                ),
+      builder: (ctx) => HojaScroll(
+        padding: const EdgeInsets.fromLTRB(0, 8, 0, 16),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+            child: Text(
+              titulo,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: MatixColors.text,
               ),
             ),
-            for (final m in estado.modelos)
-              ListTile(
-                title: Text(m.etiqueta,
-                    style: const TextStyle(
-                        fontSize: 14, color: MatixColors.text)),
-                subtitle: Text('${m.proveedorEtiqueta} · ${m.id}',
-                    style: const TextStyle(
-                        fontSize: 11.5, color: MatixColors.muted)),
-                trailing: m.id == actual
-                    ? const Icon(Icons.check_circle,
-                        color: MatixColors.accent, size: 20)
-                    : null,
-                onTap: () => Navigator.of(ctx).pop(m.id),
-              ),
-            const SizedBox(height: 8),
-          ],
-        ),
+          ),
+          for (final m in estado.modelos)
+            ListTile(
+              title: Text(m.etiqueta,
+                  style: const TextStyle(fontSize: 14, color: MatixColors.text)),
+              subtitle: Text('${m.proveedorEtiqueta} · ${m.id}',
+                  style: const TextStyle(
+                      fontSize: 11.5, color: MatixColors.muted)),
+              trailing: m.id == actual
+                  ? const Icon(Icons.check_circle,
+                      color: MatixColors.accent, size: 20)
+                  : null,
+              onTap: () => Navigator.of(ctx).pop(m.id),
+            ),
+        ],
       ),
     );
     if (id != null && id != actual) onElegido(id);

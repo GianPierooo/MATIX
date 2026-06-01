@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../theme/matix_colors.dart';
+import '../../../../widgets/pantalla_scroll.dart';
 import '../../domain/tarea.dart';
 import '../../providers/tareas_providers.dart';
 
@@ -16,50 +17,33 @@ class FiltrosSheet extends ConsumerWidget {
     final cursos = ref.watch(cursosProvider);
     final proys = ref.watch(proyectosProvider);
 
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    return HojaScroll(
+      children: [
+        Row(
           children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(2),
-                ),
+            const Text(
+              'Filtros',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: MatixColors.text,
               ),
             ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                const Text(
-                  'Filtros',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: MatixColors.text,
-                  ),
-                ),
-                const Spacer(),
-                TextButton(
-                  onPressed: f.vacio
-                      ? null
-                      : () {
-                          notifier.limpiar();
-                          Navigator.of(context).pop();
-                        },
-                  child: const Text('Limpiar todo'),
-                ),
-              ],
+            const Spacer(),
+            TextButton(
+              onPressed: f.vacio
+                  ? null
+                  : () {
+                      notifier.limpiar();
+                      Navigator.of(context).pop();
+                    },
+              child: const Text('Limpiar todo'),
             ),
-            const SizedBox(height: 8),
+          ],
+        ),
+        const SizedBox(height: 8),
 
-            _Seccion(
+        _Seccion(
               titulo: 'Prioridad',
               child: _ChipsRow(
                 opciones: const [
@@ -117,14 +101,12 @@ class FiltrosSheet extends ConsumerWidget {
                   .set(f.copyWith(proyectoId: f.proyectoId == id ? null : id)),
             ),
 
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Aplicar'),
-            ),
-          ],
+        const SizedBox(height: 16),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Aplicar'),
         ),
-      ),
+      ],
     );
   }
 }
