@@ -344,9 +344,10 @@ class _AnilloState extends State<_Anillo>
   @override
   void initState() {
     super.initState();
+    // Período corto para que la onda se sienta viva con el habla.
     _c = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 2),
+      duration: const Duration(milliseconds: 1100),
     )..repeat();
   }
 
@@ -361,22 +362,50 @@ class _AnilloState extends State<_Anillo>
     return AnimatedBuilder(
       animation: _c,
       builder: (_, _) {
+        final escuchando =
+            widget.estado.fase == FaseManosLibres.escuchando;
+        // La onda pulsa con la REPRODUCCIÓN real (no con la fase): mientras
+        // Matix suena. Si está "hablando" pero todavía descargando el audio
+        // (`reproduciendo=false`), el anillo queda quieto — sin desfase.
+        final sonando = widget.estado.reproduciendo;
+
         final db = widget.estado.nivelDb;
         final norm = (((db + 60).clamp(0, 50)) / 50).toDouble();
-        final pulso = widget.estado.fase == FaseManosLibres.escuchando
-            ? 0.55 + 0.45 * norm
-            : widget.estado.fase == FaseManosLibres.hablando
-                ? 0.7 + 0.3 * sin(_c.value * 2 * pi)
-                : 0.8;
+        final t = _c.value * 2 * pi;
+        // Onda orgánica (dos armónicos) para el habla; amplitud del mic para
+        // la escucha; quieto en el resto.
+        final onda = (0.5 + 0.5 * (0.7 * sin(t) + 0.3 * sin(t * 2.6)))
+            .clamp(0.0, 1.0)
+            .toDouble();
+        final double intensidad = escuchando
+            ? norm
+            : sonando
+                ? onda
+                : 0.0;
+        final pulso = 0.6 + 0.4 * intensidad;
+        final activo = escuchando || sonando;
+
         return Stack(
           alignment: Alignment.center,
           children: [
+            // Halo que respira (la "luz"): solo cuando escucha o suena.
+            if (activo)
+              Container(
+                width: 70,
+                height: 70,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color:
+                      widget.color.withValues(alpha: 0.08 + 0.12 * intensidad),
+                ),
+              ),
+            // Círculo que pulsa con la onda.
             Container(
               width: 70 * pulso,
               height: 70 * pulso,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: widget.color.withValues(alpha: 0.15),
+                color: widget.color.withValues(alpha: 0.16),
               ),
             ),
             if (widget.estado.fase == FaseManosLibres.transcribiendo ||

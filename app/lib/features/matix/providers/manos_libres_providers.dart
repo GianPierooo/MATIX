@@ -44,6 +44,7 @@ class EstadoManosLibres {
     this.error,
     this.nivelDb = -60,
     this.notaPausa,
+    this.reproduciendo = false,
   });
 
   final FaseManosLibres fase;
@@ -58,11 +59,18 @@ class EstadoManosLibres {
   /// pausa".
   final String? notaPausa;
 
+  /// `true` SOLO mientras el TTS realmente está sonando (no mientras se
+  /// descarga). La UI pulsa la onda con esto, así el visual va junto al
+  /// audio; al detener/interrumpir se pone en `false` y la onda para con el
+  /// sonido.
+  final bool reproduciendo;
+
   EstadoManosLibres copyWith({
     FaseManosLibres? fase,
     Object? error = _kSentinel,
     double? nivelDb,
     Object? notaPausa = _kSentinel,
+    bool? reproduciendo,
   }) {
     return EstadoManosLibres(
       fase: fase ?? this.fase,
@@ -72,6 +80,7 @@ class EstadoManosLibres {
       notaPausa: identical(notaPausa, _kSentinel)
           ? this.notaPausa
           : notaPausa as String?,
+      reproduciendo: reproduciendo ?? this.reproduciendo,
     );
   }
 
@@ -80,7 +89,9 @@ class EstadoManosLibres {
 
 // ── Providers de servicios ──────────────────────────────────────────
 
-final _ttsServiceProvider = Provider<TtsService>((ref) {
+/// Servicio TTS del modo manos libres. Público para poder inyectar un fake en
+/// los tests (`overrideWithValue`).
+final ttsManosLibresProvider = Provider<TtsBase>((ref) {
   final svc = TtsService();
   ref.onDispose(svc.dispose);
   return svc;
@@ -109,8 +120,20 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
   /// por silencio, este completer se resuelve para reanudar el loop.
   Completer<void>? _esperaReanudar;
 
-  TtsService get _tts => ref.read(_ttsServiceProvider);
-  GrabacionVozService get _grab => ref.read(_grabServiceProvider);
+  // Cacheamos los servicios en el primer uso: así el `onDispose` solo limpia
+  // lo que de verdad se creó (evita instanciar el mic/TTS sin haberlos usado,
+  // que en tests rompería por los plugins nativos).
+  TtsBase? _ttsCache;
+  TtsBase get _tts {
+    _ttsCache ??= ref.read(ttsManosLibresProvider);
+    return _ttsCache!;
+  }
+
+  GrabacionVozService? _grabCache;
+  GrabacionVozService get _grab {
+    _grabCache ??= ref.read(_grabServiceProvider);
+    return _grabCache!;
+  }
   MatixTranscribirRepository get _transcribirRepo =>
       ref.read(_transcribirRepoProvider);
 
@@ -123,8 +146,8 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
       if (_esperaReanudar != null && !_esperaReanudar!.isCompleted) {
         _esperaReanudar!.complete();
       }
-      unawaited(_grab.cancelar());
-      unawaited(_tts.detener());
+      if (_grabCache != null) unawaited(_grabCache!.cancelar());
+      if (_ttsCache != null) unawaited(_ttsCache!.detener());
     });
     return const EstadoManosLibres();
   }
@@ -169,6 +192,8 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
       await _grab.cancelar();
       _entrarEnPausa('Pausa manual. Toca "Hablar" para seguir.');
     } else if (state.fase == FaseManosLibres.hablando) {
+      // Visual y audio paran JUNTOS: la onda se apaga ya y el TTS se corta.
+      state = state.copyWith(reproduciendo: false);
       await _tts.detener();
       // Cuando termina el TTS naturalmente o por detener, el loop
       // sigue. Pero como el usuario quiso pausar, marcamos:
@@ -185,10 +210,19 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
   }
 
   /// Mientras Matix está hablando, esto corta el TTS y la siguiente
-  /// vuelta del loop reabre el mic (sin pausa).
+  /// vuelta del loop reabre el mic (sin pausa). Visual y audio paran JUNTOS:
+  /// apagamos la onda (`reproduciendo=false`) en el mismo momento en que
+  /// cortamos el reproductor.
   Future<void> interrumpirHabla() async {
     if (state.fase != FaseManosLibres.hablando) return;
+    state = state.copyWith(reproduciendo: false);
     await _tts.detener();
+  }
+
+  /// Solo para tests: fija fase/reproduciendo sin correr el bucle.
+  @visibleForTesting
+  void debugFijarReproduccion(FaseManosLibres fase, {bool reproduciendo = false}) {
+    state = state.copyWith(fase: fase, reproduciendo: reproduciendo);
   }
 
   /// Mientras escucha, corta la escucha AHORA y transcribe lo dicho
@@ -346,9 +380,21 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
     final respuesta = ultima.contenido;
     if (respuesta.isEmpty) return;
 
-    // 4) HABLAR
-    state = state.copyWith(fase: FaseManosLibres.hablando);
-    await _tts.hablar(respuesta);
+    // 4) HABLAR. La fase sigue en "pensando" mientras se DESCARGA el audio;
+    // pasa a "hablando" (con la onda) recién cuando SUENA de verdad (onInicio),
+    // así el visual va junto al audio y no antes. Al terminar (o al cortar con
+    // detener), `reproduciendo` vuelve a false y la onda para con el sonido.
+    await _tts.hablar(
+      respuesta,
+      onInicio: () {
+        if (_saliendo) return;
+        state = state.copyWith(
+          fase: FaseManosLibres.hablando,
+          reproduciendo: true,
+        );
+      },
+    );
+    state = state.copyWith(reproduciendo: false);
     if (_saliendo) throw _AbortoUsuario();
 
     // Pequeña pausa antes del próximo mic.
