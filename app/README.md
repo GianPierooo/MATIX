@@ -16,6 +16,33 @@ For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
 
+## Compilar release con config PROD e instalar al device por USB (dev)
+
+Para iterar en un teléfono físico con la MISMA config que publica el CI (URL de
+Railway, entorno `prod`, API key) sin pasar por el OTA:
+
+```powershell
+# 1) Una sola vez: pon la API key de prod (la misma de cerebro/.env) en un
+#    archivo local NO versionado (.gitignore lo cubre):
+copy tools\.env.prod.local.example tools\.env.prod.local
+#    edita tools\.env.prod.local y pega:  MATIX_API_KEY=<la key>
+#    (alternativa sin archivo:  $env:MATIX_API_KEY = '<la key>')
+
+# 2) Compilar release arm64 con config prod + instalar al device conectado:
+powershell -File tools\instalar-prod.ps1
+```
+
+El script (`tools/instalar-prod.ps1`) reproduce los `--dart-define` del CI
+(`MATIX_API_URL`, `MATIX_API_KEY`, `MATIX_ENV=prod`, `MATIX_BUILD_NUMBER`),
+compila `--release --target-platform android-arm64`, desinstala la versión
+previa (el APK local va firmado con la debug keystore, distinta de la de release
+del CI) e instala por `adb`. La API key se lee de `$env:MATIX_API_KEY` o de
+`tools/.env.prod.local`; si falta, el script falla diciendo exactamente qué
+poner. La key NUNCA se escribe en el repo ni se imprime.
+
+Esto es SOLO para desarrollo local; no toca el workflow del CI ni el build de
+prod publicado por OTA.
+
 ## Build — notas de dependencias nativas
 
 ### Wake word on-device ("oye Matix")
