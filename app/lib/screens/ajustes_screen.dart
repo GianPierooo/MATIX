@@ -969,7 +969,12 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
       subtitulo = 'En pausa mientras usas el modo de voz. Vuelve sola al '
           'terminar.';
     } else {
-      subtitulo = 'Escuchando "hey jarvis". Solo con la app abierta.';
+      // Mostramos el score en vivo: así se ve si "hey jarvis" cruza el umbral
+      // (diagnóstico sin depender de logcat, que el Honor filtra).
+      final maxS = estado.maxScore.toStringAsFixed(2);
+      final ultS = estado.ultimoScore.toStringAsFixed(2);
+      subtitulo = 'Escuchando "hey jarvis" · score máx $maxS (ahora $ultS). '
+          'Solo con la app abierta.';
       subColor = MatixColors.green;
     }
 

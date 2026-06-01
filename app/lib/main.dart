@@ -22,6 +22,7 @@ import 'features/matix/data/captura_apunte_repository.dart';
 import 'features/matix/presentation/manos_libres_screen.dart';
 import 'features/matix/providers/captura_apunte_providers.dart';
 import 'features/push/application/push_service.dart';
+import 'features/wakeword/data/wakeword_log.dart';
 import 'features/wakeword/providers/wakeword_providers.dart';
 import 'features/tareas/presentation/nueva_tarea_screen.dart';
 import 'screens/home_shell.dart';
@@ -162,7 +163,11 @@ class _MatixAppState extends ConsumerState<MatixApp>
   /// y lo retoma al cerrarse.
   void _abrirManosLibresPorWakeWord() {
     final nav = _navigatorKey.currentState;
-    if (nav == null) return;
+    wlog('navegando a ManosLibresScreen (navigator disponible=${nav != null})');
+    if (nav == null) {
+      wlog('navigatorKey.currentState es null — no pude navegar');
+      return;
+    }
     nav.push(
       MaterialPageRoute(builder: (_) => const ManosLibresScreen()),
     );

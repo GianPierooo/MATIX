@@ -14,6 +14,7 @@ class _FakeEscucha implements WakeWordEscucha {
   int detenerCount = 0;
   bool _activo = false;
   void Function()? _onDeteccion;
+  void Function(double)? _onScore;
 
   @override
   bool get activo => _activo;
@@ -22,10 +23,12 @@ class _FakeEscucha implements WakeWordEscucha {
   Future<void> iniciar({
     required double umbral,
     required void Function() onDeteccion,
+    void Function(double score)? onScore,
   }) async {
     iniciarCount++;
     _activo = true;
     _onDeteccion = onDeteccion;
+    _onScore = onScore;
   }
 
   @override
@@ -38,6 +41,7 @@ class _FakeEscucha implements WakeWordEscucha {
   Future<void> liberar() async {}
 
   void simularDeteccion() => _onDeteccion?.call();
+  void simularScore(double s) => _onScore?.call(s);
 }
 
 /// Fake que SIEMPRE falla al iniciar (simula carga ONNX rota en el device).
@@ -49,6 +53,7 @@ class _EscuchaQueFalla implements WakeWordEscucha {
   Future<void> iniciar({
     required double umbral,
     required void Function() onDeteccion,
+    void Function(double score)? onScore,
   }) async {
     throw Exception('ONNX no cargó (simulado)');
   }
@@ -122,6 +127,23 @@ void main() {
 
     expect(fake.detenerCount, greaterThanOrEqualTo(1));
     expect(c.read(wakeWordControllerProvider).fase, FaseWakeWord.desactivado);
+  });
+
+  test('el score se refleja en el estado (maxScore) para verlo en Ajustes',
+      () async {
+    SharedPreferences.setMockInitialValues({'wakeword_activo': true});
+    final fake = _FakeEscucha();
+    final c = hacerContainer(fake);
+    final ctrl = c.read(wakeWordControllerProvider.notifier);
+    await ctrl.alFrente(); // escuchando
+
+    fake.simularScore(0.12);
+    fake.simularScore(0.73); // nuevo máximo
+    fake.simularScore(0.40);
+
+    // maxScore retiene el pico (lo que importa para ver si cruza el umbral).
+    final s = c.read(wakeWordControllerProvider);
+    expect(s.maxScore, 0.73);
   });
 
   test('al detectar: suelta el micro y avisa para abrir manos libres',

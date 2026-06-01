@@ -25,6 +25,7 @@ abstract class WakeWordEscucha {
   Future<void> iniciar({
     required double umbral,
     required void Function() onDeteccion,
+    void Function(double score)? onScore,
   });
   Future<void> detener();
   Future<void> liberar();
@@ -75,15 +76,19 @@ class WakeWordService implements WakeWordEscucha {
   /// Cada paso va logueado y envuelto: si algo CATCHABLE falla, deja todo
   /// limpio (mic parado, `_activo=false`) y relanza para que el controller
   /// muestre el estado de error — nunca a medias.
+  void Function(double score)? _onScore;
+
   @override
   Future<void> iniciar({
     required double umbral,
     required void Function() onDeteccion,
+    void Function(double score)? onScore,
   }) async {
     if (_activo) {
       wlog('iniciar(): ya estaba activo, ignoro');
       return;
     }
+    _onScore = onScore;
     var arranqueMic = false;
     // Preparamos el archivo de migajas ANTES de cualquier paso nativo, para que
     // las marcas síncronas funcionen aunque lo que siga muera de golpe.
@@ -170,8 +175,11 @@ class WakeWordService implements WakeWordEscucha {
         _primeraInferencia = false;
         _crumbs.marca('inferencia-ok');
       }
+      // Reporta el score de cada inferencia (la UI lo muestra y lo loguea
+      // throttle-ado en el controller) para ver si "hey jarvis" cruza el umbral.
+      _onScore?.call(p.ultimoScore);
       if (detecto && _activo) {
-        wlog('¡palabra detectada! disparando manos libres');
+        wlog('DETECTADO score=${p.ultimoScore.toStringAsFixed(3)} → disparando manos libres');
         onDeteccion();
       }
     } catch (e) {

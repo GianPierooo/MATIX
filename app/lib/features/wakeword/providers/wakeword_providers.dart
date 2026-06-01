@@ -29,14 +29,32 @@ enum FaseWakeWord {
 
 @immutable
 class WakeWordEstado {
-  const WakeWordEstado({this.fase = FaseWakeWord.desactivado, this.error});
+  const WakeWordEstado({
+    this.fase = FaseWakeWord.desactivado,
+    this.error,
+    this.ultimoScore = 0,
+    this.maxScore = 0,
+  });
   final FaseWakeWord fase;
   final String? error;
 
-  WakeWordEstado copyWith({FaseWakeWord? fase, Object? error = _sentinel}) {
+  /// Último score de detección (0..1) y máximo de esta sesión de escucha.
+  /// Se muestran en Ajustes para diagnosticar si "hey jarvis" cruza el umbral
+  /// sin depender de logcat (que el Honor filtra).
+  final double ultimoScore;
+  final double maxScore;
+
+  WakeWordEstado copyWith({
+    FaseWakeWord? fase,
+    Object? error = _sentinel,
+    double? ultimoScore,
+    double? maxScore,
+  }) {
     return WakeWordEstado(
       fase: fase ?? this.fase,
       error: identical(error, _sentinel) ? this.error : error as String?,
+      ultimoScore: ultimoScore ?? this.ultimoScore,
+      maxScore: maxScore ?? this.maxScore,
     );
   }
 
@@ -166,7 +184,12 @@ class WakeWordController extends Notifier<WakeWordEstado> {
       return;
     }
     try {
-      await _svc.iniciar(umbral: await _prefs.umbral(), onDeteccion: _onDeteccion);
+      _scoreTicks = 0;
+      await _svc.iniciar(
+        umbral: await _prefs.umbral(),
+        onDeteccion: _onDeteccion,
+        onScore: _onScore,
+      );
       state = const WakeWordEstado(fase: FaseWakeWord.escuchando);
     } on PermisoWakeWordDenegado {
       wlog('_arrancar(): permiso de micrófono denegado');
@@ -179,11 +202,33 @@ class WakeWordController extends Notifier<WakeWordEstado> {
     }
   }
 
+  int _scoreTicks = 0;
+
+  /// Llamado en cada inferencia con el score (0..1). Actualiza el máximo y,
+  /// throttle-ado, el último score visible en Ajustes. Loguea cada ~25 ticks
+  /// (~2 s) para no inundar.
+  void _onScore(double s) {
+    if (state.fase != FaseWakeWord.escuchando) return;
+    _scoreTicks++;
+    final nuevoMax = s > state.maxScore ? s : state.maxScore;
+    // Refresca la UI ~2 veces/s, o siempre que haya un nuevo máximo.
+    if (s > state.maxScore || _scoreTicks % 6 == 0) {
+      state = state.copyWith(ultimoScore: s, maxScore: nuevoMax);
+    }
+    if (_scoreTicks % 25 == 0) {
+      wlog('score=${s.toStringAsFixed(3)} max=${nuevoMax.toStringAsFixed(3)}');
+    }
+  }
+
   void _onDeteccion() {
     // Suelta el micro YA (antes de navegar) y avisa para abrir manos libres.
+    wlog('WAKEWORD DETECTADO (score≈${state.ultimoScore.toStringAsFixed(3)}) → navegando a manos libres');
     _pausadoPorVoz = true;
     unawaited(_svc.detener());
     state = state.copyWith(fase: FaseWakeWord.pausadoPorVoz);
+    if (_alDetectar == null) {
+      wlog('WAKEWORD: ¡no hay callback de navegación registrado! (bug)');
+    }
     _alDetectar?.call();
   }
 }
