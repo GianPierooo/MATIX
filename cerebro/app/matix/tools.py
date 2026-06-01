@@ -47,6 +47,7 @@ providers del Flutter):
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
@@ -61,7 +62,7 @@ from ..schemas.eventos import EventoCreate, EventoUpdate
 from ..schemas.movimientos import MovimientoCreate, MovimientoUpdate
 from ..schemas.proyectos import ProyectoCreate, ProyectoUpdate
 from ..schemas.tareas import TareaCreate, TareaUpdate
-from . import memoria, modos
+from . import finanzas, memoria, modos
 from .biblioteca import buscar_material as _buscar_material_rag
 from .indexador import buscar_apuntes as _buscar_apuntes_rag
 from .indexador import indexar_apunte
@@ -1033,14 +1034,102 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "eliminar_movimiento",
             "description": (
-                "Borra un movimiento de finanzas. OJO: es PERMANENTE (no hay "
-                "papelera para finanzas). Confirma con el usuario antes de "
-                "llamarla si hay cualquier duda."
+                "Borra UN movimiento concreto por su `movimiento_id`. OJO: es "
+                "PERMANENTE (no hay papelera para finanzas). Úsala solo para un "
+                "registro específico; para deshacer lo último que registraste, "
+                "usa `revertir_ultimo_lote`."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {"movimiento_id": _UUID},
                 "required": ["movimiento_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "registrar_movimientos",
+            "description": (
+                "Registra VARIOS movimientos de una imagen (Yape/banco/recibo) "
+                "en un solo lote. Flujo de DOS pasos para no meter datos malos:\n"
+                "1) Primero llámala con `confirmado=false` (o sin él): NO "
+                "escribe nada, te devuelve la lista CLASIFICADA (preview) para "
+                "que se la muestres al usuario y le pidas confirmar.\n"
+                "2) Solo cuando el usuario confirme, llámala con "
+                "`confirmado=true` para registrarlos.\n"
+                "Cada item: `tipo` (gasto/ingreso), `monto` positivo, y la "
+                "`senal` que VISTE en la imagen (el signo o la palabra: «-30», "
+                "«+50», «Pagaste», «Te yapearon», «rojo»…) — la uso para "
+                "verificar la clasificación. Respeta el filtro del usuario con "
+                "`filtro`: si pidió «solo los gastos», pasa `filtro='solo_gastos'` "
+                "y descarto los ingresos. Para UN movimiento simple usa "
+                "`crear_movimiento`, no esto."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "movimientos": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "tipo": {
+                                    "type": "string",
+                                    "enum": ["ingreso", "gasto"],
+                                },
+                                "monto": {"type": "number"},
+                                "categoria": {"type": "string"},
+                                "fecha": {"type": "string"},
+                                "nota": {"type": "string"},
+                                "senal": {
+                                    "type": "string",
+                                    "description": (
+                                        "Lo que viste que indica el tipo: signo "
+                                        "(-/+), color o palabra (Pagaste, "
+                                        "Recibiste, Abono…)."
+                                    ),
+                                },
+                            },
+                            "required": ["tipo", "monto"],
+                        },
+                    },
+                    "filtro": {
+                        "type": "string",
+                        "enum": ["todos", "solo_gastos", "solo_ingresos"],
+                        "description": "Default 'todos'. Respeta lo que pidió el usuario.",
+                    },
+                    "confirmado": {
+                        "type": "boolean",
+                        "description": "false = preview (no escribe); true = registra.",
+                    },
+                },
+                "required": ["movimientos"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "revertir_ultimo_lote",
+            "description": (
+                "Deshace el ÚLTIMO lote de movimientos que registraste (uno "
+                "suelto o un grupo de una imagen). Borra SOLO esos; nunca toca "
+                "movimientos buenos no relacionados ni los que el usuario creó a "
+                "mano. Úsala cuando diga «revierte», «corrige eso», «bórralos». "
+                "Dos pasos: primero con `confirmado=false` para mostrar qué "
+                "borrarías; solo con `confirmado=true` cuando el usuario acepte."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "confirmado": {
+                        "type": "boolean",
+                        "description": "false = preview (no borra); true = borra el lote.",
+                    },
+                },
                 "additionalProperties": False,
             },
         },
@@ -2471,11 +2560,21 @@ async def _consultar_apuntes(db: Postgrest, args: dict) -> dict[str, Any]:
 
 
 async def _crear_movimiento(db: Postgrest, args: dict) -> dict[str, Any]:
+    # `senal` (lo que se vio en la imagen) NO es columna: se usa solo para
+    # verificar el tipo, luego se descarta.
+    senal = args.pop("senal", None) if isinstance(args, dict) else None
     try:
         body = MovimientoCreate(**args)
     except ValidationError as e:
         return _err_validacion(e)
     payload = body.model_dump(mode="json", exclude_none=True)
+    # Reconcilia el tipo con la señal observada (el signo/keyword manda).
+    inferido = finanzas.inferir_tipo(senal)
+    if inferido and inferido != payload["tipo"]:
+        payload["tipo"] = inferido
+    # Un movimiento suelto también lleva su lote_id propio, para que
+    # `revertir_ultimo_lote` pueda deshacerlo si fue lo último que hice.
+    payload["lote_id"] = str(uuid.uuid4())
     fila = await db.insert("movimientos", payload)
     return _ok(
         {
@@ -2567,6 +2666,187 @@ async def _eliminar_movimiento(db: Postgrest, args: dict) -> dict[str, Any]:
             "tipo": actual.get("tipo"),
             "monto": actual.get("monto"),
             # Finanzas no tiene papelera: el borrado es permanente.
+            "reversible": False,
+        }
+    )
+
+
+# Tope del lote: leer una captura no debería meter cientos de filas de golpe.
+_MAX_LOTE_MOVIMIENTOS = 50
+
+
+async def _registrar_movimientos(db: Postgrest, args: dict) -> dict[str, Any]:
+    """Registra un LOTE de movimientos (de una imagen) en dos pasos seguros:
+    preview (no escribe) → confirmado (escribe con un `lote_id` compartido).
+    Reconcilia el tipo con la `senal` vista y respeta el `filtro` del usuario
+    («solo los gastos» descarta los ingresos)."""
+    items = args.get("movimientos")
+    if not isinstance(items, list) or not items:
+        return _error(
+            "validacion", "Pásame `movimientos`: una lista con al menos uno."
+        )
+    if len(items) > _MAX_LOTE_MOVIMIENTOS:
+        return _error(
+            "validacion",
+            f"Son {len(items)} movimientos de una — demasiados. Pártelo "
+            f"(máx {_MAX_LOTE_MOVIMIENTOS} por lote).",
+        )
+    filtro = args.get("filtro") or "todos"
+    if filtro not in ("todos", "solo_gastos", "solo_ingresos"):
+        filtro = "todos"
+    confirmado = bool(args.get("confirmado"))
+
+    # 1) Validar + clasificar TODOS primero (sin escribir nada).
+    validados: list[dict[str, Any]] = []
+    descartados_por_filtro = 0
+    correcciones_por_senal = 0
+    for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            return _error(
+                "validacion", f"El movimiento #{i + 1} no es un objeto válido."
+            )
+        it = dict(item)
+        senal = it.pop("senal", None)
+        try:
+            body = MovimientoCreate(**it)
+        except ValidationError as e:
+            val = _err_validacion(e)
+            val["mensaje"] = f"Movimiento #{i + 1}: {val['mensaje']}"
+            return val
+        payload = body.model_dump(mode="json", exclude_none=True)
+        # La señal observada (signo/keyword) manda sobre el `tipo` propuesto:
+        # así un ingreso no termina anotado como gasto.
+        inferido = finanzas.inferir_tipo(senal)
+        if inferido and inferido != payload["tipo"]:
+            payload["tipo"] = inferido
+            correcciones_por_senal += 1
+        # Filtro del usuario: «solo gastos» / «solo ingresos» descarta el resto.
+        if filtro == "solo_gastos" and payload["tipo"] != "gasto":
+            descartados_por_filtro += 1
+            continue
+        if filtro == "solo_ingresos" and payload["tipo"] != "ingreso":
+            descartados_por_filtro += 1
+            continue
+        validados.append(payload)
+
+    if not validados:
+        return _error(
+            "validacion",
+            "Con ese filtro no queda ningún movimiento para registrar.",
+        )
+
+    total_gastos = round(
+        sum(m["monto"] for m in validados if m["tipo"] == "gasto"), 2
+    )
+    total_ingresos = round(
+        sum(m["monto"] for m in validados if m["tipo"] == "ingreso"), 2
+    )
+    resumen = [
+        {
+            "tipo": m["tipo"],
+            "monto": m["monto"],
+            "categoria": m.get("categoria"),
+            "fecha": m.get("fecha"),
+        }
+        for m in validados
+    ]
+
+    # 2) PREVIEW: sin confirmar, no escribe. Matix muestra la lista y pregunta.
+    if not confirmado:
+        return _ok(
+            {
+                "preview": True,
+                "n": len(validados),
+                "movimientos": resumen,
+                "total_gastos": total_gastos,
+                "total_ingresos": total_ingresos,
+                "descartados_por_filtro": descartados_por_filtro,
+                "correcciones_por_senal": correcciones_por_senal,
+                "nota": (
+                    "NO registré nada todavía. Muéstrale esta lista al usuario y "
+                    "pídele que confirme; recién ahí llámame con confirmado=true."
+                ),
+            }
+        )
+
+    # 3) CONFIRMADO: inserta el lote completo con un lote_id compartido.
+    lote_id = str(uuid.uuid4())
+    creados: list[dict[str, Any]] = []
+    for payload in validados:
+        payload["lote_id"] = lote_id
+        fila = await db.insert("movimientos", payload)
+        creados.append(
+            {
+                "id": fila["id"],
+                "tipo": fila["tipo"],
+                "monto": fila["monto"],
+                "categoria": fila.get("categoria"),
+            }
+        )
+    return _ok(
+        {
+            "registrado": True,
+            "lote_id": lote_id,
+            "total": len(creados),
+            "total_gastos": total_gastos,
+            "total_ingresos": total_ingresos,
+            "descartados_por_filtro": descartados_por_filtro,
+            "movimientos": creados,
+        }
+    )
+
+
+async def _revertir_ultimo_lote(db: Postgrest, args: dict) -> dict[str, Any]:
+    """Deshace SOLO el último lote que registró Matix (por lote_id). Nunca
+    toca movimientos sin lote (creados a mano) ni lotes anteriores. Dos pasos:
+    preview → confirmado."""
+    confirmado = bool(args.get("confirmado"))
+    # El último lote = el lote_id del movimiento con lote_id más reciente.
+    recientes = await db.list(
+        "movimientos",
+        raw_filters={"lote_id": "not.is.null"},
+        order="creado_en.desc",
+        limit=1,
+    )
+    if not recientes:
+        return _error(
+            "no_existe",
+            "No hay ningún movimiento registrado por mí que pueda revertir.",
+        )
+    lote_id = recientes[0]["lote_id"]
+    del_lote = await db.list("movimientos", filters={"lote_id": lote_id})
+    resumen = [
+        {
+            "id": m["id"],
+            "tipo": m.get("tipo"),
+            "monto": m.get("monto"),
+            "categoria": m.get("categoria"),
+            "fecha": m.get("fecha"),
+        }
+        for m in del_lote
+    ]
+
+    if not confirmado:
+        return _ok(
+            {
+                "preview": True,
+                "lote_id": lote_id,
+                "n": len(del_lote),
+                "movimientos": resumen,
+                "nota": (
+                    "Esto borraría SOLO estos (el último lote). No toco nada más. "
+                    "Pide confirmación; recién ahí llámame con confirmado=true."
+                ),
+            }
+        )
+
+    borrados = await db.delete_where("movimientos", filters={"lote_id": lote_id})
+    return _ok(
+        {
+            "revertido": True,
+            "lote_id": lote_id,
+            "borrados": borrados,
+            "movimientos": resumen,
             "reversible": False,
         }
     )
@@ -2732,6 +3012,8 @@ _HANDLERS = {
     "registrar_cierre": _registrar_cierre,
     # Finanzas (movimientos)
     "crear_movimiento": _crear_movimiento,
+    "registrar_movimientos": _registrar_movimientos,
+    "revertir_ultimo_lote": _revertir_ultimo_lote,
     "editar_movimiento": _editar_movimiento,
     "eliminar_movimiento": _eliminar_movimiento,
     # Navegación (no toca datos)
@@ -2781,6 +3063,8 @@ TABLAS_AFECTADAS = {
     "registrar_cierre": ["cierres_dia"],
     # Finanzas
     "crear_movimiento": ["movimientos"],
+    "registrar_movimientos": ["movimientos"],
+    "revertir_ultimo_lote": ["movimientos"],
     "editar_movimiento": ["movimientos"],
     "eliminar_movimiento": ["movimientos"],
     # Navegación (no cambia datos)

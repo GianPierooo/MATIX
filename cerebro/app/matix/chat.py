@@ -168,11 +168,12 @@ async def conversar(
     auto = seleccion == modelos_llm.AUTO
     if auto:
         barato, fuerte = await modelos_llm.par_barato_fuerte(db)
-        # Con un documento adjunto vamos al modelo FUERTE: el enrutador solo ve
-        # el mensaje (corto: «resúmelo»), pero leer/analizar un documento
-        # merece el modelo a fondo. La imagen ya va por el modelo que toque
-        # (todos los del catálogo ven imágenes).
-        if doc_texto:
+        # Con un documento O una imagen adjunta vamos al modelo FUERTE: el
+        # enrutador solo ve el mensaje (corto: «resúmelo» / «anota los gastos»),
+        # pero leer/analizar un documento o una captura (Yape/banco) merece el
+        # modelo a fondo — mejor lectura, menos errores de clasificación. Sube
+        # algo el costo en mensajes con adjunto, pero la precisión lo vale.
+        if doc_texto or imagen:
             modelo = fuerte
         else:
             decision = enrutador.elegir(

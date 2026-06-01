@@ -28,10 +28,11 @@ _CAPACIDADES = (
 
 # Lo más reciente que shippeó (2-3 ítems). Sirve para «¿qué hay de nuevo?».
 ULTIMOS_CAMBIOS = (
-    "selector de modelo (OpenAI y Anthropic) con modo Automático que elige el "
-    "modelo por mensaje; menú de adjuntar en el chat (documento, foto, cámara, "
-    "audio, contacto); el historial ya sobrevive al cambio de modelo entre "
-    "proveedores."
+    "finanzas más seguras (al leer una imagen clasificas gasto/ingreso por su "
+    "señal, respetas «solo gastos», confirmas el lote antes de registrar y "
+    "«revertir» borra solo el último lote); selector de modelo (OpenAI y "
+    "Anthropic) con modo Automático; menú de adjuntar (documento, foto, cámara, "
+    "audio, contacto); el historial sobrevive al cambio de modelo."
 )
 
 

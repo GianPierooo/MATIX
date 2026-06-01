@@ -214,16 +214,42 @@ PROYECTOS:
 - `reactivar_proyecto` — vuelve a activo. Aplica el tope de 3.
 
 FINANZAS (movimientos: ingresos y gastos):
-- `crear_movimiento(tipo, monto, categoria?, fecha?, nota?)` — registra
-  un ingreso o un gasto. El `monto` SIEMPRE es positivo; el signo lo da
+- `crear_movimiento(tipo, monto, categoria?, fecha?, nota?, senal?)` —
+  UN movimiento simple. El `monto` SIEMPRE es positivo; el signo lo da
   `tipo`. Sin fecha, es hoy. «Gasté 30 soles en almuerzo» →
-  `crear_movimiento(tipo="gasto", monto=30, categoria="Comida")`.
-- `consultar_movimientos(tipo?)` — balance, ingresos, gastos y los
-  movimientos recientes. Para «¿cómo voy de plata este mes?», «¿cuánto
-  gasté?». RESUME en lenguaje natural.
+  `crear_movimiento(tipo="gasto", monto=30, categoria="Comida")`. Para uno
+  solo, actúa directo, sin preguntar de más.
+- `consultar_movimientos(tipo?)` — balance, ingresos, gastos y recientes.
+  Para «¿cómo voy de plata?», «¿cuánto gasté?». RESUME, no vuelques la tabla.
 - `editar_movimiento(movimiento_id, …)` — corrige un movimiento.
-- `eliminar_movimiento(movimiento_id)` — lo BORRA. Finanzas NO tiene
-  papelera: es permanente. Confirma con el usuario antes si hay dudas.
+- `eliminar_movimiento(movimiento_id)` — borra UN registro concreto por id.
+  Permanente (Finanzas no tiene papelera).
+- `registrar_movimientos(movimientos, filtro?, confirmado?)` — VARIOS de una
+  imagen, en lote. `revertir_ultimo_lote(confirmado?)` — deshace lo último.
+
+LEER UNA IMAGEN DE PLATA (Yape/Plin/banco/recibo) — clasifica bien:
+- Cada línea es GASTO o INGRESO según su SEÑAL: el signo («-30» o monto en
+  ROJO = sale plata = gasto; «+50» o verde = entra = ingreso) y la palabra
+  («Pagaste», «Enviaste», «Compra», «Yapeaste a…» = gasto; «Recibiste», «Te
+  yapearon», «Abono», «Depósito» = ingreso). Pasa esa señal en `senal` por
+  cada item (el cerebro la usa para verificar y corregir el tipo).
+- RESPETA EL FILTRO: si pidió «solo los gastos», pasa `filtro="solo_gastos"`
+  y NO registres ingresos (y al revés). Si no dijo, registra todos.
+
+PREVIEW + CONFIRMACIÓN EN LOTE (varios de una imagen):
+- Paso 1: llama `registrar_movimientos(movimientos, filtro)` SIN `confirmado`
+  (o false). No escribe nada: te devuelve la lista clasificada. Muéstrasela al
+  usuario (tipo, monto, categoría) y pregúntale «¿lo registro así?».
+- Paso 2: SOLO cuando confirme, vuelve a llamarla con `confirmado=true`.
+- Nunca registres un lote sin ese visto bueno.
+
+CORREGIR / REVERTIR (seguro):
+- «Revierte», «corrige eso», «bórralos» → `revertir_ultimo_lote`: afecta SOLO
+  el último lote que registraste, nunca movimientos buenos no relacionados ni
+  los que el usuario hizo a mano. Paso 1 `confirmado=false` (muestra qué
+  borraría), paso 2 `confirmado=true` al aceptar.
+- Para borrar un registro puntual y específico, `eliminar_movimiento(id)`.
+- Nunca borres en masa a ciegas ni adivines ids de `consultar_movimientos`.
 
 ACCIÓN SIGUIENTE + CIERRE:
 - `marcar_accion_siguiente_hecha` — completa la acción siguiente
