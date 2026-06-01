@@ -11,8 +11,34 @@ from app.matix import modos
 
 def test_listar_modos_file_driven() -> None:
     nombres = {m["nombre"] for m in modos.listar_modos()}
-    # Los 3 iniciales existen como .md en el repo.
-    assert {"tesis", "estudio", "motivacion"} <= nombres
+    # Los modos existen como .md en el repo (incluido finanzas, el nuevo).
+    assert {"tesis", "estudio", "motivacion", "finanzas"} <= nombres
+
+
+def test_finanzas_se_carga_y_lista() -> None:
+    # El modo finanzas (file-driven) existe, carga y trae su metadata.
+    assert modos.existe_modo("finanzas") is True
+    meta = modos.meta_modo("finanzas")
+    assert meta is not None
+    assert meta["etiqueta"] == "Finanzas"
+    assert meta["descripcion"]  # la línea `> ...`
+    contenido = modos.cargar_modo("finanzas")
+    assert contenido is not None
+    bajo = contenido.lower()
+    # Conocimiento financiero + las reglas seguras que ya existen.
+    assert "presupuesto" in bajo
+    assert "registrar_movimientos" in bajo
+    assert "revertir_ultimo_lote" in bajo
+
+
+def test_envoltura_es_inmersiva_y_redirige() -> None:
+    contenido = modos.cargar_modo("finanzas")
+    assert contenido is not None
+    env = modos.envoltura_modo("finanzas", contenido)
+    bajo = env.lower()
+    # Centrarse a full + redirigir al propósito del modo.
+    assert "inmersi" in bajo
+    assert "seguimos con finanzas" in bajo
 
 
 def test_meta_se_lee_del_md() -> None:

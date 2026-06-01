@@ -22,8 +22,8 @@ _CAPACIDADES = (
     "organiza tareas, proyectos, universidad (cursos, entregas, exámenes, "
     "apuntes), calendario y eventos, finanzas y apuntes; memoria personal "
     "duradera; lee imágenes y documentos (PDF/DOCX/TXT), transcribe audio y "
-    "hace OCR por cámara; modos (tesis, estudio, motivación); recordatorios y "
-    "avisos por push."
+    "hace OCR por cámara; modos (tesis, estudio, motivación, finanzas); "
+    "recordatorios y avisos por push."
 )
 
 # Lo más reciente que shippeó (2-3 ítems). Sirve para «¿qué hay de nuevo?».
