@@ -106,12 +106,16 @@ class MatixChatRepository {
     List<String> imagenes = const [],
     String? documentoNombre,
     String? documentoTexto,
+    String? idempotencyKey,
   }) async {
     final body = <String, dynamic>{
       'historial': historial
           .map((m) => m.toJsonParaCerebro())
           .toList(growable: false),
       'mensaje': mensaje,
+      // Clave de idempotencia: si reintentamos tras una caída con la MISMA
+      // clave, el cerebro devuelve el resultado guardado sin duplicar nada.
+      if (idempotencyKey != null) 'idempotency_key': idempotencyKey,
       // Las imágenes (data URL) solo viajan en este turno; el cerebro las
       // pasa al modelo de visión y no las guarda en el historial. Se pueden
       // mandar varias por mensaje.

@@ -45,6 +45,10 @@ class ChatRequest(BaseModel):
     imagen: str | None = None
     imagenes: list[str] | None = None
     documento: DocumentoChat | None = None
+    # Clave de idempotencia del turno (la genera la app y la REUSA si
+    # reintenta tras una caída). Con la misma clave, el cerebro no re-ejecuta:
+    # devuelve el resultado guardado (no duplica escrituras). Opcional.
+    idempotency_key: str | None = None
 
 
 class DocumentoExtraidoResponse(BaseModel):

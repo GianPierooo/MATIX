@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -42,12 +45,18 @@ class EstadoChatMatix {
     this.opcionesUltimoTurno,
     this.modeloUltimoTurno,
     this.autoUltimoTurno = false,
+    this.reconectando = false,
   });
 
   final List<Mensaje> mensajes;
   final bool enviando;
   final String? errorUltimoEnvio;
   final List<String> accionesUltimoTurno;
+
+  /// `true` cuando un envío se cayó por una caída transitoria (saliste de la
+  /// app un momento) y estamos reintentando solos con la misma clave. NO es un
+  /// error rojo: la UI muestra un "Reconectando…" suave.
+  final bool reconectando;
 
   /// Bloque interactivo de opciones del último turno del asistente (o `null`).
   /// La UI lo pinta bajo la burbuja; tocar una opción la manda como respuesta.
@@ -68,6 +77,7 @@ class EstadoChatMatix {
     Object? opcionesUltimoTurno = _kSentinel,
     Object? modeloUltimoTurno = _kSentinel,
     bool? autoUltimoTurno,
+    bool? reconectando,
   }) {
     return EstadoChatMatix(
       mensajes: mensajes ?? this.mensajes,
@@ -83,6 +93,7 @@ class EstadoChatMatix {
           ? this.modeloUltimoTurno
           : modeloUltimoTurno as String?,
       autoUltimoTurno: autoUltimoTurno ?? this.autoUltimoTurno,
+      reconectando: reconectando ?? this.reconectando,
     );
   }
 
@@ -161,20 +172,58 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
       mensajes: [...historialPrevio, propio],
       enviando: true,
       errorUltimoEnvio: null,
+      reconectando: false,
       accionesUltimoTurno: const <String>[],
       // Al mandar un mensaje nuevo, el bloque de opciones anterior ya no aplica.
       opcionesUltimoTurno: null,
     );
 
+    // Guardamos lo necesario para REINTENTAR con la MISMA clave de
+    // idempotencia si la conexión se cae (saliste un momento). Reintentar con
+    // la misma clave no duplica nada y recupera el resultado.
+    _pendiente = _PendienteEnvio(
+      mensaje: mensaje,
+      imagenes: imagenesDataUrl,
+      historialPrevio: historialPrevio,
+      documentoNombre: documentoNombre,
+      documentoTexto: documentoTexto,
+      idemKey: _nuevaIdemKey(),
+    );
+    _intentos = 0;
+    await _despacharPendiente();
+  }
+
+  // ── Envío con reintento idempotente + reconexión suave ────────────
+
+  _PendienteEnvio? _pendiente;
+  int _intentos = 0;
+  static const int _maxIntentos = 4;
+
+  bool _esTransitorio(Object e) =>
+      e is MatixApiException &&
+      // 0 = sin respuesta/conexión abortada (saliste de la app); 409 = el
+      // cerebro sigue procesando ese turno; 408 = timeout.
+      (e.statusCode == 0 || e.statusCode == 409 || e.statusCode == 408);
+
+  /// Manda (o reintenta) el turno pendiente. En éxito aplica el resultado; en
+  /// caída transitoria deja "reconectando" y reintenta solo; en error duro
+  /// muestra el error rojo.
+  Future<void> _despacharPendiente() async {
+    final p = _pendiente;
+    if (p == null) return;
+    state = state.copyWith(enviando: true, reconectando: false);
     try {
       final repo = ref.read(matixChatRepositoryProvider);
       final turno = await repo.enviar(
-        historial: historialPrevio,
-        mensaje: mensaje,
-        imagenes: imagenesDataUrl,
-        documentoNombre: documentoNombre,
-        documentoTexto: documentoTexto,
+        historial: p.historialPrevio,
+        mensaje: p.mensaje,
+        imagenes: p.imagenes,
+        documentoNombre: p.documentoNombre,
+        documentoTexto: p.documentoTexto,
+        idempotencyKey: p.idemKey,
       );
+      _pendiente = null;
+      _intentos = 0;
       final ans = Mensaje(
         rol: RolMensaje.matix,
         contenido: turno.respuesta,
@@ -183,33 +232,61 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
       state = state.copyWith(
         mensajes: [...state.mensajes, ans],
         enviando: false,
+        reconectando: false,
         accionesUltimoTurno: turno.toolsUsadas,
         opcionesUltimoTurno: turno.opciones,
         modeloUltimoTurno: turno.modeloUsado,
         autoUltimoTurno: turno.auto,
       );
-      // Refrescar el hub si Matix tocó algo
       _invalidarProviders(turno.tablasCambiadas);
-      // Si pidió navegar, dejamos el objetivo para que el HomeShell abra
-      // la sección. One-shot: el shell lo consume y lo vuelve a null.
       final destino = seccionMatixDeString(turno.navegacion);
       if (destino != null) {
         ref.read(objetivoNavegacionProvider.notifier).state = destino;
       }
-      // Sincroniza el indicador de modo: el modelo pudo activar/desactivar
-      // un modo con una tool este turno. Refleja el estado post-turno.
       ref.read(modosProvider.notifier).sincronizar(turno.modoActivo);
-      // El medidor cambió: hubo al menos una llamada al modelo.
       ref.invalidate(usoSnapshotProvider);
     } catch (e) {
-      // El mensaje del usuario se queda en el historial; el error se
-      // muestra inline con botón "Reintentar". Reintentar reusará el
-      // último mensaje del usuario.
-      state = state.copyWith(
-        enviando: false,
-        errorUltimoEnvio: _mensajeDeError(e),
-      );
+      if (_esTransitorio(e)) {
+        // Caída transitoria: NADA de error rojo. Reconectando + reintento
+        // solo (mismo idemKey → sin duplicar). El mensaje del usuario queda.
+        _intentos++;
+        state = state.copyWith(enviando: false, reconectando: true);
+        if (_intentos < _maxIntentos) {
+          final espera = Duration(seconds: (_intentos * 2).clamp(2, 8));
+          Future<void>.delayed(espera, () {
+            if (_pendiente != null && !state.enviando) {
+              unawaited(_despacharPendiente());
+            }
+          });
+        }
+        // Si se agotan los intentos, queda `reconectando` con el botón manual.
+      } else {
+        // Error duro (503/502/400…): rojo, y descartamos el pendiente.
+        _pendiente = null;
+        state = state.copyWith(
+          enviando: false,
+          reconectando: false,
+          errorUltimoEnvio: _mensajeDeError(e),
+        );
+      }
     }
+  }
+
+  /// Reintenta YA el turno pendiente (lo llama el ciclo de vida al volver a la
+  /// app, y el botón "Reintentar" del aviso de reconexión).
+  void reconectarAhora() {
+    if (_pendiente != null && !state.enviando) {
+      _intentos = 0;
+      unawaited(_despacharPendiente());
+    }
+  }
+
+  String _nuevaIdemKey() {
+    final r = Random();
+    final a = DateTime.now().microsecondsSinceEpoch.toRadixString(16);
+    final b = r.nextInt(1 << 32).toRadixString(16);
+    final c = r.nextInt(1 << 32).toRadixString(16);
+    return 'mk_${a}_${b}_$c';
   }
 
   /// Para cada tabla que Matix tocó, invalida el provider raíz que
@@ -242,15 +319,17 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
     }
   }
 
-  /// Reenvía el último mensaje del usuario sin duplicarlo en la lista.
-  /// Útil después de un error de red / 502 / 503.
+  /// Botón "Reintentar". Si hay un turno pendiente (caída transitoria),
+  /// reintenta con la MISMA clave (no duplica). Si fue un error duro, reenvía
+  /// el último mensaje del usuario sin duplicarlo en la lista.
   Future<void> reintentar() async {
     if (state.enviando) return;
+    if (_pendiente != null) {
+      reconectarAhora();
+      return;
+    }
     final ultimo = state.mensajes.lastOrNull;
     if (ultimo == null || ultimo.rol != RolMensaje.usuario) return;
-
-    // Quitamos el último mensaje del usuario (lo va a volver a poner
-    // `enviar`) y reenviamos.
     final historialPrevio =
         state.mensajes.sublist(0, state.mensajes.length - 1);
     state = state.copyWith(
@@ -259,6 +338,26 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
     );
     await enviar(ultimo.contenido);
   }
+}
+
+/// Lo que se necesita para REINTENTAR un turno con su misma clave de
+/// idempotencia tras una caída transitoria.
+class _PendienteEnvio {
+  _PendienteEnvio({
+    required this.mensaje,
+    required this.imagenes,
+    required this.historialPrevio,
+    required this.idemKey,
+    this.documentoNombre,
+    this.documentoTexto,
+  });
+
+  final String mensaje;
+  final List<String> imagenes;
+  final List<Mensaje> historialPrevio;
+  final String idemKey;
+  final String? documentoNombre;
+  final String? documentoTexto;
 }
 
 String _mensajeDeError(Object e) {

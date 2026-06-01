@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import Response
 
 from ..db import Postgrest, get_db
-from ..matix import extraccion_documentos, llm
+from ..matix import extraccion_documentos, idempotencia, llm
 from ..matix.chat import capturar_apunte, conversar
 from ..matix.uso import medidor
 from ..schemas.matix import (
@@ -122,14 +122,29 @@ async def chat(body: ChatRequest, db: Postgrest = Depends(get_db)) -> dict:
                 status_code=413,  # Content Too Large
                 detail="Una imagen es muy pesada. Adjunta una más liviana.",
             )
-    try:
-        resultado = await conversar(
+    async def _correr() -> dict:
+        return await conversar(
             db,
             historial=[m.model_dump() for m in body.historial],
             mensaje=body.mensaje,
             imagenes=todas,
             documento=body.documento.model_dump() if body.documento else None,
         )
+
+    # Idempotencia + reconciliación: con `idempotency_key`, un reintento tras
+    # una caída devuelve el resultado guardado sin re-ejecutar (no duplica). Sin
+    # clave, corre como siempre.
+    key = (body.idempotency_key or "").strip()
+    try:
+        if key:
+            resultado = await idempotencia.ejecutar_idempotente(db, key, _correr)
+        else:
+            resultado = await _correr()
+    except idempotencia.EnProceso as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Esa operación sigue en proceso; reintenta en un momento.",
+        ) from e
     except RuntimeError as e:
         # Caso típico: OPENAI_API_KEY no configurada.
         raise HTTPException(

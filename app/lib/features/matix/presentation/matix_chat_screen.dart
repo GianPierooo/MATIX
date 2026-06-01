@@ -45,7 +45,8 @@ class MatixChatScreen extends ConsumerStatefulWidget {
   ConsumerState<MatixChatScreen> createState() => _MatixChatScreenState();
 }
 
-class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
+class _MatixChatScreenState extends ConsumerState<MatixChatScreen>
+    with WidgetsBindingObserver {
   final _controller = TextEditingController();
   final _scroll = ScrollController();
   final _focusInput = FocusNode();
@@ -77,7 +78,23 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
   DateTime? _inicioGrabacion;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Al volver a la app (después de salir un momento), reintentamos solos
+    // cualquier turno que quedó en el aire — con la misma clave, sin duplicar.
+    if (state == AppLifecycleState.resumed) {
+      ref.read(chatMatixProvider.notifier).reconectarAhora();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tickGrabacion?.cancel();
     _controller.dispose();
     _scroll.dispose();
@@ -616,6 +633,7 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
                       ),
                       itemCount: estado.mensajes.length +
                           (estado.enviando ? 1 : 0) +
+                          (estado.reconectando ? 1 : 0) +
                           (estado.errorUltimoEnvio != null ? 1 : 0),
                       itemBuilder: (ctx, i) {
                         if (i < estado.mensajes.length) {
@@ -660,9 +678,15 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
                             ],
                           );
                         }
-                        final iExtra = i - estado.mensajes.length;
-                        if (estado.enviando && iExtra == 0) {
+                        if (estado.enviando &&
+                            i == estado.mensajes.length) {
                           return const _PensandoBurbuja();
+                        }
+                        if (estado.reconectando) {
+                          // Caída transitoria (saliste un momento): aviso
+                          // suave, no error rojo. Reintenta solo; el botón
+                          // fuerza el reintento ya.
+                          return _ReconectandoInline(onReintentar: _reintentar);
                         }
                         return _ErrorInline(
                           mensaje: estado.errorUltimoEnvio!,
@@ -689,9 +713,11 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
             _Composer(
               controller: _controller,
               focusNode: _focusInput,
-              enabled: !estado.enviando,
+              enabled: !(estado.enviando || estado.reconectando),
               onEnviar: _enviar,
-              onAdjuntar: estado.enviando ? null : _abrirMenuAdjuntar,
+              onAdjuntar: (estado.enviando || estado.reconectando)
+                  ? null
+                  : _abrirMenuAdjuntar,
               voz: voz,
               onEmpezarVoz: _empezarAGrabar,
               onDetenerVoz: _detenerYTranscribir,
@@ -974,6 +1000,63 @@ class _ErrorInline extends StatelessWidget {
               onPressed: onReintentar,
               style: TextButton.styleFrom(
                 foregroundColor: MatixColors.red,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: MatixSpacing.l,
+                  vertical: MatixSpacing.s,
+                ),
+              ),
+              child: const Text('Reintentar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Reconectando (caída transitoria) ────────────────────────────────────
+
+/// Aviso SUAVE (no rojo) cuando un envío se cayó por salir de la app un
+/// momento: Matix reintenta solo con la misma clave (sin duplicar). El botón
+/// fuerza el reintento ya.
+class _ReconectandoInline extends StatelessWidget {
+  const _ReconectandoInline({required this.onReintentar});
+  final VoidCallback onReintentar;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: MatixSpacing.m),
+      child: Container(
+        padding: const EdgeInsets.all(MatixSpacing.l),
+        decoration: BoxDecoration(
+          color: MatixColors.amber.withValues(alpha: 0.10),
+          border: Border.all(color: MatixColors.amber.withValues(alpha: 0.4)),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: MatixColors.amber,
+              ),
+            ),
+            const SizedBox(width: MatixSpacing.l),
+            Expanded(
+              child: Text(
+                'Reconectando… Lo retomo en cuanto vuelva la conexión, sin '
+                'perder lo que estabas haciendo.',
+                style: MatixText.small.copyWith(color: MatixColors.text),
+              ),
+            ),
+            const SizedBox(width: MatixSpacing.m),
+            TextButton(
+              onPressed: onReintentar,
+              style: TextButton.styleFrom(
+                foregroundColor: MatixColors.amber,
                 padding: const EdgeInsets.symmetric(
                   horizontal: MatixSpacing.l,
                   vertical: MatixSpacing.s,
