@@ -72,6 +72,42 @@ La detección de la palabra de activación corre on-device con la cadena ONNX de
   done
   ```
 
-- **Permiso**: usa `RECORD_AUDIO` (ya declarado para la voz). El escuchador
-  solo corre con la app en primer plano (v1) y suelta el micro cuando arranca
-  el modo manos libres. Umbral de detección por defecto: `0.5`.
+- **Permiso**: usa `RECORD_AUDIO` (ya declarado para la voz). Umbral de
+  detección por defecto: `0.30` (ajustable con el slider de Ajustes; bajo porque
+  "hey jarvis" es un modelo en inglés y los scores en español son bajos).
+
+### Escucha en segundo plano (foreground service nativo)
+
+Un toggle SEPARADO en Ajustes ("Escuchar en segundo plano") enciende un
+**foreground service de micrófono** (`WakeWordService.kt`) que corre la cadena
+ONNX en **Kotlin** (vía la API Java `ai.onnxruntime`, sin engine de Flutter) y
+escucha con la app cerrada / pantalla apagada / bloqueada. Al detectar, abre el
+modo de voz con un **full-screen intent** (patrón de llamada entrante:
+`MainActivity` con `showWhenLocked` + `turnScreenOn`), que es la vía soportada
+para lanzar UI desde background en Android 10+. El service es `START_STICKY`
+(el SO intenta recrearlo si lo mata).
+
+- Dependencia nativa: `com.microsoft.onnxruntime:onnxruntime-android:1.22.0`
+  (declarada explícita en `build.gradle.kts`; flutter_onnxruntime ya la trae
+  transitiva, Gradle deduplica el `.aar`).
+- Permisos: `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MICROPHONE`,
+  `USE_FULL_SCREEN_INTENT`, `WAKE_LOCK`, `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`.
+- El foreground (app abierta) y el segundo plano se relevan por ciclo de vida:
+  en `paused` se arranca el service y se para el escuchador Dart; en `resumed`,
+  al revés. Un solo dueño del micro a la vez.
+
+**MagicOS / Honor — pasos manuales (NO se pueden forzar por código).** Este OEM
+mata agresivo los servicios en background (mismo motivo por el que las notifs se
+movieron a FCM). Al activar el toggle se pide la excepción de batería; además el
+usuario debe, a mano:
+
+1. **Ajustes del sistema > Batería > Lanzamiento de aplicaciones > Matix**:
+   ponerlo en **Gestionar manualmente** y activar **Autoarranque**, **Arranque
+   secundario** y **Ejecutar en segundo plano**.
+2. **Recientes**: deslizar hacia abajo sobre Matix para **bloquear** la tarjeta
+   (candado), así no la barre el limpiador.
+3. Aceptar el diálogo de **ignorar optimización de batería** que aparece al
+   encender el toggle.
+
+Aun así MagicOS puede matar el service; por eso es `START_STICKY`. Si la escucha
+de fondo deja de responder, reabrir la app lo reinicia.

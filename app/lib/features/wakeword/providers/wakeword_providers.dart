@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/wakeword_bg_service.dart';
 import '../data/wakeword_crumbs.dart';
 import '../data/wakeword_log.dart';
 import '../data/wakeword_prefs.dart';
@@ -84,6 +85,10 @@ final wakeWordServiceProvider = Provider<WakeWordEscucha>((ref) {
   ref.onDispose(() => unawaited(svc.liberar()));
   return svc;
 });
+
+/// Puente al foreground service nativo (escucha en segundo plano).
+final wakeWordBgServiceProvider =
+    Provider<WakeWordBgService>((ref) => WakeWordBgService());
 
 final wakeWordControllerProvider =
     NotifierProvider<WakeWordController, WakeWordEstado>(WakeWordController.new);

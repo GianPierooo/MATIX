@@ -1,6 +1,11 @@
 package dev.matix.matix
 
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -17,31 +22,64 @@ import io.flutter.plugin.common.MethodChannel
  *    empujamos a Flutter invocando `onSharedText`.
  *
  * Solo `text/plain`. Las URLs vienen como texto en EXTRA_TEXT.
+ *
+ * Wake word en segundo plano (Capa 2): un segundo MethodChannel
+ * (`wakeword_bg`) controla el foreground service [WakeWordService]
+ * (iniciar/detener), pide la excepción de batería, y entrega a Flutter la
+ * señal de "abrir modo de voz" cuando el service lanzó la app al detectar la
+ * palabra (full-screen intent).
  */
 class MainActivity : FlutterActivity() {
-    private val canal = "dev.matix.matix/share"
-    private var channel: MethodChannel? = null
+    private val canalShare = "dev.matix.matix/share"
+    private val canalWake = "dev.matix.matix/wakeword_bg"
+    private var channelShare: MethodChannel? = null
+    private var channelWake: MethodChannel? = null
     private var textoInicialCompartido: String? = null
+    private var aperturaWakePendiente = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        // Captura el texto del intent que ARRANCÓ la app (compartir con
-        // la app cerrada), antes de que Flutter lo pida.
+        // Texto compartido que ARRANCÓ la app (compartir con la app cerrada).
         textoInicialCompartido = extraerTextoCompartido(intent)
-        // Consumimos el intent: si la Activity se recrea (rotación,
-        // restauración de proceso, volver desde Recientes) NO debe
-        // volver a leer el mismo ACTION_SEND y reabrir el aviso una y
-        // otra vez. Ese replay era lo que dejaba el snackbar "pegado".
         if (textoInicialCompartido != null) consumirIntent()
+        // ¿La app la lanzó el service del wake word (detección en background)?
+        if (intent?.getBooleanExtra(WakeWordService.EXTRA_ABRIR_WAKEWORD, false) == true) {
+            aperturaWakePendiente = true
+            consumirIntent()
+        }
 
-        channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, canal).also {
+        channelShare = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, canalShare).also {
             it.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "getInitialSharedText" -> {
                         result.success(textoInicialCompartido)
-                        // Se consume una sola vez: en un hot-restart o
-                        // segunda llamada no queremos re-capturarlo.
                         textoInicialCompartido = null
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
+
+        channelWake = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, canalWake).also {
+            it.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "iniciar" -> {
+                        val umbral = call.argument<Double>("umbral") ?: 0.30
+                        val clf = call.argument<String>("clasificador") ?: "hey_jarvis_v0.1.onnx"
+                        iniciarService(umbral, clf)
+                        result.success(true)
+                    }
+                    "detener" -> {
+                        detenerService()
+                        result.success(true)
+                    }
+                    "pedirIgnorarBateria" -> result.success(pedirIgnorarBateria())
+                    "estaIgnorandoBateria" -> result.success(estaIgnorandoBateria())
+                    // Flutter lo llama al arrancar para saber si debe abrir el
+                    // modo de voz (la app la lanzó el wake word). Una sola vez.
+                    "consumirAperturaWakeWord" -> {
+                        result.success(aperturaWakePendiente)
+                        aperturaWakePendiente = false
                     }
                     else -> result.notImplemented()
                 }
@@ -51,26 +89,66 @@ class MainActivity : FlutterActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // Mantener el intent vigente como el actual de la Activity.
         setIntent(intent)
         val texto = extraerTextoCompartido(intent)
         if (texto != null) {
-            channel?.invokeMethod("onSharedText", texto)
-            // Consumido: que una recreación posterior no lo reprocese.
+            channelShare?.invokeMethod("onSharedText", texto)
+            consumirIntent()
+            return
+        }
+        // App ya abierta y el service la trajo al frente por detección.
+        if (intent.getBooleanExtra(WakeWordService.EXTRA_ABRIR_WAKEWORD, false)) {
+            channelWake?.invokeMethod("onWakeWordBackground", null)
             consumirIntent()
         }
     }
 
-    /** Neutraliza el intent actual de la Activity para que un compartido
-     * ya capturado no se vuelva a leer si la Activity se recrea. */
+    private fun iniciarService(umbral: Double, clf: String) {
+        val intent = Intent(this, WakeWordService::class.java).apply {
+            putExtra(WakeWordService.EXTRA_UMBRAL, umbral)
+            putExtra(WakeWordService.EXTRA_CLASIFICADOR, clf)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
+    private fun detenerService() {
+        stopService(Intent(this, WakeWordService::class.java))
+    }
+
+    private fun estaIgnorandoBateria(): Boolean {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        return pm.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    private fun pedirIgnorarBateria(): Boolean {
+        if (estaIgnorandoBateria()) return true
+        return try {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            startActivity(intent)
+            true
+        } catch (e: Exception) {
+            // Si el OEM no expone el diálogo directo, abrimos los ajustes.
+            try {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
+
     private fun consumirIntent() {
         val limpio = Intent(Intent.ACTION_MAIN)
         limpio.setPackage(packageName)
         setIntent(limpio)
     }
 
-    /** Devuelve el texto compartido si el intent es un ACTION_SEND de
-     * texto; null en cualquier otro caso (ej. el MAIN del launcher). */
     private fun extraerTextoCompartido(intent: Intent?): String? {
         if (intent == null || intent.action != Intent.ACTION_SEND) return null
         val tipo = intent.type ?: return null

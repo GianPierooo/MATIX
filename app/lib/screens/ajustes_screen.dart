@@ -924,6 +924,7 @@ class _WakeWordTile extends ConsumerStatefulWidget {
 
 class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
   bool _activo = false;
+  bool _bgActivo = false;
   bool _cargando = true;
   double _umbral = 0.30;
 
@@ -935,12 +936,15 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
 
   Future<void> _cargar() async {
     final notifier = ref.read(wakeWordControllerProvider.notifier);
+    final prefs = ref.read(wakeWordPrefsProvider);
     final v = await notifier.estaActivo();
     final u = await notifier.umbral();
+    final bg = await prefs.bgActivo();
     if (mounted) {
       setState(() {
         _activo = v;
         _umbral = u;
+        _bgActivo = bg;
         _cargando = false;
       });
     }
@@ -955,6 +959,36 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
     setState(() => _umbral = v);
     // Persiste y aplica en vivo (sin re-armar la escucha).
     unawaited(ref.read(wakeWordControllerProvider.notifier).cambiarUmbral(v));
+  }
+
+  Future<void> _cambiarBg(bool v) async {
+    setState(() => _bgActivo = v);
+    await ref.read(wakeWordPrefsProvider).fijarBgActivo(v);
+    final bg = ref.read(wakeWordBgServiceProvider);
+    if (v) {
+      // Opt-in: pedimos la excepción de batería (clave en MagicOS/Honor). El
+      // service arranca solo cuando la app pasa a segundo plano.
+      await bg.pedirIgnorarBateria();
+      if (mounted) _mostrarNotaMagicOS();
+    } else {
+      await bg.detener();
+    }
+  }
+
+  void _mostrarNotaMagicOS() {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          duration: Duration(seconds: 8),
+          content: Text(
+            'En este Honor (MagicOS), además: mantén Matix en Ajustes > '
+            'Batería > Lanzamiento de apps (Ejecución en segundo plano + '
+            'Autoarranque), y bloquéala en Recientes. Si no, el sistema mata '
+            'la escucha.',
+          ),
+        ),
+      );
   }
 
   @override
@@ -1060,6 +1094,30 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
                       label: _umbral.toStringAsFixed(2),
                       onChanged: _cambiarUmbral,
                     ),
+                  ),
+                ],
+              ),
+            ),
+          // Toggle SEPARADO: escuchar también en segundo plano / pantalla
+          // apagada (foreground service nativo). Opt-in por batería.
+          if (!_cargando)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(2, 0, 0, 2),
+              child: Row(
+                children: [
+                  const Icon(Icons.nights_stay_outlined,
+                      color: MatixColors.muted, size: 18),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Escuchar en segundo plano\n(app cerrada / pantalla '
+                      'apagada · más batería)',
+                      style: TextStyle(fontSize: 12, color: MatixColors.muted),
+                    ),
+                  ),
+                  Switch(
+                    value: _bgActivo,
+                    onChanged: _cargando ? null : _cambiarBg,
                   ),
                 ],
               ),

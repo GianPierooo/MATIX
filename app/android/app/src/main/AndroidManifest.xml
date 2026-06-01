@@ -24,6 +24,18 @@
          empezar la grabación. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 
+    <!-- Wake word en SEGUNDO PLANO (foreground service de micrófono): escuchar
+         "hey jarvis" con la app cerrada / pantalla apagada. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+    <!-- Despertar la pantalla y abrir el modo de voz desde el service estando
+         bloqueado (patrón de "llamada entrante" con full-screen intent). -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- Pedir la excepción de optimización de batería (los OEM como Honor matan
+         servicios en background; sin esto el service no sobrevive). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+
     <!-- Auto-actualización: el APK se baja y se instala desde el
          navegador del sistema (url_launcher), no in-app. Por eso
          Matix NO declara REQUEST_INSTALL_PACKAGES — la fuente de
@@ -51,6 +63,8 @@
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
             android:windowSoftInputMode="adjustResize">
             <!-- Specifies an Android theme to apply to this Activity as soon as
                  the Android process has started. This theme is visible to the user
@@ -77,6 +91,14 @@
                 <data android:mimeType="text/plain"/>
             </intent-filter>
         </activity>
+        <!-- Foreground service de micrófono para el wake word en segundo plano.
+             Corre el pipeline ONNX en Kotlin (sin engine de Flutter) y abre el
+             modo de voz por full-screen intent al detectar la palabra. -->
+        <service
+            android:name=".WakeWordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

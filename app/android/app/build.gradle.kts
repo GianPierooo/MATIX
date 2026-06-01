@@ -120,4 +120,16 @@ flutter {
 dependencies {
     // Core library desugaring para `flutter_local_notifications`.
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+
+    // ONNX Runtime (Java/Kotlin) para el FOREGROUND SERVICE del wake word en
+    // segundo plano. flutter_onnxruntime ya lo trae como dependencia
+    // transitiva (misma versión 1.22.0), pero esa es `implementation` en SU
+    // módulo, así que las clases ai.onnxruntime.* NO están en el classpath de
+    // compilación de la app. La declaramos acá para poder usar la API Java de
+    // ORT directamente desde WakeWordService.kt (sin depender del engine de
+    // Flutter, que no corre en background). Gradle deduplica el .aar a uno.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
+
+    // AndroidX core para NotificationCompat (full-screen intent del wake word).
+    implementation("androidx.core:core-ktx:1.13.1")
 }

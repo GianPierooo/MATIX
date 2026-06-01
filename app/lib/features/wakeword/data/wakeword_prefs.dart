@@ -11,6 +11,7 @@ import 'wakeword_pipeline.dart';
 class WakeWordPrefs {
   static const _kActivo = 'wakeword_activo';
   static const _kUmbral = 'wakeword_umbral';
+  static const _kBgActivo = 'wakeword_bg_activo';
 
   /// Apagada por defecto: el usuario la enciende a propósito desde Ajustes
   /// (y ahí se le pide el permiso de micrófono).
@@ -34,5 +35,18 @@ class WakeWordPrefs {
   Future<void> fijarUmbral(double v) async {
     final p = await SharedPreferences.getInstance();
     await p.setDouble(_kUmbral, v.clamp(0.0, 1.0));
+  }
+
+  /// Escucha en SEGUNDO PLANO (foreground service nativo). Toggle SEPARADO del
+  /// wake word con la app abierta: es opt-in porque consume batería. Apagado
+  /// por defecto.
+  Future<bool> bgActivo() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getBool(_kBgActivo) ?? false;
+  }
+
+  Future<void> fijarBgActivo(bool v) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_kBgActivo, v);
   }
 }

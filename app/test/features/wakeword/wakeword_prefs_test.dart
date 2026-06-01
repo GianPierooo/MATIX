@@ -24,6 +24,14 @@ void main() {
     expect(await prefs.umbral(), 0.7);
   });
 
+  test('escucha en segundo plano: apagada por defecto, persiste', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = WakeWordPrefs();
+    expect(await prefs.bgActivo(), isFalse);
+    await prefs.fijarBgActivo(true);
+    expect(await prefs.bgActivo(), isTrue);
+  });
+
   test('el umbral se recorta a 0..1', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = WakeWordPrefs();

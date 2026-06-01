@@ -138,6 +138,21 @@ class _MatixAppState extends ConsumerState<MatixApp>
       // La app arranca en primer plano: si el usuario dejó la palabra activa,
       // empieza a escuchar (pide permiso solo si hace falta).
       unawaited(wake.alFrente());
+
+      // Wake word en SEGUNDO PLANO (foreground service nativo). Si la app la
+      // lanzó el service al detectar (full-screen intent), abrimos manos
+      // libres; y registramos el callback para cuando detecte con la app ya
+      // viva en background.
+      final bg = ref.read(wakeWordBgServiceProvider);
+      bg.registrarAlAbrir(_abrirManosLibresPorWakeWord);
+      unawaited(() async {
+        if (await bg.consumirApertura()) {
+          _abrirManosLibresPorWakeWord();
+        }
+        // Como arrancamos en primer plano, el service de fondo no debe correr
+        // (el escuchador in-app toma el relevo). Lo detenemos por si quedó vivo.
+        await bg.detener();
+      }());
     });
   }
 
@@ -150,11 +165,23 @@ class _MatixAppState extends ConsumerState<MatixApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState estado) {
     final wake = ref.read(wakeWordControllerProvider.notifier);
+    final bg = ref.read(wakeWordBgServiceProvider);
+    final prefs = ref.read(wakeWordPrefsProvider);
     if (estado == AppLifecycleState.resumed) {
+      // Volvimos al frente: el escuchador in-app toma el relevo; paramos el
+      // service de fondo (un solo dueño del micro a la vez).
+      unawaited(bg.detener());
       unawaited(wake.alFrente());
     } else if (estado == AppLifecycleState.paused ||
         estado == AppLifecycleState.detached) {
+      // Nos vamos a segundo plano: paramos el escuchador in-app y, si el modo
+      // de fondo está activado, arrancamos el foreground service nativo.
       unawaited(wake.alFondo());
+      unawaited(() async {
+        if (await prefs.bgActivo()) {
+          await bg.iniciar(umbral: await prefs.umbral());
+        }
+      }());
     }
   }
 
