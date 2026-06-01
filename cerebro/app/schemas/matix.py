@@ -13,6 +13,17 @@ class MensajeChat(BaseModel):
     contenido: str
 
 
+class DocumentoChat(BaseModel):
+    """Documento adjunto al turno del chat (texto ya extraído por el cerebro).
+
+    Lo manda la app tras subir el archivo a `/matix/extraer-documento`: el
+    texto viaja como contexto de ESE turno para que Matix lo lea/analice/
+    resuma. No se guarda en el historial (como la imagen)."""
+
+    nombre: str
+    texto: str
+
+
 class ChatRequest(BaseModel):
     """Cuerpo del endpoint `/matix/chat`.
 
@@ -21,11 +32,25 @@ class ChatRequest(BaseModel):
     servidor a propósito (distinto del OCR on-device): para entender la
     imagen hace falta el modelo. Solo viaja en ESE turno; no se guarda
     en el historial.
+
+    `documento`, si viene, es el texto extraído de un PDF/DOCX/TXT/MD que el
+    usuario adjuntó. También es contexto de ESE turno.
     """
 
     historial: list[MensajeChat] = Field(default_factory=list)
     mensaje: str = Field(min_length=1)
     imagen: str | None = None
+    documento: DocumentoChat | None = None
+
+
+class DocumentoExtraidoResponse(BaseModel):
+    """Respuesta de `/matix/extraer-documento`: el texto que la app luego
+    manda como `documento` en el chat (y puede ofrecer guardar en apuntes)."""
+
+    nombre: str
+    texto: str
+    caracteres: int
+    truncado: bool
 
 
 class TranscripcionResponse(BaseModel):

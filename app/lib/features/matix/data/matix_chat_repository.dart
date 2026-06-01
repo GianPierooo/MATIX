@@ -72,6 +72,8 @@ class MatixChatRepository {
     required List<Mensaje> historial,
     required String mensaje,
     String? imagenDataUrl,
+    String? documentoNombre,
+    String? documentoTexto,
   }) async {
     final body = <String, dynamic>{
       'historial': historial
@@ -81,6 +83,13 @@ class MatixChatRepository {
       // La imagen (data URL) solo viaja en este turno; el cerebro la
       // pasa al modelo de visión y no la guarda en el historial.
       if (imagenDataUrl != null) 'imagen': imagenDataUrl,
+      // El documento adjunto (texto ya extraído por el cerebro) también es
+      // contexto solo de este turno.
+      if (documentoTexto != null && documentoTexto.isNotEmpty)
+        'documento': {
+          'nombre': documentoNombre ?? 'documento',
+          'texto': documentoTexto,
+        },
     };
     final j = await _client.post('/api/v1/matix/chat', body);
     return ChatTurno(

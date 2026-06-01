@@ -67,6 +67,7 @@ async def conversar(
     historial: list[dict],
     mensaje: str,
     imagen: str | None = None,
+    documento: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Genera la respuesta de Matix a `mensaje`, considerando
     `historial` (lista de `{rol, contenido}` con `rol` en
@@ -129,6 +130,27 @@ async def conversar(
                     "content": modos.envoltura_modo(modo, contenido_modo),
                 }
             )
+    # Documento adjunto (PDF/DOCX/TXT/MD): el texto ya extraído por el cerebro
+    # entra como contexto `system` de ESTE turno (no va al historial, igual que
+    # la imagen). Matix lo lee para responder lo que el usuario le pida
+    # (resumir, analizar, sacar tareas…). Si pide guardarlo, usa crear_apunte.
+    doc_nombre = (documento or {}).get("nombre", "").strip()
+    doc_texto = (documento or {}).get("texto", "").strip()
+    if doc_texto:
+        titulo = doc_nombre or "documento"
+        mensajes.append(
+            {
+                "role": "system",
+                "content": (
+                    f"DOCUMENTO ADJUNTO por el usuario («{titulo}»). Léelo y "
+                    "úsalo para responder lo que te pida en este turno "
+                    "(resumir, analizar, explicar, sacar tareas…). Si te pide "
+                    "guardarlo, usa crear_apunte con su contenido. Contenido:\n\n"
+                    f"{doc_texto}"
+                ),
+            }
+        )
+
     for m in historial:
         rol = m.get("rol") or m.get("role")
         if rol not in ("user", "assistant"):
@@ -171,10 +193,17 @@ async def conversar(
     auto = seleccion == modelos_llm.AUTO
     if auto:
         barato, fuerte = await modelos_llm.par_barato_fuerte(db)
-        decision = enrutador.elegir(
-            mensaje, modo_activo=modo, barato=barato, fuerte=fuerte
-        )
-        modelo = decision.modelo
+        # Con un documento adjunto vamos al modelo FUERTE: el enrutador solo ve
+        # el mensaje (corto: «resúmelo»), pero leer/analizar un documento
+        # merece el modelo a fondo. La imagen ya va por el modelo que toque
+        # (todos los del catálogo ven imágenes).
+        if doc_texto:
+            modelo = fuerte
+        else:
+            decision = enrutador.elegir(
+                mensaje, modo_activo=modo, barato=barato, fuerte=fuerte
+            )
+            modelo = decision.modelo
     else:
         modelo = seleccion
 

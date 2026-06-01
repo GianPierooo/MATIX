@@ -2,23 +2,32 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../../api/matix_client.dart';
 import '../../../theme/matix_colors.dart';
 import '../../../theme/matix_spacing.dart';
 import '../../../theme/matix_typography.dart';
+import '../../apuntes/providers/apuntes_providers.dart';
+import '../../captura_camara/presentation/captura_camara_screen.dart';
 import '../../modelos/providers/modelos_providers.dart';
 import '../../modos/providers/modos_providers.dart';
+import '../data/contacto_memoria.dart';
+import '../data/documento_repository.dart';
+import '../data/matix_transcribir_repository.dart';
 import '../data/uso_repository.dart';
 import '../domain/mensaje.dart';
 import '../providers/matix_chat_providers.dart';
 import '../providers/uso_providers.dart';
 import '../providers/voz_providers.dart';
 import 'manos_libres_screen.dart';
+import 'widgets/menu_adjuntar.dart';
 
 /// Pantalla principal de Matix (Capa 2 Paso 1): chat solo texto.
 ///
@@ -45,6 +54,14 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
   /// Imagen adjunta lista para mandar con el próximo mensaje (Capa 2 ·
   /// chat multimodal). Null = ninguna.
   XFile? _imagenAdjunta;
+
+  /// Documento adjunto (texto ya extraído por el cerebro) listo para mandar
+  /// con el próximo mensaje. Null = ninguno.
+  ({String nombre, String texto, bool truncado})? _documentoAdjunto;
+
+  /// `true` mientras subimos/extraemos un documento o transcribimos un audio
+  /// elegido (para mostrar un indicador y no dejar mandar a medias).
+  bool _procesandoAdjunto = false;
 
   /// Tope: imágenes más pesadas se rechazan con mensaje claro.
   static const int _maxImagenBytes = 4 * 1024 * 1024;
@@ -80,7 +97,8 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
   Future<void> _enviar() async {
     final texto = _controller.text.trim();
     final img = _imagenAdjunta;
-    if (texto.isEmpty && img == null) return;
+    final doc = _documentoAdjunto;
+    if (texto.isEmpty && img == null && doc == null) return;
 
     String? dataUrl;
     String? imagenPath;
@@ -98,11 +116,16 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
     }
 
     _controller.clear();
-    setState(() => _imagenAdjunta = null);
+    setState(() {
+      _imagenAdjunta = null;
+      _documentoAdjunto = null;
+    });
     await ref.read(chatMatixProvider.notifier).enviar(
           texto,
           imagenDataUrl: dataUrl,
           imagenPath: imagenPath,
+          documentoNombre: doc?.nombre,
+          documentoTexto: doc?.texto,
         );
     _scrollAlFinal();
     if (mounted) _focusInput.requestFocus();
@@ -114,10 +137,92 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
       ..showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  /// Adjunta una imagen (cámara o galería) para mandarla con el mensaje.
-  /// La comprime para no enviar 8 MP cuando no hace falta.
-  Future<void> _adjuntarImagen() async {
-    final origen = await showModalBottomSheet<ImageSource>(
+  // ─── Menú de adjuntar (tipo WhatsApp) ───────────────────────────────
+
+  /// Abre el menú "+" y rutea a la acción de la opción elegida. Cada opción
+  /// reutiliza un flujo que ya existe (visión, OCR, voz/Whisper, memoria).
+  Future<void> _abrirMenuAdjuntar() async {
+    final op = await mostrarMenuAdjuntar(context);
+    if (op == null || !mounted) return;
+    switch (op) {
+      case OpcionAdjuntar.documento:
+        await _adjuntarDocumento();
+      case OpcionAdjuntar.fotoVideo:
+        await _adjuntarFoto();
+      case OpcionAdjuntar.camara:
+        await _abrirCamara();
+      case OpcionAdjuntar.audio:
+        await _menuAudio();
+      case OpcionAdjuntar.contacto:
+        await _adjuntarContacto();
+    }
+  }
+
+  /// Foto desde la galería → se adjunta para el flujo de VISIÓN (Matix la ve).
+  /// Video: por ahora no (se avisa). La comprime para no mandar 8 MP.
+  Future<void> _adjuntarFoto() async {
+    try {
+      final x = await _picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 70,
+        maxWidth: 1280,
+        maxHeight: 1280,
+      );
+      if (x != null && mounted) setState(() => _imagenAdjunta = x);
+    } catch (e) {
+      if (mounted) _mostrarAviso('No pude abrir la galería: $e');
+    }
+  }
+
+  /// Cámara → la pantalla de captura con OCR on-device (flujo existente):
+  /// rutea solo a tareas, eventos o apunte. La imagen no sale del teléfono.
+  Future<void> _abrirCamara() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const CapturaCamaraScreen()),
+    );
+  }
+
+  /// Documento (PDF/DOCX/TXT/MD): el selector del sistema (SAF) → lo subimos
+  /// al cerebro, que extrae el texto, y lo dejamos adjunto para el próximo
+  /// mensaje (Matix lo lee/analiza/resume).
+  Future<void> _adjuntarDocumento() async {
+    FilePickerResult? res;
+    try {
+      res = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['pdf', 'docx', 'txt', 'md'],
+      );
+    } catch (e) {
+      if (mounted) _mostrarAviso('No pude abrir el selector de archivos: $e');
+      return;
+    }
+    final ruta = res?.files.single.path;
+    final nombre = res?.files.single.name ?? 'documento';
+    if (ruta == null) return; // cancelado
+    setState(() => _procesandoAdjunto = true);
+    final repo = DocumentoRepository();
+    try {
+      final doc = await repo.extraer(File(ruta), nombre: nombre);
+      if (!mounted) return;
+      setState(() {
+        _documentoAdjunto =
+            (nombre: doc.nombre, texto: doc.texto, truncado: doc.truncado);
+        _procesandoAdjunto = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _procesandoAdjunto = false);
+        _mostrarAviso(_mensajeError(e));
+      }
+    } finally {
+      repo.close();
+    }
+  }
+
+  /// Audio: grabar (flujo de voz existente) o elegir un archivo del sistema
+  /// para transcribir con Whisper.
+  Future<void> _menuAudio() async {
+    final accion = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: MatixColors.card,
       shape: const RoundedRectangleBorder(
@@ -129,34 +234,119 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
           children: [
             const SizedBox(height: 12),
             ListTile(
-              leading: const Icon(Icons.camera_alt_outlined,
-                  color: MatixColors.accent),
-              title: const Text('Tomar foto'),
-              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+              leading: const Icon(Icons.mic_none, color: MatixColors.accent),
+              title: const Text('Grabar audio'),
+              onTap: () => Navigator.pop(ctx, 'grabar'),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined,
-                  color: MatixColors.accent),
-              title: const Text('Elegir de la galería'),
-              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+              leading:
+                  const Icon(Icons.audio_file_outlined, color: MatixColors.accent),
+              title: const Text('Elegir un audio'),
+              onTap: () => Navigator.pop(ctx, 'elegir'),
             ),
             const SizedBox(height: 8),
           ],
         ),
       ),
     );
-    if (origen == null) return;
-    try {
-      final x = await _picker.pickImage(
-        source: origen,
-        imageQuality: 70,
-        maxWidth: 1280,
-        maxHeight: 1280,
-      );
-      if (x != null && mounted) setState(() => _imagenAdjunta = x);
-    } catch (e) {
-      if (mounted) _mostrarAviso('No pude abrir la cámara / galería: $e');
+    if (accion == 'grabar') {
+      await _empezarAGrabar();
+    } else if (accion == 'elegir') {
+      await _elegirAudio();
     }
+  }
+
+  /// Elige un archivo de audio (SAF) → lo transcribe con Whisper (mismo
+  /// endpoint que el mic) → deja el texto en el composer para revisar y enviar.
+  Future<void> _elegirAudio() async {
+    FilePickerResult? res;
+    try {
+      res = await FilePicker.platform.pickFiles(type: FileType.audio);
+    } catch (e) {
+      if (mounted) _mostrarAviso('No pude abrir el selector de audio: $e');
+      return;
+    }
+    final ruta = res?.files.single.path;
+    if (ruta == null) return; // cancelado
+    setState(() => _procesandoAdjunto = true);
+    final repo = MatixTranscribirRepository();
+    try {
+      final texto = await repo.transcribir(File(ruta));
+      if (!mounted) return;
+      setState(() => _procesandoAdjunto = false);
+      if (texto.trim().isNotEmpty) _insertarEnComposer(texto.trim());
+    } catch (e) {
+      if (mounted) {
+        setState(() => _procesandoAdjunto = false);
+        _mostrarAviso(_mensajeError(e));
+      }
+    } finally {
+      repo.close();
+    }
+  }
+
+  /// Contacto: abre el selector NATIVO de contactos (sin leer la agenda
+  /// entera ni pedir READ_CONTACTS). Con lo elegido arma un mensaje y se lo
+  /// manda a Matix, que lo guarda en su memoria (categoría personas) con la
+  /// tool `recordar` y confirma en su voz.
+  Future<void> _adjuntarContacto() async {
+    Contact? c;
+    try {
+      c = await FlutterContacts.openExternalPick();
+    } catch (e) {
+      if (mounted) _mostrarAviso('No pude abrir tus contactos: $e');
+      return;
+    }
+    if (c == null || !mounted) return;
+
+    final mensaje = mensajeGuardarContacto(
+      nombre: c.displayName,
+      telefonos: c.phones.map((p) => p.number).toList(),
+      correos: c.emails.map((e) => e.address).toList(),
+    );
+    if (mensaje == null) {
+      _mostrarAviso('Ese contacto no tiene datos que guardar.');
+      return;
+    }
+    await ref.read(chatMatixProvider.notifier).enviar(mensaje);
+    _scrollAlFinal();
+  }
+
+  /// Inserta texto en la posición del cursor (o al final), sin mandar.
+  void _insertarEnComposer(String texto) {
+    final actual = _controller.text;
+    final sel = _controller.selection;
+    final ins = actual.isEmpty || actual.endsWith(' ') ? texto : ' $texto';
+    final nuevo = sel.isValid
+        ? actual.replaceRange(sel.start, sel.end, ins)
+        : '$actual$ins';
+    _controller.value = TextEditingValue(
+      text: nuevo,
+      selection: TextSelection.collapsed(
+        offset: sel.isValid ? sel.start + ins.length : nuevo.length,
+      ),
+    );
+    _focusInput.requestFocus();
+  }
+
+  /// Guarda el documento adjunto como un apunte (reusa el CRUD de apuntes).
+  Future<void> _guardarDocEnApuntes() async {
+    final doc = _documentoAdjunto;
+    if (doc == null) return;
+    try {
+      await ref
+          .read(apuntesRepoProvider)
+          .crear(titulo: doc.nombre, contenido: doc.texto);
+      ref.invalidate(apuntesListProvider);
+      if (mounted) _mostrarAviso('Guardado en apuntes: ${doc.nombre}');
+    } catch (e) {
+      if (mounted) _mostrarAviso('No pude guardar el apunte: $e');
+    }
+  }
+
+  String _mensajeError(Object e) {
+    if (e is MatixApiException) return e.message;
+    return '$e';
   }
 
   Future<void> _reintentar() async {
@@ -191,22 +381,9 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
     final notifier = ref.read(vozNotifierProvider.notifier);
     final texto = await notifier.detenerYTranscribir();
     if (!mounted || texto == null) return;
-
     // Insertamos en la posición del cursor (o al final). Importante:
     // NO mandamos solo. El usuario revisa y aprieta enviar.
-    final actual = _controller.text;
-    final sel = _controller.selection;
-    final ins = actual.isEmpty || actual.endsWith(' ') ? texto : ' $texto';
-    final nuevo = sel.isValid
-        ? actual.replaceRange(sel.start, sel.end, ins)
-        : '$actual$ins';
-    _controller.value = TextEditingValue(
-      text: nuevo,
-      selection: TextSelection.collapsed(
-        offset: sel.isValid ? sel.start + ins.length : nuevo.length,
-      ),
-    );
-    _focusInput.requestFocus();
+    _insertarEnComposer(texto);
   }
 
   Future<void> _cancelarGrabacion() async {
@@ -453,12 +630,21 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
                 path: _imagenAdjunta!.path,
                 onQuitar: () => setState(() => _imagenAdjunta = null),
               ),
+            if (_procesandoAdjunto)
+              const _PreviewProcesando()
+            else if (_documentoAdjunto != null)
+              _PreviewDocumento(
+                nombre: _documentoAdjunto!.nombre,
+                truncado: _documentoAdjunto!.truncado,
+                onGuardar: _guardarDocEnApuntes,
+                onQuitar: () => setState(() => _documentoAdjunto = null),
+              ),
             _Composer(
               controller: _controller,
               focusNode: _focusInput,
               enabled: !estado.enviando,
               onEnviar: _enviar,
-              onAdjuntar: estado.enviando ? null : _adjuntarImagen,
+              onAdjuntar: estado.enviando ? null : _abrirMenuAdjuntar,
               voz: voz,
               onEmpezarVoz: _empezarAGrabar,
               onDetenerVoz: _detenerYTranscribir,
@@ -931,6 +1117,104 @@ class _PreviewAdjunto extends StatelessWidget {
   }
 }
 
+/// Preview del documento adjunto: nombre + acción "guardar en apuntes" +
+/// quitar. Si el cerebro lo recortó por largo, lo avisa.
+class _PreviewDocumento extends StatelessWidget {
+  const _PreviewDocumento({
+    required this.nombre,
+    required this.truncado,
+    required this.onGuardar,
+    required this.onQuitar,
+  });
+  final String nombre;
+  final bool truncado;
+  final VoidCallback onGuardar;
+  final VoidCallback onQuitar;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: MatixColors.bg,
+      padding: const EdgeInsets.fromLTRB(
+          MatixSpacing.xl, MatixSpacing.s, MatixSpacing.xl, 0),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: MatixColors.purple.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.description_outlined,
+                color: MatixColors.purple, size: 20),
+          ),
+          const SizedBox(width: MatixSpacing.m),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  nombre,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: MatixText.small.copyWith(color: MatixColors.text),
+                ),
+                Text(
+                  truncado
+                      ? 'Listo para Matix · recortado por largo'
+                      : 'Listo para que Matix lo lea',
+                  style: MatixText.caption.copyWith(
+                    color: MatixColors.muted,
+                    fontSize: 10.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: onGuardar,
+            child: const Text('Guardar en apuntes',
+                style: TextStyle(fontSize: 11.5, color: MatixColors.accent)),
+          ),
+          IconButton(
+            tooltip: 'Quitar documento',
+            onPressed: onQuitar,
+            icon: const Icon(Icons.close, size: 18, color: MatixColors.muted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Mientras subimos/extraemos un documento o transcribimos un audio elegido.
+class _PreviewProcesando extends StatelessWidget {
+  const _PreviewProcesando();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: MatixColors.bg,
+      padding: const EdgeInsets.fromLTRB(
+          MatixSpacing.xl, MatixSpacing.m, MatixSpacing.xl, MatixSpacing.s),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(
+                strokeWidth: 2, color: MatixColors.accent),
+          ),
+          const SizedBox(width: MatixSpacing.m),
+          Text('Procesando el adjunto…', style: MatixText.small),
+        ],
+      ),
+    );
+  }
+}
+
 class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
@@ -985,10 +1269,9 @@ class _Composer extends StatelessWidget {
         _MicButton(onTap: enabled ? onEmpezarVoz : null),
         const SizedBox(width: MatixSpacing.s),
         IconButton(
-          tooltip: 'Adjuntar imagen',
+          tooltip: 'Adjuntar',
           onPressed: onAdjuntar,
-          icon: const Icon(Icons.add_photo_alternate_outlined,
-              color: MatixColors.muted),
+          icon: const Icon(Icons.add, color: MatixColors.muted),
         ),
         const SizedBox(width: MatixSpacing.s),
         Expanded(

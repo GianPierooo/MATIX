@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import Response
 
 from ..db import Postgrest, get_db
-from ..matix import llm
+from ..matix import extraccion_documentos, llm
 from ..matix.chat import capturar_apunte, conversar
 from ..matix.uso import medidor
 from ..schemas.matix import (
@@ -31,6 +31,7 @@ from ..schemas.matix import (
     ClasificarCapturaResponse,
     DesglosarTareaRequest,
     DesglosarTareaResponse,
+    DocumentoExtraidoResponse,
     EstimarDuracionesRequest,
     EstimarDuracionesResponse,
     ExtraerEventosRequest,
@@ -115,6 +116,7 @@ async def chat(body: ChatRequest, db: Postgrest = Depends(get_db)) -> dict:
             historial=[m.model_dump() for m in body.historial],
             mensaje=body.mensaje,
             imagen=imagen,
+            documento=body.documento.model_dump() if body.documento else None,
         )
     except RuntimeError as e:
         # Caso típico: OPENAI_API_KEY no configurada.
@@ -415,6 +417,71 @@ async def transcribir(
         ) from e
 
     return {"texto": texto}
+
+
+# Tope del documento: 10 MB. Un PDF/DOCX típico de apuntes o un sílabo está
+# muy por debajo; cortamos antes para fallar claro y no procesar archivos
+# enormes (la extracción ya capea el TEXTO a ~16k chars aparte).
+_MAX_DOCUMENTO_BYTES = 10 * 1024 * 1024
+
+
+@router.post("/extraer-documento", response_model=DocumentoExtraidoResponse)
+async def extraer_documento(
+    file: UploadFile = File(..., description="Documento (PDF/DOCX/TXT/MD)."),
+) -> dict:
+    """Recibe un documento y devuelve su TEXTO extraído.
+
+    La app lo sube por multipart cuando el usuario adjunta un documento en el
+    chat. Reusa la misma extracción que la ingestión de material
+    (`extraccion_documentos`). No persiste nada: el texto vuelve a la app, que
+    lo manda como `documento` en el siguiente turno del chat para que Matix lo
+    lea/analice/resuma (y puede ofrecer guardarlo en apuntes).
+    """
+    datos = await file.read()
+    if not datos:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El documento está vacío.",
+        )
+    if len(datos) > _MAX_DOCUMENTO_BYTES:
+        raise HTTPException(
+            status_code=413,  # Content Too Large
+            detail="El documento supera el tope de 10 MB. Adjunta uno más liviano.",
+        )
+
+    nombre = file.filename or "documento"
+    try:
+        texto, truncado = extraccion_documentos.extraer(nombre, datos)
+    except extraccion_documentos.DocumentoNoSoportado as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    except RuntimeError as e:
+        # Falta pypdf / python-docx en el server.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"No pude leer el documento: {e}",
+        ) from e
+
+    if not texto:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "El documento no tiene texto legible (¿es un PDF escaneado? "
+                "Prueba con la cámara para OCR)."
+            ),
+        )
+
+    return {
+        "nombre": nombre,
+        "texto": texto,
+        "caracteres": len(texto),
+        "truncado": truncado,
+    }
 
 
 @router.get("/uso")

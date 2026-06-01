@@ -112,6 +112,16 @@ dependencies:
   camera: ^0.12.0+1
   google_mlkit_text_recognition: ^0.15.1
 
+  # Menú de adjuntar del chat (tipo WhatsApp). Ambos usan los selectores
+  # NATIVOS del sistema (intents), sin permisos peligrosos — vía probada en
+  # el Huawei sin Google Play:
+  #  - file_picker: documento (PDF/DOCX/TXT/MD) y audio, vía Storage Access
+  #    Framework (el selector de archivos del sistema).
+  #  - flutter_contacts: solo `openExternalPick()` (el picker de contactos
+  #    del sistema). NO pedimos READ_CONTACTS ni leemos la agenda completa.
+  file_picker: ^8.1.6
+  flutter_contacts: ^1.1.9+2
+
 dependency_overrides:
   # `record 5.2.1` resuelve `record_linux 0.7.2`, que está fuera de
   # sync con el `record_platform_interface 1.6.0` que pide el resto

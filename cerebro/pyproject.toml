@@ -32,6 +32,11 @@ dependencies = [
     # dentro del proceso de FastAPI (AsyncIOScheduler).
     "apscheduler>=3.10,<4",
     "anthropic>=0.40",
+    # Extracción de texto de documentos adjuntos al chat (PDF/DOCX). Misma
+    # librería que usa scripts/ingestar_documentos.py para la biblioteca de
+    # material; ahora también en el server para `/matix/extraer-documento`.
+    "pypdf>=5.0",
+    "python-docx>=1.1",
 ]
 
 [dependency-groups]

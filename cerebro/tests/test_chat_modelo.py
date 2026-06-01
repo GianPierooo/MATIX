@@ -118,3 +118,41 @@ async def test_auto_rutea_por_mensaje(monkeypatch):
     assert r2["auto"] is True
     assert r2["modelo_usado"] == "claude-sonnet-4-6"
     assert capturas[-1]["model"] == "claude-sonnet-4-6"
+
+
+async def test_documento_adjunto_se_inyecta_y_rutea_a_fuerte(monkeypatch):
+    """Un documento adjunto entra como contexto `system` del turno y, en
+    Automático, fuerza el modelo fuerte aunque el mensaje sea corto."""
+    capturas: list[dict] = []
+
+    async def fake_resp(messages, tools, *, model=None, temperature=0.6, tool_choice="auto"):
+        capturas.append({"model": model, "messages": list(messages)})
+        return {"tipo": "texto", "contenido": "ok", "raw": {"role": "assistant", "content": "ok"}}
+
+    monkeypatch.setattr(chat_mod.llm, "responder_con_tools", fake_resp)
+    monkeypatch.setattr(chat_mod, "contexto_vivo", _sin_contexto)
+    monkeypatch.setattr(chat_mod.memoria, "bloque_memoria", _sin_memoria)
+    monkeypatch.setattr(chat_mod.modos, "modo_activo", _sin_modo)
+
+    async def sel_auto(db):
+        return chat_mod.modelos_llm.AUTO
+
+    async def par(db):
+        return ("gpt-4o-mini", "claude-sonnet-4-6")
+
+    monkeypatch.setattr(chat_mod.modelos_llm, "seleccion_guardada", sel_auto)
+    monkeypatch.setattr(chat_mod.modelos_llm, "par_barato_fuerte", par)
+
+    r = await chat_mod.conversar(
+        None,
+        historial=[],
+        mensaje="resúmelo",  # corto: sin documento iría a barato
+        documento={"nombre": "silabo.pdf", "texto": "TEMARIO DEL CURSO XYZ"},
+    )
+    assert r["auto"] is True
+    assert r["modelo_usado"] == "claude-sonnet-4-6"
+    blob = "\n".join(
+        m["content"] for m in capturas[-1]["messages"] if isinstance(m.get("content"), str)
+    )
+    assert "DOCUMENTO ADJUNTO" in blob and "silabo.pdf" in blob
+    assert "TEMARIO DEL CURSO XYZ" in blob

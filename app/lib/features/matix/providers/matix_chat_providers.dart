@@ -111,17 +111,29 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
     String texto, {
     String? imagenDataUrl,
     String? imagenPath,
+    String? documentoNombre,
+    String? documentoTexto,
   }) async {
     final t = texto.trim();
-    // Permitimos mandar solo imagen (sin texto). Si no hay ni texto ni
-    // imagen, no hay nada que enviar.
-    if ((t.isEmpty && imagenDataUrl == null) || state.enviando) return;
+    final hayDocumento = documentoTexto != null && documentoTexto.isNotEmpty;
+    // Permitimos mandar solo imagen o solo documento (sin texto). Si no hay
+    // nada de eso, no hay nada que enviar.
+    if ((t.isEmpty && imagenDataUrl == null && !hayDocumento) ||
+        state.enviando) {
+      return;
+    }
 
-    // Cuando solo se adjunta imagen, mandamos un texto por defecto: el
-    // schema del cerebro exige `mensaje` no vacío y le da una
-    // instrucción al modelo.
-    final mensaje =
-        t.isEmpty ? 'Mira esta imagen y ayúdame con lo que muestre.' : t;
+    // Cuando solo se adjunta imagen o documento (sin texto), mandamos un
+    // texto por defecto: el schema del cerebro exige `mensaje` no vacío y le
+    // da una instrucción al modelo.
+    final String mensaje;
+    if (t.isNotEmpty) {
+      mensaje = t;
+    } else if (hayDocumento) {
+      mensaje = 'Lee este documento y dime de qué trata.';
+    } else {
+      mensaje = 'Mira esta imagen y ayúdame con lo que muestre.';
+    }
 
     // Historial que se manda al cerebro: el de ANTES de agregar el
     // nuevo mensaje (el endpoint espera `historial` separado del
@@ -147,6 +159,8 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
         historial: historialPrevio,
         mensaje: mensaje,
         imagenDataUrl: imagenDataUrl,
+        documentoNombre: documentoNombre,
+        documentoTexto: documentoTexto,
       );
       final ans = Mensaje(
         rol: RolMensaje.matix,
