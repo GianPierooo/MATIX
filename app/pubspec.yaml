@@ -122,6 +122,16 @@ dependencies:
   file_picker: ^8.1.6
   flutter_contacts: ^1.1.9+2
 
+  # Wake word on-device (Capa 2 · "oye Matix", paso 1 = tubería con modelo
+  # pre-entrenado). Corremos la cadena ONNX de openWakeWord
+  # (melspectrograma → embedding → clasificador) directamente en Dart, sin
+  # servicio nativo Kotlin: para v1 (solo con la app abierta) el cómputo es
+  # mínimo (~12.5 inferencias/s sobre modelos diminutos) y el trabajo nativo
+  # corre por method channel, fuera del hilo de UI. flutter_onnxruntime trae
+  # ONNX Runtime 1.22 (compatible con el page size de 16 KB). El micro en
+  # streaming PCM16 16 kHz lo da `record` (ya arriba) vía startStream.
+  flutter_onnxruntime: ^1.7.1
+
 dependency_overrides:
   # `record 5.2.1` resuelve `record_linux 0.7.2`, que está fuera de
   # sync con el `record_platform_interface 1.6.0` que pide el resto
@@ -163,10 +173,12 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
+  # Modelos ONNX de openWakeWord (pre-entrenados, de la release v0.5.1 del
+  # repo dscripka/openWakeWord). La cadena compartida (melspectrograma +
+  # embedding) más el clasificador de la palabra de prueba "hey jarvis".
+  # Cuando entrenemos "oye matix" solo se reemplaza el .onnx del clasificador.
+  assets:
+    - assets/models/wakeword/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

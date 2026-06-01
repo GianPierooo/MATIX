@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../theme/matix_colors.dart';
 import '../../../theme/matix_spacing.dart';
 import '../../../theme/matix_typography.dart';
+import '../../wakeword/providers/wakeword_providers.dart';
 import '../domain/mensaje.dart';
 import '../providers/manos_libres_providers.dart';
 import '../providers/matix_chat_providers.dart';
@@ -45,6 +47,10 @@ class _ManosLibresScreenState extends ConsumerState<ManosLibresScreen> {
   @override
   void initState() {
     super.initState();
+    // Relevo del micrófono: mientras manos libres está abierto, el escuchador
+    // de wake word suelta el micro para que no peleen. (Único punto de entrada
+    // al modo, sea por el botón o por la palabra detectada.)
+    ref.read(wakeWordControllerProvider.notifier).pausarPorVoz();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref
           .read(manosLibresProvider.notifier)
@@ -60,6 +66,8 @@ class _ManosLibresScreenState extends ConsumerState<ManosLibresScreen> {
 
   @override
   void dispose() {
+    // Manos libres terminó: el escuchador retoma el micro si sigue activo.
+    unawaited(ref.read(wakeWordControllerProvider.notifier).reanudarTrasVoz());
     _scrollCtrl.dispose();
     super.dispose();
   }

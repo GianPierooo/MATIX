@@ -25,6 +25,7 @@ import '../features/planificador/domain/disponibilidad.dart';
 import '../features/push/data/push_repository.dart';
 import '../features/repaso/presentation/repaso_semanal_screen.dart';
 import '../features/repaso/providers/repaso_providers.dart';
+import '../features/wakeword/providers/wakeword_providers.dart';
 import '../theme/matix_colors.dart';
 
 /// Pantalla de Ajustes — informativa en Capa 1.
@@ -224,6 +225,7 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
               MaterialPageRoute(builder: (_) => const ModeloScreen()),
             ),
           ),
+          const _WakeWordTile(),
 
           const _Seccion('Conexión'),
           _Fila(
@@ -898,6 +900,115 @@ class _RepasoSemanalTile extends ConsumerWidget {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Toggle de la palabra de activación ("oye Matix").
+///
+/// Estado del dispositivo (SharedPreferences), no del hub: encenderla aquí
+/// hace que el teléfono escuche la palabra mientras la app está abierta y, al
+/// oírla, abra el modo manos libres. En esta versión de prueba responde a la
+/// palabra pre-entrenada "hey jarvis" (luego se reemplaza por "oye matix").
+class _WakeWordTile extends ConsumerStatefulWidget {
+  const _WakeWordTile();
+
+  @override
+  ConsumerState<_WakeWordTile> createState() => _WakeWordTileState();
+}
+
+class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
+  bool _activo = false;
+  bool _cargando = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    final v = await ref.read(wakeWordControllerProvider.notifier).estaActivo();
+    if (mounted) {
+      setState(() {
+        _activo = v;
+        _cargando = false;
+      });
+    }
+  }
+
+  Future<void> _cambiar(bool v) async {
+    setState(() => _activo = v);
+    await ref.read(wakeWordControllerProvider.notifier).activar(v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fase = ref.watch(wakeWordControllerProvider).fase;
+
+    String subtitulo;
+    Color subColor = MatixColors.muted;
+    if (!_activo) {
+      subtitulo = 'Di la palabra y Matix abre el modo de voz. '
+          'En esta versión de prueba responde a "hey jarvis".';
+    } else if (fase == FaseWakeWord.sinPermiso) {
+      subtitulo = 'Necesito permiso del micrófono. Concédelo y vuelve a '
+          'activarla.';
+      subColor = MatixColors.red;
+    } else if (fase == FaseWakeWord.error) {
+      subtitulo = 'No pude iniciar la escucha. Apágala y enciéndela otra vez.';
+      subColor = MatixColors.red;
+    } else if (fase == FaseWakeWord.pausadoPorVoz) {
+      subtitulo = 'En pausa mientras usas el modo de voz. Vuelve sola al '
+          'terminar.';
+    } else {
+      subtitulo = 'Escuchando "hey jarvis". Solo con la app abierta.';
+      subColor = MatixColors.green;
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      padding: const EdgeInsets.fromLTRB(14, 4, 8, 8),
+      decoration: BoxDecoration(
+        color: MatixColors.card,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.graphic_eq, color: MatixColors.accent, size: 22),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Palabra de activación',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: MatixColors.text,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    subtitulo,
+                    style: TextStyle(fontSize: 12, color: subColor),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: _activo,
+            onChanged: _cargando ? null : _cambiar,
           ),
         ],
       ),

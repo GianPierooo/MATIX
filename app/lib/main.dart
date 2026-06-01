@@ -19,8 +19,10 @@ import 'features/compartir/data/share_intent_service.dart';
 import 'features/eventos/presentation/nuevo_evento_screen.dart';
 import 'features/eventos/providers/eventos_providers.dart';
 import 'features/matix/data/captura_apunte_repository.dart';
+import 'features/matix/presentation/manos_libres_screen.dart';
 import 'features/matix/providers/captura_apunte_providers.dart';
 import 'features/push/application/push_service.dart';
+import 'features/wakeword/providers/wakeword_providers.dart';
 import 'features/tareas/presentation/nueva_tarea_screen.dart';
 import 'screens/home_shell.dart';
 import 'theme/matix_theme.dart';
@@ -65,7 +67,8 @@ class MatixApp extends ConsumerStatefulWidget {
   ConsumerState<MatixApp> createState() => _MatixAppState();
 }
 
-class _MatixAppState extends ConsumerState<MatixApp> {
+class _MatixAppState extends ConsumerState<MatixApp>
+    with WidgetsBindingObserver {
   late final MatixClient _client = ref.read(matixClientProvider);
 
   /// Llave del Navigator para que callbacks que viven fuera del
@@ -122,6 +125,47 @@ class _MatixAppState extends ConsumerState<MatixApp> {
     final share = ref.read(shareIntentServiceProvider);
     share.escuchar(_capturarCompartido);
     unawaited(_capturarCompartidoInicial(share));
+
+    // Wake word "oye Matix" (Capa 2 · paso 1: tubería con modelo de prueba).
+    // Solo escucha con la app en primer plano (v1), por eso lo colgamos del
+    // ciclo de vida. Al detectar la palabra abrimos el modo manos libres
+    // (mismo flujo que tocar para hablar).
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final wake = ref.read(wakeWordControllerProvider.notifier);
+      wake.registrarAlDetectar(_abrirManosLibresPorWakeWord);
+      // La app arranca en primer plano: si el usuario dejó la palabra activa,
+      // empieza a escuchar (pide permiso solo si hace falta).
+      unawaited(wake.alFrente());
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState estado) {
+    final wake = ref.read(wakeWordControllerProvider.notifier);
+    if (estado == AppLifecycleState.resumed) {
+      unawaited(wake.alFrente());
+    } else if (estado == AppLifecycleState.paused ||
+        estado == AppLifecycleState.detached) {
+      unawaited(wake.alFondo());
+    }
+  }
+
+  /// Detectada la palabra: abre el modo manos libres. El escuchador ya soltó
+  /// el micro; `ManosLibresScreen` lo mantiene en pausa mientras está abierto
+  /// y lo retoma al cerrarse.
+  void _abrirManosLibresPorWakeWord() {
+    final nav = _navigatorKey.currentState;
+    if (nav == null) return;
+    nav.push(
+      MaterialPageRoute(builder: (_) => const ManosLibresScreen()),
+    );
   }
 
   /// Si la app arrancó porque el usuario compartió texto/URL a Matix
