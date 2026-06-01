@@ -8,7 +8,11 @@ import 'dart:typed_data';
 /// probada. La implementación real vive en `onnx_backend.dart`.
 abstract class WakeWordBackend {
   /// Carga los tres modelos (melspectrograma, embedding, clasificador).
-  Future<void> cargar();
+  ///
+  /// `migaja` (opcional) se invoca con el nombre del paso ANTES de cada
+  /// creación de sesión ONNX, para dejar un rastro en disco que sobreviva a un
+  /// crash nativo (ver [WakeWordCrumbs]).
+  Future<void> cargar({void Function(String paso)? migaja});
 
   /// Corre el melspectrograma sobre `muestras` crudas. OJO: openWakeWord
   /// espera los valores int16 representados como float32 SIN normalizar (no se

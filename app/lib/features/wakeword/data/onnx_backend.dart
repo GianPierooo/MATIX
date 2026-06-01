@@ -52,15 +52,27 @@ class OnnxWakeWordBackend implements WakeWordBackend {
       OrtSessionOptions(providers: [OrtProvider.CPU], intraOpNumThreads: 1);
 
   @override
-  Future<void> cargar() async {
+  Future<void> cargar({void Function(String paso)? migaja}) async {
     // Idempotente: solo crea lo que falte (no refabrica ni fuga).
     if (_mel != null && _emb != null && _clf != null) {
       wlog('cargar(): ya cargado, no recreo sesiones');
       return;
     }
-    _mel ??= await _crearSesion('melspectrogram.onnx', 'melspectrograma');
-    _emb ??= await _crearSesion('embedding_model.onnx', 'embedding');
-    _clf ??= await _crearSesion(archivoClasificador, 'clasificador');
+    // La migaja se escribe ANTES de cada createSession: si el proceso muere de
+    // golpe al crear esa sesión (p.ej. la lib nativa al cargarse), el rastro en
+    // disco dice exactamente cuál.
+    if (_mel == null) {
+      migaja?.call('sesion:mel');
+      _mel = await _crearSesion('melspectrogram.onnx', 'melspectrograma');
+    }
+    if (_emb == null) {
+      migaja?.call('sesion:embedding');
+      _emb = await _crearSesion('embedding_model.onnx', 'embedding');
+    }
+    if (_clf == null) {
+      migaja?.call('sesion:clasificador');
+      _clf = await _crearSesion(archivoClasificador, 'clasificador');
+    }
     wlog('cargar(): las 3 sesiones ONNX listas');
   }
 

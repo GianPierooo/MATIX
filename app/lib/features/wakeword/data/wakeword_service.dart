@@ -5,6 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 
 import 'onnx_backend.dart';
+import 'wakeword_crumbs.dart';
 import 'wakeword_log.dart';
 import 'wakeword_pipeline.dart';
 
@@ -43,11 +44,14 @@ class WakeWordService implements WakeWordEscucha {
   WakeWordService({
     WakeWordBackend? backend,
     AudioRecorder? recorder,
+    WakeWordCrumbs? crumbs,
   })  : _backend = backend ?? OnnxWakeWordBackend(),
-        _recorder = recorder ?? AudioRecorder();
+        _recorder = recorder ?? AudioRecorder(),
+        _crumbs = crumbs ?? WakeWordCrumbs();
 
   final WakeWordBackend _backend;
   final AudioRecorder _recorder;
+  final WakeWordCrumbs _crumbs;
 
   WakeWordPipeline? _pipeline;
   StreamSubscription<Uint8List>? _sub;
@@ -81,17 +85,24 @@ class WakeWordService implements WakeWordEscucha {
       return;
     }
     var arranqueMic = false;
+    // Preparamos el archivo de migajas ANTES de cualquier paso nativo, para que
+    // las marcas síncronas funcionen aunque lo que siga muera de golpe.
+    await _crumbs.preparar();
     try {
+      _crumbs.marca('permiso');
       wlog('iniciar(): paso 1/4 — pidiendo permiso de micrófono…');
       await asegurarPermiso();
       wlog('iniciar(): permiso OK');
 
       wlog('iniciar(): paso 2/4 — cargando modelos ONNX…');
-      await _backend.cargar();
+      _crumbs.marca('cargar');
+      // El backend escribe una migaja por modelo (sesion:mel/embedding/...).
+      await _backend.cargar(migaja: _crumbs.marca);
       _pipeline = WakeWordPipeline(_backend, umbral: umbral);
       wlog('iniciar(): pipeline lista (umbral $umbral)');
 
       wlog('iniciar(): paso 3/4 — abriendo stream de micrófono…');
+      _crumbs.marca('mic-start');
       if (await _recorder.isRecording()) {
         await _recorder.stop();
       }
@@ -105,6 +116,9 @@ class WakeWordService implements WakeWordEscucha {
       arranqueMic = true;
       _activo = true;
       _primerFrame = true;
+      _primeraInferencia = true;
+      // Pasó toda la activación sin morir: estado seguro.
+      _crumbs.marca('escuchando-ok');
       // El callback nunca relanza (todo el cuerpo va en try/catch) y le
       // colgamos un catchError por si el Future async emitiera un error: así
       // un fallo de inferencia jamás escapa a la zona y tumba el proceso.
@@ -132,12 +146,14 @@ class WakeWordService implements WakeWordEscucha {
   }
 
   bool _primerFrame = false;
+  bool _primeraInferencia = false;
 
   Future<void> _alimentar(Uint8List bytes, void Function() onDeteccion) async {
     final p = _pipeline;
     if (!_activo || p == null) return;
     if (_primerFrame) {
       _primerFrame = false;
+      _crumbs.marca('primer-frame');
       wlog('primer frame de audio recibido (${bytes.length} bytes)');
     }
     // Si una inferencia previa aún corre, soltamos este lote: el wake word
@@ -146,7 +162,14 @@ class WakeWordService implements WakeWordEscucha {
     if (_procesando) return;
     _procesando = true;
     try {
+      // Migaja solo de la PRIMERA inferencia (la que primero cruza al nativo
+      // mel/embedding). No escribimos por frame: sería desgaste de disco.
+      if (_primeraInferencia) _crumbs.marca('inferencia');
       final detecto = await p.alimentarPcm(bytes);
+      if (_primeraInferencia) {
+        _primeraInferencia = false;
+        _crumbs.marca('inferencia-ok');
+      }
       if (detecto && _activo) {
         wlog('¡palabra detectada! disparando manos libres');
         onDeteccion();
@@ -163,6 +186,8 @@ class WakeWordService implements WakeWordEscucha {
   @override
   Future<void> detener() async {
     if (_activo) wlog('detener(): soltando micro');
+    // Cierre limpio: migaja segura, así un reinicio no lo confunde con muerte.
+    _crumbs.marca('apagado');
     _activo = false;
     await _sub?.cancel();
     _sub = null;

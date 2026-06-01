@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/wakeword_crumbs.dart';
 import '../data/wakeword_log.dart';
 import '../data/wakeword_prefs.dart';
 import '../data/wakeword_service.dart';
@@ -44,10 +45,14 @@ class WakeWordEstado {
 
 final wakeWordPrefsProvider = Provider<WakeWordPrefs>((ref) => WakeWordPrefs());
 
+/// Migajas de activación (diagnóstico de crash nativo sin USB). Compartidas
+/// entre el servicio (las escribe) y el controller (las lee al arrancar).
+final wakeWordCrumbsProvider = Provider<WakeWordCrumbs>((ref) => WakeWordCrumbs());
+
 /// Servicio del escuchador. Tipado como interfaz para inyectar un fake en
 /// tests (el real abre el micro y carga ONNX nativo).
 final wakeWordServiceProvider = Provider<WakeWordEscucha>((ref) {
-  final svc = WakeWordService();
+  final svc = WakeWordService(crumbs: ref.read(wakeWordCrumbsProvider));
   ref.onDispose(() => unawaited(svc.liberar()));
   return svc;
 });
@@ -66,6 +71,7 @@ final wakeWordControllerProvider =
 class WakeWordController extends Notifier<WakeWordEstado> {
   WakeWordEscucha get _svc => ref.read(wakeWordServiceProvider);
   WakeWordPrefs get _prefs => ref.read(wakeWordPrefsProvider);
+  WakeWordCrumbs get _crumbs => ref.read(wakeWordCrumbsProvider);
 
   bool _enFrente = true;
   bool _pausadoPorVoz = false;
@@ -88,6 +94,9 @@ class WakeWordController extends Notifier<WakeWordEstado> {
     try {
       await _prefs.fijarActivo(v);
       if (v) {
+        // Intento MANUAL y deliberado: borramos el rastro de una muerte previa
+        // para que sea un arranque limpio (el usuario está reintentando).
+        await _crumbs.limpiar();
         await _arrancar();
       } else {
         await _svc.detener();
@@ -101,9 +110,28 @@ class WakeWordController extends Notifier<WakeWordEstado> {
   }
 
   /// La app volvió a primer plano.
+  ///
+  /// Circuit breaker: si la última activación murió a mitad (crash nativo de
+  /// ONNX/micro), NO reintentamos sola al abrir — eso causaría un bucle de
+  /// crashes que deja la app inusable. La dejamos desarmada, mostramos en qué
+  /// paso murió, y el usuario decide si reintenta a mano.
   Future<void> alFrente() async {
     _enFrente = true;
-    if (await _prefs.activo()) await _arrancar();
+    if (!await _prefs.activo()) return;
+    final muerte = await _crumbs.muerteDeActivacion();
+    if (muerte != null) {
+      wlog('alFrente(): la última activación murió en "$muerte" → no auto-arranco');
+      await _prefs.fijarActivo(false);
+      await _crumbs.limpiar();
+      state = WakeWordEstado(
+        fase: FaseWakeWord.error,
+        error: 'La última vez que la activé, la app se cerró en el paso '
+            '"$muerte". La dejé en pausa para que la app abra bien. Vuelve a '
+            'activarla si quieres reintentar.',
+      );
+      return;
+    }
+    await _arrancar();
   }
 
   /// La app pasó a segundo plano: soltamos el micro (v1 solo escucha con la

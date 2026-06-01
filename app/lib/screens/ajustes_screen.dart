@@ -947,19 +947,23 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
 
   @override
   Widget build(BuildContext context) {
-    final fase = ref.watch(wakeWordControllerProvider).fase;
+    final estado = ref.watch(wakeWordControllerProvider);
+    final fase = estado.fase;
 
     String subtitulo;
     Color subColor = MatixColors.muted;
-    if (!_activo) {
+    if (fase == FaseWakeWord.error) {
+      // El mensaje de error trae el detalle (incluye en qué paso murió, si la
+      // app se cerró en el intento anterior). Lo mostramos tal cual.
+      subtitulo = estado.error ??
+          'No pude iniciar la escucha. Apágala y enciéndela otra vez.';
+      subColor = MatixColors.red;
+    } else if (!_activo) {
       subtitulo = 'Di la palabra y Matix abre el modo de voz. '
           'En esta versión de prueba responde a "hey jarvis".';
     } else if (fase == FaseWakeWord.sinPermiso) {
       subtitulo = 'Necesito permiso del micrófono. Concédelo y vuelve a '
           'activarla.';
-      subColor = MatixColors.red;
-    } else if (fase == FaseWakeWord.error) {
-      subtitulo = 'No pude iniciar la escucha. Apágala y enciéndela otra vez.';
       subColor = MatixColors.red;
     } else if (fase == FaseWakeWord.pausadoPorVoz) {
       subtitulo = 'En pausa mientras usas el modo de voz. Vuelve sola al '

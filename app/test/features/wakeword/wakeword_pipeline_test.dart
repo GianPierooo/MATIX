@@ -14,7 +14,7 @@ class _FakeBackend implements WakeWordBackend {
   int embCalls = 0;
 
   @override
-  Future<void> cargar() async {}
+  Future<void> cargar({void Function(String paso)? migaja}) async {}
 
   @override
   Future<List<Float32List>> melspectrograma(Float32List muestras) async {

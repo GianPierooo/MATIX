@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:matix/features/wakeword/data/wakeword_crumbs.dart';
 import 'package:matix/features/wakeword/data/wakeword_service.dart';
 import 'package:matix/features/wakeword/providers/wakeword_providers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -155,6 +158,56 @@ void main() {
 
     expect(c.read(wakeWordControllerProvider).fase, FaseWakeWord.error);
     expect(c.read(wakeWordControllerProvider).error, isNotNull);
+  });
+
+  test('circuit breaker: si la última activación murió, NO auto-arranca y '
+      'desarma (evita bucle de crashes)', () async {
+    SharedPreferences.setMockInitialValues({'wakeword_activo': true});
+    final tmp = await Directory.systemTemp.createTemp('ww_cb');
+    addTearDown(() async {
+      if (await tmp.exists()) await tmp.delete(recursive: true);
+    });
+    final crumbs = WakeWordCrumbs(archivo: File('${tmp.path}/c.txt'));
+    await crumbs.preparar();
+    crumbs.marca('sesion:mel'); // la vez pasada murió creando esa sesión
+
+    final fake = _FakeEscucha();
+    final c = ProviderContainer(overrides: [
+      wakeWordServiceProvider.overrideWithValue(fake),
+      wakeWordCrumbsProvider.overrideWithValue(crumbs),
+    ]);
+    addTearDown(c.dispose);
+    final ctrl = c.read(wakeWordControllerProvider.notifier);
+
+    await ctrl.alFrente(); // arranque de app: debería frenar, no reintentar
+
+    expect(fake.iniciarCount, 0); // NO auto-arrancó
+    expect(c.read(wakeWordControllerProvider).fase, FaseWakeWord.error);
+    expect(c.read(wakeWordControllerProvider).error, contains('sesion:mel'));
+    expect(await ctrl.estaActivo(), isFalse); // se desarmó solo
+  });
+
+  test('alFrente arranca normal si el último cierre fue limpio', () async {
+    SharedPreferences.setMockInitialValues({'wakeword_activo': true});
+    final tmp = await Directory.systemTemp.createTemp('ww_cb_ok');
+    addTearDown(() async {
+      if (await tmp.exists()) await tmp.delete(recursive: true);
+    });
+    final crumbs = WakeWordCrumbs(archivo: File('${tmp.path}/c.txt'));
+    await crumbs.preparar();
+    crumbs.marca('apagado'); // cierre limpio anterior
+
+    final fake = _FakeEscucha();
+    final c = ProviderContainer(overrides: [
+      wakeWordServiceProvider.overrideWithValue(fake),
+      wakeWordCrumbsProvider.overrideWithValue(crumbs),
+    ]);
+    addTearDown(c.dispose);
+
+    await c.read(wakeWordControllerProvider.notifier).alFrente();
+
+    expect(fake.iniciarCount, 1);
+    expect(c.read(wakeWordControllerProvider).fase, FaseWakeWord.escuchando);
   });
 
   test('activar(true) persiste y arranca; activar(false) apaga', () async {
