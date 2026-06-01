@@ -32,7 +32,9 @@ def _ext(nombre: str) -> str:
 
 
 def _texto_de_txt(datos: bytes) -> str:
-    return datos.decode("utf-8", errors="ignore")
+    # utf-8-sig se traga el BOM que ponen Notepad y otros editores de Windows
+    # (si no, el contenido arrancaría con un carácter invisible).
+    return datos.decode("utf-8-sig", errors="ignore")
 
 
 def _texto_de_pdf(datos: bytes) -> str:
