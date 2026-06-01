@@ -43,22 +43,37 @@ class WakeWordService : Service() {
         private const val NOTIF_ALERTA = 4712
         private const val TAG = "WAKEWORD_BG"
         private const val SR = 16000
+        // SharedPreferences nativa donde Dart espeja el umbral del slider.
+        const val SP = "matix_wakeword"
     }
 
     @Volatile private var corriendo = false
     private var hilo: Thread? = null
+    private var umbralActual = 0.30
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val umbral = intent?.getDoubleExtra(EXTRA_UMBRAL, 0.30) ?: 0.30
-        val clf = intent?.getStringExtra(EXTRA_CLASIFICADOR) ?: "hey_jarvis_v0.1.onnx"
+        // UNA fuente de verdad del umbral: el valor del slider, que Dart espeja a
+        // esta SharedPreferences nativa (`matix_wakeword`) cada vez que arranca
+        // el service. Si el SO recrea el service (START_STICKY) con intent nulo,
+        // igual leemos el último valor de aquí — nunca volvemos a un default
+        // distinto del que el usuario eligió.
+        val sp = getSharedPreferences(SP, Context.MODE_PRIVATE)
+        val umbral = if (intent != null && intent.hasExtra(EXTRA_UMBRAL)) {
+            intent.getDoubleExtra(EXTRA_UMBRAL, 0.30)
+        } else {
+            sp.getFloat("umbral", 0.30f).toDouble()
+        }
+        val clf = intent?.getStringExtra(EXTRA_CLASIFICADOR)
+            ?: sp.getString("clasificador", null) ?: "hey_jarvis_v0.1.onnx"
+        umbralActual = umbral
         crearCanales()
         // startForeground con el type de micrófono (obligatorio en Android 10+).
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIF_ESCUCHA, notifEscucha(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            startForeground(NOTIF_ESCUCHA, notifEscucha(0.0, 0.0, umbral), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
         } else {
-            startForeground(NOTIF_ESCUCHA, notifEscucha())
+            startForeground(NOTIF_ESCUCHA, notifEscucha(0.0, 0.0, umbral))
         }
         if (!corriendo) {
             corriendo = true
@@ -97,9 +112,12 @@ class WakeWordService : Service() {
             rec.startRecording()
             Log.i(TAG, "AudioRecord grabando")
 
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val pend = ArrayList<Short>(WakeWordOnnx.BLOQUE * 2)
             val buf = ShortArray(WakeWordOnnx.BLOQUE)
             var primero = true
+            var maxScore = 0.0
+            var ultimaNotif = 0L
             while (corriendo) {
                 val n = rec.read(buf, 0, buf.size)
                 if (n <= 0) continue
@@ -108,13 +126,24 @@ class WakeWordService : Service() {
                 while (pend.size >= WakeWordOnnx.BLOQUE) {
                     val bloque = ShortArray(WakeWordOnnx.BLOQUE) { pend[it] }
                     pend.subList(0, WakeWordOnnx.BLOQUE).clear()
-                    if (onnx.procesarBloque(bloque)) {
+                    val det = onnx.procesarBloque(bloque)
+                    if (onnx.ultimoScore > maxScore) maxScore = onnx.ultimoScore
+                    if (det) {
                         Log.i(TAG, "DETECTADO en background (score=${onnx.ultimoScore})")
                         dispararAlerta()
                         // Refractario del pipeline ya evita re-disparo inmediato;
                         // además limpiamos el pendiente para no encolar audio.
                         pend.clear()
+                        maxScore = 0.0
                     }
+                }
+                // Readout en segundo plano: refrescamos la notificación con el
+                // score máx / actual y el umbral, ~cada 1.2 s (sin sonido, canal
+                // de baja importancia). Así se ve qué tan cerca del umbral está.
+                val ahora = System.currentTimeMillis()
+                if (ahora - ultimaNotif > 1200) {
+                    ultimaNotif = ahora
+                    nm.notify(NOTIF_ESCUCHA, notifEscucha(maxScore, onnx.ultimoScore, umbral))
                 }
             }
         } catch (e: Exception) {
@@ -176,19 +205,25 @@ class WakeWordService : Service() {
         )
     }
 
-    private fun notifEscucha(): Notification {
+    private fun notifEscucha(maxScore: Double, ahora: Double, umbral: Double): Notification {
         val abrir = Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val pi = PendingIntent.getActivity(
             this, 1, abrir, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        // Readout visible del modo segundo plano: score y umbral activos.
+        val texto = "score máx ${fmt(maxScore)} (ahora ${fmt(ahora)}) · umbral ${fmt(umbral)}"
         return NotificationCompat.Builder(this, CANAL_ESCUCHA)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle("Matix está escuchando")
-            .setContentText("Di \"hey jarvis\" para abrir el modo de voz")
+            .setContentText(texto)
+            .setStyle(NotificationCompat.BigTextStyle().bigText("$texto\nDi \"hey jarvis\" para abrir el modo de voz."))
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .setContentIntent(pi)
             .build()
     }
+
+    private fun fmt(x: Double): String = String.format(java.util.Locale.US, "%.2f", x)
 }

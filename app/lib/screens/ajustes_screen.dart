@@ -1015,12 +1015,13 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
       subtitulo = 'En pausa mientras usas el modo de voz. Vuelve sola al '
           'terminar.';
     } else {
-      // Mostramos el score en vivo: así se ve si "hey jarvis" cruza el umbral
-      // (diagnóstico sin depender de logcat, que el Honor filtra).
+      // Mostramos el score en vivo y el umbral activo: así se ve qué tan cerca
+      // está de disparar (diagnóstico sin depender de logcat, que el Honor
+      // filtra). El mismo umbral lo usa también el modo segundo plano.
       final maxS = estado.maxScore.toStringAsFixed(2);
       final ultS = estado.ultimoScore.toStringAsFixed(2);
-      subtitulo = 'Escuchando "hey jarvis" · score máx $maxS (ahora $ultS). '
-          'Solo con la app abierta.';
+      subtitulo = 'Escuchando · score máx $maxS (ahora $ultS) · '
+          'umbral ${_umbral.toStringAsFixed(2)}.';
       subColor = MatixColors.green;
     }
 
@@ -1079,10 +1080,11 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
                   const Icon(Icons.tune, color: MatixColors.muted, size: 16),
                   const SizedBox(width: 8),
                   Text(
-                    'Sensibilidad ${_umbral.toStringAsFixed(2)}',
+                    'Umbral ${_umbral.toStringAsFixed(2)}',
                     style: const TextStyle(
                       fontSize: 12,
-                      color: MatixColors.muted,
+                      fontWeight: FontWeight.w600,
+                      color: MatixColors.text,
                     ),
                   ),
                   Expanded(
@@ -1111,7 +1113,7 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
                   const Expanded(
                     child: Text(
                       'Escuchar en segundo plano\n(app cerrada / pantalla '
-                      'apagada · más batería)',
+                      'apagada · mismo umbral · más batería)',
                       style: TextStyle(fontSize: 12, color: MatixColors.muted),
                     ),
                   ),

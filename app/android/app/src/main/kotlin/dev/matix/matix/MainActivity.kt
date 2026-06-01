@@ -104,6 +104,13 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun iniciarService(umbral: Double, clf: String) {
+        // Espejamos el umbral del slider a la SharedPreferences nativa que lee
+        // el service: así, aunque el SO recree el service (START_STICKY) con
+        // intent nulo, usa el MISMO umbral que el pipeline Dart. Fuente única.
+        getSharedPreferences(WakeWordService.SP, Context.MODE_PRIVATE).edit()
+            .putFloat("umbral", umbral.toFloat())
+            .putString("clasificador", clf)
+            .apply()
         val intent = Intent(this, WakeWordService::class.java).apply {
             putExtra(WakeWordService.EXTRA_UMBRAL, umbral)
             putExtra(WakeWordService.EXTRA_CLASIFICADOR, clf)
