@@ -133,21 +133,25 @@ def _imagen_a_anthropic(url: str) -> dict[str, Any]:
 def _contenido_usuario_anthropic(content: Any) -> Any:
     """Contenido de un mensaje de usuario: texto plano tal cual, o lista
     multimodal [texto, imagen] traducida a bloques de Anthropic."""
+    # Anthropic RECHAZA contenido de usuario vacío (rompería el hilo). Nunca
+    # devolvemos cadena/lista vacía: un placeholder neutro mantiene el turno.
     if isinstance(content, str):
-        return content
+        return content if content.strip() else "(adjunto)"
     if isinstance(content, list):
         bloques: list[dict[str, Any]] = []
         for parte in content:
             if not isinstance(parte, dict):
                 continue
             if parte.get("type") == "text":
-                bloques.append({"type": "text", "text": parte.get("text", "")})
+                texto = parte.get("text", "")
+                if texto.strip():
+                    bloques.append({"type": "text", "text": texto})
             elif parte.get("type") == "image_url":
                 url = (parte.get("image_url") or {}).get("url", "")
                 if url:
                     bloques.append(_imagen_a_anthropic(url))
-        return bloques or ""
-    return content or ""
+        return bloques or "(adjunto)"
+    return content or "(adjunto)"
 
 
 def _a_anthropic(messages: list[dict]) -> tuple[str, list[dict]]:

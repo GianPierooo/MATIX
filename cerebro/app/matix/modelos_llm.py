@@ -81,6 +81,13 @@ def modelo_por_id(modelo_id: str | None) -> ModeloLLM | None:
     return _POR_ID.get(modelo_id or "")
 
 
+def etiqueta_de(modelo_id: str | None) -> str:
+    """Nombre amigable del modelo (ej. «Claude Sonnet 4.6»). Si el id no está
+    en el catálogo, devuelve el id tal cual — nunca vacío."""
+    m = _POR_ID.get(modelo_id or "")
+    return m.etiqueta if m else (modelo_id or "desconocido")
+
+
 def precios_de(modelo_id: str | None) -> tuple[float, float] | None:
     """(input, output) por 1M tokens del modelo, o None si no está en el
     catálogo (el medidor usa entonces su default)."""

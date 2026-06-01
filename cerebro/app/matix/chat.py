@@ -27,7 +27,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..db import Postgrest
-from . import enrutador, llm, memoria, modelos_llm, modos
+from . import enrutador, estado, llm, memoria, modelos_llm, modos
 from .contexto import contexto_vivo
 from .system_prompt import system_prompt_fijo
 from .tools import TABLAS_AFECTADAS, TOOL_DEFINITIONS, ejecutar_tool
@@ -151,31 +151,6 @@ async def conversar(
             }
         )
 
-    for m in historial:
-        rol = m.get("rol") or m.get("role")
-        if rol not in ("user", "assistant"):
-            continue
-        mensajes.append({"role": rol, "content": m["contenido"]})
-
-    # El turno actual: si trae imagen, el `content` es una lista
-    # multimodal [texto, imagen] que gpt-4o-mini (visión) entiende. La
-    # imagen solo viaja en ESTE turno — no entra al historial, así no
-    # se re-manda en turnos siguientes.
-    if imagen:
-        contenido_usuario: Any = [
-            {"type": "text", "text": mensaje},
-            {"type": "image_url", "image_url": {"url": imagen}},
-        ]
-    else:
-        contenido_usuario = mensaje
-    mensajes.append({"role": "user", "content": contenido_usuario})
-
-    tools_usadas: list[str] = []
-    tablas_cambiadas: list[str] = []
-    # Sección a la que llevar al usuario si pidió navegar ("llévame a
-    # Universidad"). Gana la última llamada a `navegar` del turno.
-    navegacion: str | None = None
-
     # Modelo (y por ende proveedor) del CHAT: se resuelve UNA sola vez al
     # arrancar el turno y se usa en TODAS las vueltas del loop. Crítico: si el
     # usuario cambia de modelo a mitad de conversación, el cambio aplica desde
@@ -206,6 +181,53 @@ async def conversar(
             modelo = decision.modelo
     else:
         modelo = seleccion
+
+    # ESTADO DE MATIX + el modelo REAL de este turno (id + nombre amigable),
+    # como contexto `system`. Así Matix reporta con precisión en qué modelo
+    # está (incluido Automático, que resuelve por mensaje) y qué puede hacer,
+    # sin depender de cómo se autoidentifique el modelo subyacente.
+    mensajes.append(
+        {
+            "role": "system",
+            "content": estado.bloque_estado(
+                modelo_id=modelo,
+                modelo_etiqueta=modelos_llm.etiqueta_de(modelo),
+                auto=auto,
+            ),
+        }
+    )
+
+    # Historial entre turnos: SIEMPRE desde los campos NEUTROS ({rol,
+    # contenido} de texto), nunca el `raw` de otro proveedor. Un turno
+    # solo-imagen/solo-documento se guardó con texto vacío: OpenAI lo tolera,
+    # pero Anthropic RECHAZA contenido vacío y rompería el hilo al cambiar a
+    # Claude. Le ponemos un placeholder neutro para no perder el turno ni el
+    # orden de la conversación.
+    for m in historial:
+        rol = m.get("rol") or m.get("role")
+        if rol not in ("user", "assistant"):
+            continue
+        contenido = (m.get("contenido") or "").strip() or "(adjunto)"
+        mensajes.append({"role": rol, "content": contenido})
+
+    # El turno actual: si trae imagen, el `content` es una lista
+    # multimodal [texto, imagen] que el modelo de visión entiende. La
+    # imagen solo viaja en ESTE turno — no entra al historial, así no
+    # se re-manda en turnos siguientes.
+    if imagen:
+        contenido_usuario: Any = [
+            {"type": "text", "text": mensaje},
+            {"type": "image_url", "image_url": {"url": imagen}},
+        ]
+    else:
+        contenido_usuario = mensaje
+    mensajes.append({"role": "user", "content": contenido_usuario})
+
+    tools_usadas: list[str] = []
+    tablas_cambiadas: list[str] = []
+    # Sección a la que llevar al usuario si pidió navegar ("llévame a
+    # Universidad"). Gana la última llamada a `navegar` del turno.
+    navegacion: str | None = None
 
     ultima_respuesta = ""
 
