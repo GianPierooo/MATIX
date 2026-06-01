@@ -31,6 +31,10 @@ class _FakeEscucha implements WakeWordEscucha {
     _onScore = onScore;
   }
 
+  double? umbralFijado;
+  @override
+  void fijarUmbral(double umbral) => umbralFijado = umbral;
+
   @override
   Future<void> detener() async {
     detenerCount++;
@@ -58,6 +62,8 @@ class _EscuchaQueFalla implements WakeWordEscucha {
     throw Exception('ONNX no cargó (simulado)');
   }
 
+  @override
+  void fijarUmbral(double umbral) {}
   @override
   Future<void> detener() async => detenerCount++;
   @override
@@ -113,6 +119,38 @@ void main() {
     await ctrl.reanudarTrasVoz(); // manos libres terminó
     expect(fake.iniciarCount, 2); // retomó la escucha
     expect(c.read(wakeWordControllerProvider).fase, FaseWakeWord.escuchando);
+  });
+
+  test('fuente única de verdad: modoVozActivo true pausa, false reanuda',
+      () async {
+    SharedPreferences.setMockInitialValues({'wakeword_activo': true});
+    final fake = _FakeEscucha();
+    final c = hacerContainer(fake);
+    final ctrl = c.read(wakeWordControllerProvider.notifier);
+    await ctrl.alFrente(); // escuchando
+    expect(fake.iniciarCount, 1);
+
+    // Entra el modo voz (manos libres) → el listener pausa.
+    c.read(modoVozActivoProvider.notifier).state = true;
+    await pumpEventQueue();
+    expect(fake.detenerCount, greaterThanOrEqualTo(1));
+    expect(c.read(wakeWordControllerProvider).fase, FaseWakeWord.pausadoPorVoz);
+
+    // Sale el modo voz por CUALQUIER vía → el listener reanuda solo.
+    c.read(modoVozActivoProvider.notifier).state = false;
+    await pumpEventQueue();
+    expect(fake.iniciarCount, 2);
+    expect(c.read(wakeWordControllerProvider).fase, FaseWakeWord.escuchando);
+  });
+
+  test('cambiarUmbral persiste y lo aplica en vivo', () async {
+    SharedPreferences.setMockInitialValues({});
+    final fake = _FakeEscucha();
+    final c = hacerContainer(fake);
+    final ctrl = c.read(wakeWordControllerProvider.notifier);
+    await ctrl.cambiarUmbral(0.25);
+    expect(fake.umbralFijado, 0.25); // aplicado en vivo al pipeline
+    expect(await ctrl.umbral(), 0.25); // persistido
   });
 
   test('al fondo suelta el micro (v1 solo escucha con la app abierta)',

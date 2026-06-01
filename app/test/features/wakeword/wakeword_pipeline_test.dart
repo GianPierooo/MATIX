@@ -106,6 +106,22 @@ void main() {
     expect(dets, 0);
   });
 
+  test('el umbral es mutable en vivo (slider de sensibilidad)', () async {
+    final fake = _FakeBackend(score: 0.35);
+    final p = WakeWordPipeline(fake, umbral: 0.5);
+    var dets = 0;
+    for (var i = 0; i < 16; i++) {
+      if (await p.alimentarPcm(_bloque())) dets++;
+    }
+    expect(dets, 0); // 0.35 < 0.5
+
+    p.umbral = 0.30; // el usuario baja la sensibilidad en vivo
+    for (var i = 0; i < 16; i++) {
+      if (await p.alimentarPcm(_bloque())) dets++;
+    }
+    expect(dets, greaterThan(0)); // ahora 0.35 ≥ 0.30 → dispara
+  });
+
   test('acumula bytes parciales hasta completar un bloque', () async {
     final fake = _FakeBackend(score: 0.9);
     final p = WakeWordPipeline(fake, umbral: 0.5);

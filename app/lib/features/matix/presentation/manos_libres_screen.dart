@@ -47,10 +47,11 @@ class _ManosLibresScreenState extends ConsumerState<ManosLibresScreen> {
   @override
   void initState() {
     super.initState();
-    // Relevo del micrófono: mientras manos libres está abierto, el escuchador
-    // de wake word suelta el micro para que no peleen. (Único punto de entrada
-    // al modo, sea por el botón o por la palabra detectada.)
-    ref.read(wakeWordControllerProvider.notifier).pausarPorVoz();
+    // Fuente ÚNICA de verdad del relevo de micro: marcamos "modo voz activo".
+    // El listener del wake word reacciona (suelta el micro). Mientras esta
+    // pantalla exista, el modo voz está activo; cuando se destruya (por la vía
+    // que sea), se apaga en dispose() y el wake word reanuda solo.
+    ref.read(modoVozActivoProvider.notifier).state = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref
           .read(manosLibresProvider.notifier)
@@ -66,8 +67,10 @@ class _ManosLibresScreenState extends ConsumerState<ManosLibresScreen> {
 
   @override
   void dispose() {
-    // Manos libres terminó: el escuchador retoma el micro si sigue activo.
-    unawaited(ref.read(wakeWordControllerProvider.notifier).reanudarTrasVoz());
+    // El modo voz terminó pase lo que pase (back, completar, cancelar, navegar
+    // a otra pantalla): apagamos la fuente de verdad y el wake word reanuda.
+    // dispose() SIEMPRE corre al quitar la ruta, así que nunca queda pegado.
+    ref.read(modoVozActivoProvider.notifier).state = false;
     _scrollCtrl.dispose();
     super.dispose();
   }

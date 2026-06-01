@@ -63,6 +63,16 @@ class WakeWordEstado {
 
 final wakeWordPrefsProvider = Provider<WakeWordPrefs>((ref) => WakeWordPrefs());
 
+/// FUENTE ÚNICA DE VERDAD del relevo de micrófono: ¿hay un modo voz (manos
+/// libres) activo ahora mismo?
+///
+/// La fija `ManosLibresScreen`: `true` al abrirse, `false` al cerrarse por
+/// CUALQUIER vía (completar, cancelar, botón atrás, navegar a otra pantalla,
+/// salir). El listener del wake word la observa: activo → pausa; inactivo →
+/// reanuda. Así el escuchador nunca queda pegado en pausa, sin importar cómo
+/// se salga del modo voz.
+final modoVozActivoProvider = StateProvider<bool>((ref) => false);
+
 /// Migajas de activación (diagnóstico de crash nativo sin USB). Compartidas
 /// entre el servicio (las escribe) y el controller (las lee al arrancar).
 final wakeWordCrumbsProvider = Provider<WakeWordCrumbs>((ref) => WakeWordCrumbs());
@@ -96,7 +106,20 @@ class WakeWordController extends Notifier<WakeWordEstado> {
   VoidCallback? _alDetectar;
 
   @override
-  WakeWordEstado build() => const WakeWordEstado();
+  WakeWordEstado build() {
+    // Relevo de micro por fuente única de verdad: el modo voz (manos libres)
+    // manda. Al activarse soltamos el micro; al desactivarse (por la vía que
+    // sea) reanudamos. El listener vive lo que vive el controller (no
+    // autoDispose), así que no hay fugas.
+    ref.listen<bool>(modoVozActivoProvider, (anterior, activo) {
+      if (activo) {
+        pausarPorVoz();
+      } else {
+        unawaited(reanudarTrasVoz());
+      }
+    });
+    return const WakeWordEstado();
+  }
 
   /// Registra qué hacer cuando se detecta la palabra (abrir manos libres). Lo
   /// fija el root de la app, que tiene el navigatorKey global.
@@ -104,6 +127,13 @@ class WakeWordController extends Notifier<WakeWordEstado> {
 
   Future<bool> estaActivo() => _prefs.activo();
   Future<double> umbral() => _prefs.umbral();
+
+  /// Cambia la sensibilidad EN VIVO desde el slider de Ajustes: persiste y, si
+  /// está escuchando, la aplica al instante sin re-armar.
+  Future<void> cambiarUmbral(double v) async {
+    await _prefs.fijarUmbral(v);
+    _svc.fijarUmbral(v);
+  }
 
   /// Enciende/apaga la palabra desde Ajustes. Al encender pide el permiso de
   /// micrófono; si se niega, queda en [FaseWakeWord.sinPermiso].

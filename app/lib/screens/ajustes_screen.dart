@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -923,6 +925,7 @@ class _WakeWordTile extends ConsumerStatefulWidget {
 class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
   bool _activo = false;
   bool _cargando = true;
+  double _umbral = 0.30;
 
   @override
   void initState() {
@@ -931,10 +934,13 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
   }
 
   Future<void> _cargar() async {
-    final v = await ref.read(wakeWordControllerProvider.notifier).estaActivo();
+    final notifier = ref.read(wakeWordControllerProvider.notifier);
+    final v = await notifier.estaActivo();
+    final u = await notifier.umbral();
     if (mounted) {
       setState(() {
         _activo = v;
+        _umbral = u;
         _cargando = false;
       });
     }
@@ -943,6 +949,12 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
   Future<void> _cambiar(bool v) async {
     setState(() => _activo = v);
     await ref.read(wakeWordControllerProvider.notifier).activar(v);
+  }
+
+  void _cambiarUmbral(double v) {
+    setState(() => _umbral = v);
+    // Persiste y aplica en vivo (sin re-armar la escucha).
+    unawaited(ref.read(wakeWordControllerProvider.notifier).cambiarUmbral(v));
   }
 
   @override
@@ -985,40 +997,73 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
         color: MatixColors.card,
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Row(
+      child: Column(
         children: [
-          const Icon(Icons.graphic_eq, color: MatixColors.accent, size: 22),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Padding(
-                  padding: EdgeInsets.only(top: 6),
-                  child: Text(
-                    'Palabra de activación',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: MatixColors.text,
+          Row(
+            children: [
+              const Icon(Icons.graphic_eq, color: MatixColors.accent, size: 22),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 6),
+                      child: Text(
+                        'Palabra de activación',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: MatixColors.text,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        subtitulo,
+                        style: TextStyle(fontSize: 12, color: subColor),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: _activo,
+                onChanged: _cargando ? null : _cambiar,
+              ),
+            ],
+          ),
+          // Sensibilidad: slider para afinar el umbral en vivo. Visible cuando
+          // está encendida. Menos umbral = dispara más fácil (más sensible).
+          if (_activo && !_cargando)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 0, 8, 4),
+              child: Row(
+                children: [
+                  const Icon(Icons.tune, color: MatixColors.muted, size: 16),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Sensibilidad ${_umbral.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: MatixColors.muted,
                     ),
                   ),
-                ),
-                const SizedBox(height: 2),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    subtitulo,
-                    style: TextStyle(fontSize: 12, color: subColor),
+                  Expanded(
+                    child: Slider(
+                      value: _umbral.clamp(0.10, 0.70),
+                      min: 0.10,
+                      max: 0.70,
+                      divisions: 12,
+                      label: _umbral.toStringAsFixed(2),
+                      onChanged: _cambiarUmbral,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          Switch(
-            value: _activo,
-            onChanged: _cargando ? null : _cambiar,
-          ),
         ],
       ),
     );

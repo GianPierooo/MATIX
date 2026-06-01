@@ -27,6 +27,10 @@ abstract class WakeWordEscucha {
     required void Function() onDeteccion,
     void Function(double score)? onScore,
   });
+
+  /// Ajusta el umbral de detección EN VIVO (slider de Ajustes), sin re-armar.
+  void fijarUmbral(double umbral);
+
   Future<void> detener();
   Future<void> liberar();
 }
@@ -148,6 +152,11 @@ class WakeWordService implements WakeWordEscucha {
       }
       rethrow;
     }
+  }
+
+  @override
+  void fijarUmbral(double umbral) {
+    _pipeline?.umbral = umbral;
   }
 
   bool _primerFrame = false;

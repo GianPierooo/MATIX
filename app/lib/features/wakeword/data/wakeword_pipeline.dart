@@ -49,8 +49,13 @@ class WakeWordPipeline {
     this.refractarioFrames = kRefractarioPorDefecto,
   });
 
-  /// Umbral recomendado por openWakeWord para sus modelos pre-entrenados.
-  static const double kUmbralPorDefecto = 0.5;
+  /// Umbral por defecto. openWakeWord recomienda 0.5 para sus modelos, pero
+  /// "hey jarvis" es un modelo en INGLÉS y el usuario habla español: en device
+  /// real los scores al decir "hey jarvis" llegan a ~0.40, así que 0.5 casi
+  /// nunca cruza. Bajamos el default a 0.30 (con margen bajo ese 0.40) para que
+  /// el placeholder sea usable. El modelo "oye matix" en español subirá los
+  /// scores y se podrá volver a subir. Ajustable en vivo desde Ajustes.
+  static const double kUmbralPorDefecto = 0.30;
 
   /// Tras una detección, cuántos bloques (≈80 ms c/u) se ignoran antes de
   /// volver a clasificar. 16 ≈ 1.28 s: evita que el mismo "hey jarvis"
@@ -70,7 +75,10 @@ class WakeWordPipeline {
   static const int _maxFeatures = 120; // ~10 s de embeddings
 
   final WakeWordBackend _backend;
-  final double umbral;
+
+  /// Umbral de detección (0..1). Mutable para poder afinarlo en vivo desde el
+  /// slider de Ajustes sin re-armar la escucha.
+  double umbral;
   final int refractarioFrames;
 
   final List<int> _pendiente = []; // muestras int16 aún sin completar bloque
