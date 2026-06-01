@@ -93,6 +93,24 @@ android {
             )
         }
     }
+
+    // Comprimir las librerías nativas (.so) DENTRO del APK.
+    //
+    // AGP 8 por defecto las guarda sin comprimir (`useLegacyPackaging=false`,
+    // extractNativeLibs=false): más rápido de cargar, pero infla el APK. Con
+    // el wake word, `libonnxruntime.so` (~18 MB) + ML Kit + Flutter dejaron el
+    // APK arm64 en ~57 MB, por encima del tope de subida de Supabase Storage
+    // del plan free (50 MB), y el publish del OTA fallaba con 413.
+    //
+    // Comprimiéndolas (DEFLATE) el APK baja muy por debajo de 50 MB. El costo
+    // es que se extraen al instalar (algo más de disco/instalación), aceptable
+    // para distribución por sideload. Mantiene el APK arm64 (sin cambiar de
+    // ABI, así no hay downgrade de versionCode en el device ya instalado).
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 flutter {
