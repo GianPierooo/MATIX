@@ -1,16 +1,34 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 
+import 'wakeword_log.dart';
 import 'wakeword_pipeline.dart';
+
+/// Falla controlada al cargar/usar un modelo ONNX. Lleva el nombre del modelo
+/// para que el estado de error y los logs digan EXACTAMENTE cuál reventó.
+class WakeWordOnnxError implements Exception {
+  WakeWordOnnxError(this.paso, this.causa);
+  final String paso;
+  final Object causa;
+  @override
+  String toString() => 'WakeWordOnnxError($paso): $causa';
+}
 
 /// Implementación real de [WakeWordBackend] con la cadena ONNX de openWakeWord
 /// (melspectrograma → embedding → clasificador) corriendo on-device vía
 /// `flutter_onnxruntime`.
 ///
-/// Las tres sesiones se mantienen vivas mientras el escuchador está activo. El
-/// trabajo nativo corre por method channel (fuera del hilo de UI de Dart), así
-/// que las ~12.5 inferencias/s no traban la interfaz. Cada `OrtValue` se libera
-/// tras usarse para no fugar memoria nativa.
+/// Robustez (esta cadena corre por 1ra vez en hardware real al activar la
+/// palabra):
+/// - Carga IDEMPOTENTE y por-sesión: si ya está cargada no recrea nada (antes
+///   `iniciar` llamaba `cargar` en cada arranque/relevo y fugaba sesiones).
+/// - Sesiones forzadas a CPU + 1 hilo intra-op: lo más compatible y liviano en
+///   gama baja (evita rutas NNAPI/XNNPACK y pools de hilos que pueden tronar).
+/// - Cada paso envuelto en try/catch y logueado. Un fallo CATCHABLE se traduce
+///   en [WakeWordOnnxError] (→ estado error visible, sin tumbar la app). Un
+///   crash NATIVO (SIGSEGV) no se puede atrapar desde Dart, pero el log deja
+///   ver el último paso vivo.
 class OnnxWakeWordBackend implements WakeWordBackend {
   OnnxWakeWordBackend({
     this.dirAssets = 'assets/models/wakeword',
@@ -29,12 +47,46 @@ class OnnxWakeWordBackend implements WakeWordBackend {
   OrtSession? _emb;
   OrtSession? _clf;
 
+  // Sesiones a CPU + 1 hilo: estable y suficiente para modelos diminutos.
+  OrtSessionOptions get _opts =>
+      OrtSessionOptions(providers: [OrtProvider.CPU], intraOpNumThreads: 1);
+
   @override
   Future<void> cargar() async {
-    _mel = await _ort.createSessionFromAsset('$dirAssets/melspectrogram.onnx');
-    _emb = await _ort.createSessionFromAsset('$dirAssets/embedding_model.onnx');
-    _clf = await _ort.createSessionFromAsset('$dirAssets/$archivoClasificador');
+    // Idempotente: solo crea lo que falte (no refabrica ni fuga).
+    if (_mel != null && _emb != null && _clf != null) {
+      wlog('cargar(): ya cargado, no recreo sesiones');
+      return;
+    }
+    _mel ??= await _crearSesion('melspectrogram.onnx', 'melspectrograma');
+    _emb ??= await _crearSesion('embedding_model.onnx', 'embedding');
+    _clf ??= await _crearSesion(archivoClasificador, 'clasificador');
+    wlog('cargar(): las 3 sesiones ONNX listas');
   }
+
+  Future<OrtSession> _crearSesion(String archivo, String etiqueta) async {
+    final assetKey = '$dirAssets/$archivo';
+    try {
+      // 1) Confirmar que el asset existe y se puede leer (error catchable de
+      //    Dart, NO crash nativo). Logueamos el tamaño para verificar que no
+      //    llegó truncado.
+      final bytes = await rootBundle.load(assetKey);
+      wlog('sesion[$etiqueta]: asset $archivo cargado (${bytes.lengthInBytes} bytes), creando sesión…');
+      // 2) Crear la sesión ONNX (esto cruza al nativo; un modelo corrupto o un
+      //    ORT incompatible podría tronar aquí — el log de arriba es la última
+      //    pista si muere).
+      final s = await _ort.createSessionFromAsset(assetKey, options: _opts);
+      wlog('sesion[$etiqueta]: OK · in=${s.inputNames} out=${s.outputNames}');
+      return s;
+    } catch (e) {
+      wlog('sesion[$etiqueta]: FALLÓ → $e');
+      throw WakeWordOnnxError(etiqueta, e);
+    }
+  }
+
+  bool _logueoPrimerMel = false;
+  bool _logueoPrimerEmb = false;
+  bool _logueoPrimerClf = false;
 
   @override
   Future<List<Float32List>> melspectrograma(Float32List muestras) async {
@@ -56,6 +108,10 @@ class OnnxWakeWordBackend implements WakeWordBackend {
             f[j] = plano[i + j].toDouble() / 10.0 + 2.0;
           }
           frames.add(f);
+        }
+        if (!_logueoPrimerMel) {
+          _logueoPrimerMel = true;
+          wlog('1er melspectrograma OK (${frames.length} frames)');
         }
         return frames;
       } finally {
@@ -89,6 +145,10 @@ class OnnxWakeWordBackend implements WakeWordBackend {
         for (var i = 0; i < plano.length; i++) {
           out[i] = plano[i].toDouble();
         }
+        if (!_logueoPrimerEmb) {
+          _logueoPrimerEmb = true;
+          wlog('1er embedding OK (dim ${out.length})');
+        }
         return out;
       } finally {
         await _liberarSalida(salida);
@@ -117,7 +177,12 @@ class OnnxWakeWordBackend implements WakeWordBackend {
       final t = salida[s.outputNames.first]!;
       try {
         final plano = (await t.asFlattenedList()).cast<num>();
-        return plano.isEmpty ? 0.0 : plano.first.toDouble();
+        final score = plano.isEmpty ? 0.0 : plano.first.toDouble();
+        if (!_logueoPrimerClf) {
+          _logueoPrimerClf = true;
+          wlog('1er clasificador OK (score $score)');
+        }
+        return score;
       } finally {
         await _liberarSalida(salida);
       }
@@ -142,7 +207,7 @@ class OnnxWakeWordBackend implements WakeWordBackend {
       try {
         await s?.close();
       } catch (e) {
-        if (kDebugMode) debugPrint('WakeWord: error cerrando sesión ONNX: $e');
+        wlog('error cerrando sesión ONNX: $e');
       }
     }
     _mel = null;

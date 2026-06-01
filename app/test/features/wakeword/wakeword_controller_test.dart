@@ -37,6 +37,25 @@ class _FakeEscucha implements WakeWordEscucha {
   void simularDeteccion() => _onDeteccion?.call();
 }
 
+/// Fake que SIEMPRE falla al iniciar (simula carga ONNX rota en el device).
+class _EscuchaQueFalla implements WakeWordEscucha {
+  int detenerCount = 0;
+  @override
+  bool get activo => false;
+  @override
+  Future<void> iniciar({
+    required double umbral,
+    required void Function() onDeteccion,
+  }) async {
+    throw Exception('ONNX no cargó (simulado)');
+  }
+
+  @override
+  Future<void> detener() async => detenerCount++;
+  @override
+  Future<void> liberar() async {}
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -119,6 +138,23 @@ void main() {
     expect(abierto, 1); // disparó la navegación a manos libres
     expect(fake.detenerCount, greaterThan(detenerAntes)); // soltó el micro
     expect(c.read(wakeWordControllerProvider).fase, FaseWakeWord.pausadoPorVoz);
+  });
+
+  test('si iniciar falla (ONNX roto), va a estado error SIN crashear',
+      () async {
+    SharedPreferences.setMockInitialValues({'wakeword_activo': true});
+    final fake = _EscuchaQueFalla();
+    final c = ProviderContainer(overrides: [
+      wakeWordServiceProvider.overrideWithValue(fake),
+    ]);
+    addTearDown(c.dispose);
+    final ctrl = c.read(wakeWordControllerProvider.notifier);
+
+    // No debe lanzar: el fallo se traduce a estado error, no a excepción.
+    await ctrl.activar(true);
+
+    expect(c.read(wakeWordControllerProvider).fase, FaseWakeWord.error);
+    expect(c.read(wakeWordControllerProvider).error, isNotNull);
   });
 
   test('activar(true) persiste y arranca; activar(false) apaga', () async {

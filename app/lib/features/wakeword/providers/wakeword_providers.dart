@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/wakeword_log.dart';
 import '../data/wakeword_prefs.dart';
 import '../data/wakeword_service.dart';
 
@@ -83,12 +84,19 @@ class WakeWordController extends Notifier<WakeWordEstado> {
   /// Enciende/apaga la palabra desde Ajustes. Al encender pide el permiso de
   /// micrófono; si se niega, queda en [FaseWakeWord.sinPermiso].
   Future<void> activar(bool v) async {
-    await _prefs.fijarActivo(v);
-    if (v) {
-      await _arrancar();
-    } else {
-      await _svc.detener();
-      state = const WakeWordEstado(fase: FaseWakeWord.desactivado);
+    wlog('activar($v) desde Ajustes');
+    try {
+      await _prefs.fijarActivo(v);
+      if (v) {
+        await _arrancar();
+      } else {
+        await _svc.detener();
+        state = const WakeWordEstado(fase: FaseWakeWord.desactivado);
+      }
+    } catch (e) {
+      // activar() nunca debe relanzar al onChanged del Switch.
+      wlog('activar(): error → $e');
+      state = WakeWordEstado(fase: FaseWakeWord.error, error: '$e');
     }
   }
 
@@ -125,13 +133,20 @@ class WakeWordController extends Notifier<WakeWordEstado> {
   }
 
   Future<void> _arrancar() async {
-    if (!_enFrente || _pausadoPorVoz) return;
+    if (!_enFrente || _pausadoPorVoz) {
+      wlog('_arrancar(): condiciones no dadas (frente=$_enFrente, pausa=$_pausadoPorVoz)');
+      return;
+    }
     try {
       await _svc.iniciar(umbral: await _prefs.umbral(), onDeteccion: _onDeteccion);
       state = const WakeWordEstado(fase: FaseWakeWord.escuchando);
     } on PermisoWakeWordDenegado {
+      wlog('_arrancar(): permiso de micrófono denegado');
       state = const WakeWordEstado(fase: FaseWakeWord.sinPermiso);
     } catch (e) {
+      // Cualquier fallo CATCHABLE (carga ONNX, micro) → estado error visible,
+      // nunca crash. (Un SIGSEGV nativo no llega acá; lo delata el log.)
+      wlog('_arrancar(): error → $e');
       state = WakeWordEstado(fase: FaseWakeWord.error, error: '$e');
     }
   }
