@@ -27,6 +27,7 @@ import '../providers/uso_providers.dart';
 import '../providers/voz_providers.dart';
 import 'manos_libres_screen.dart';
 import 'widgets/menu_adjuntar.dart';
+import 'widgets/opciones_interactivas.dart';
 
 /// Pantalla principal de Matix (Capa 2 Paso 1): chat solo texto.
 ///
@@ -152,6 +153,16 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  /// Respuesta desde una opción tocable (chip / selección / campo): se manda
+  /// como el siguiente mensaje del usuario y la conversación sigue normal.
+  Future<void> _responderOpcion(String texto) async {
+    final t = texto.trim();
+    if (t.isEmpty) return;
+    await ref.read(chatMatixProvider.notifier).enviar(t);
+    _scrollAlFinal();
+    if (mounted) _focusInput.requestFocus();
   }
 
   // ─── Menú de adjuntar (tipo WhatsApp) ───────────────────────────────
@@ -623,6 +634,10 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
                           final mostrarModelo = esUltimoAsistente &&
                               estado.autoUltimoTurno &&
                               estado.modeloUltimoTurno != null;
+                          // Opciones tocables (elicitación) bajo el último
+                          // turno: chips/campo que mandan la respuesta.
+                          final mostrarOpciones = esUltimoAsistente &&
+                              estado.opcionesUltimoTurno != null;
                           return Column(
                             crossAxisAlignment:
                                 CrossAxisAlignment.stretch,
@@ -631,6 +646,12 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
                               if (mostrarChip)
                                 _ChipAcciones(
                                   acciones: estado.accionesUltimoTurno,
+                                ),
+                              if (mostrarOpciones)
+                                OpcionesInteractivas(
+                                  bloque: estado.opcionesUltimoTurno!,
+                                  enabled: !estado.enviando,
+                                  onResponder: _responderOpcion,
                                 ),
                               if (mostrarModelo)
                                 _ModeloUsadoEtiqueta(

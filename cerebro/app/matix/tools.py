@@ -1168,6 +1168,54 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "preguntar_con_opciones",
+            "description": (
+                "Hace una pregunta y ofrece opciones TOCABLES (chips/botones) o "
+                "un campo de texto, para que el usuario elija sin escribir todo. "
+                "Úsala cuando ofrecer una ELECCIÓN o pedir una PREFERENCIA "
+                "ayuda: «¿qué modo activo?», «¿corto/medio/largo plazo?», «¿cuál "
+                "de estos cursos?», «¿prefieres A o B?». Tu cierre con gancho "
+                "puede venir como opciones. NO la uses para respuestas abiertas "
+                "ni para todo: solo cuando un conjunto chico y claro de opciones "
+                "(o un dato puntual) hace más fácil responder.\n"
+                "El turno TERMINA al usarla: la `pregunta` es el mensaje y las "
+                "opciones se pintan debajo; el usuario responde tocando."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pregunta": {
+                        "type": "string",
+                        "description": "La pregunta, en tu voz (será el mensaje).",
+                    },
+                    "tipo": {
+                        "type": "string",
+                        "enum": [
+                            "seleccion_unica",
+                            "seleccion_multiple",
+                            "texto",
+                        ],
+                        "description": (
+                            "seleccion_unica = elegir una; seleccion_multiple = "
+                            "varias; texto = un campo para escribir."
+                        ),
+                    },
+                    "opciones": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Las opciones (2 a 6, cortas). Vacío si tipo=texto."
+                        ),
+                    },
+                },
+                "required": ["pregunta", "tipo"],
+                "additionalProperties": False,
+            },
+        },
+    },
     # ── Modos de Matix (tono + conocimiento + prioridades) ───────────
     {
         "type": "function",
@@ -2880,6 +2928,35 @@ async def _navegar(_db: Postgrest, args: dict) -> dict[str, Any]:
     return _ok({"seccion": seccion})
 
 
+_TIPOS_OPCIONES = {"seleccion_unica", "seleccion_multiple", "texto"}
+
+
+async def _preguntar_con_opciones(_db: Postgrest, args: dict) -> dict[str, Any]:
+    """No toca datos: arma el bloque interactivo (pregunta + opciones + tipo).
+    El chat lo propaga a la app, que pinta las opciones tocables y termina el
+    turno; el usuario responde tocando."""
+    pregunta = (args.get("pregunta") or "").strip()
+    if not pregunta:
+        return _error("validacion", "Falta la `pregunta`.")
+    tipo = (args.get("tipo") or "").strip().lower()
+    if tipo not in _TIPOS_OPCIONES:
+        return _error(
+            "validacion",
+            "tipo inválido. Usa seleccion_unica, seleccion_multiple o texto.",
+        )
+    opciones = [
+        str(o).strip()
+        for o in (args.get("opciones") or [])
+        if str(o).strip()
+    ][:6]  # tope de 6: un set chico y claro, no un menú infinito
+    if tipo != "texto" and len(opciones) < 2:
+        return _error(
+            "validacion",
+            "Para seleccion_unica/multiple pasa al menos 2 opciones.",
+        )
+    return _ok({"pregunta": pregunta, "opciones": opciones, "tipo": tipo})
+
+
 # ── Modos de Matix: activar / desactivar ────────────────────────────
 
 
@@ -3018,6 +3095,7 @@ _HANDLERS = {
     "eliminar_movimiento": _eliminar_movimiento,
     # Navegación (no toca datos)
     "navegar": _navegar,
+    "preguntar_con_opciones": _preguntar_con_opciones,
     # Modos de Matix
     "activar_modo": _activar_modo,
     "desactivar_modo": _desactivar_modo,
@@ -3069,6 +3147,7 @@ TABLAS_AFECTADAS = {
     "eliminar_movimiento": ["movimientos"],
     # Navegación (no cambia datos)
     "navegar": [],
+    "preguntar_con_opciones": [],
     # Modos (el modo activo se surfacea aparte en la respuesta del chat)
     "activar_modo": [],
     "desactivar_modo": [],

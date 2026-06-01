@@ -244,6 +244,11 @@ async def conversar(
     # Sección a la que llevar al usuario si pidió navegar ("llévame a
     # Universidad"). Gana la última llamada a `navegar` del turno.
     navegacion: str | None = None
+    # Bloque interactivo (opciones tocables) si Matix usó
+    # `preguntar_con_opciones`. Cuando lo pide, el turno TERMINA con la
+    # pregunta + las opciones; el usuario responde tocando (la app manda la
+    # opción como su siguiente mensaje) y la conversación sigue normal.
+    opciones_bloque: dict[str, Any] | None = None
 
     ultima_respuesta = ""
 
@@ -261,6 +266,7 @@ async def conversar(
         # por cada call. Luego volvemos a llamar al modelo.
         mensajes.append(salida["raw"])
 
+        pidio_opciones = False
         for call in salida["tool_calls"]:
             nombre = call["nombre"]
             args = call["args"]
@@ -275,6 +281,11 @@ async def conversar(
                 # `navegar` no cambia datos: solo emite la sección a abrir.
                 if nombre == "navegar":
                     navegacion = resultado.get("datos", {}).get("seccion")
+                # `preguntar_con_opciones`: emite el bloque interactivo y
+                # cierra el turno (no se vuelve a llamar al modelo).
+                if nombre == "preguntar_con_opciones":
+                    opciones_bloque = resultado.get("datos")
+                    pidio_opciones = True
 
             mensajes.append(
                 {
@@ -285,6 +296,12 @@ async def conversar(
                     ),
                 }
             )
+
+        if pidio_opciones and opciones_bloque:
+            # La pregunta del bloque ES el mensaje visible; la app pinta las
+            # opciones debajo. Terminamos el turno acá: esperamos al usuario.
+            ultima_respuesta = opciones_bloque.get("pregunta", "")
+            break
     else:
         # Se agotaron las vueltas sin que el modelo cerrara con
         # texto. Damos algo razonable.
@@ -304,6 +321,9 @@ async def conversar(
         "tablas_cambiadas": tablas_cambiadas,
         "navegacion": navegacion,
         "modo_activo": modo_final,
+        # Bloque interactivo (opciones tocables) o None. La app lo pinta
+        # debajo del mensaje; tocar una opción la manda como respuesta.
+        "opciones": opciones_bloque,
         # Transparencia: qué modelo respondió este turno y si lo eligió el
         # modo Automático. La app lo muestra (sobre todo en auto) para que
         # el usuario vea qué se usó y pueda ajustar el par.

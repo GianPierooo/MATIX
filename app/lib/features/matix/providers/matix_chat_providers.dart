@@ -39,6 +39,7 @@ class EstadoChatMatix {
     this.enviando = false,
     this.errorUltimoEnvio,
     this.accionesUltimoTurno = const <String>[],
+    this.opcionesUltimoTurno,
     this.modeloUltimoTurno,
     this.autoUltimoTurno = false,
   });
@@ -47,6 +48,10 @@ class EstadoChatMatix {
   final bool enviando;
   final String? errorUltimoEnvio;
   final List<String> accionesUltimoTurno;
+
+  /// Bloque interactivo de opciones del último turno del asistente (o `null`).
+  /// La UI lo pinta bajo la burbuja; tocar una opción la manda como respuesta.
+  final BloqueOpciones? opcionesUltimoTurno;
 
   /// Id del modelo que respondió el último turno (transparencia). `null`
   /// si aún no hubo respuesta o el cerebro no lo reportó.
@@ -60,6 +65,7 @@ class EstadoChatMatix {
     bool? enviando,
     Object? errorUltimoEnvio = _kSentinel,
     List<String>? accionesUltimoTurno,
+    Object? opcionesUltimoTurno = _kSentinel,
     Object? modeloUltimoTurno = _kSentinel,
     bool? autoUltimoTurno,
   }) {
@@ -70,6 +76,9 @@ class EstadoChatMatix {
           ? this.errorUltimoEnvio
           : errorUltimoEnvio as String?,
       accionesUltimoTurno: accionesUltimoTurno ?? this.accionesUltimoTurno,
+      opcionesUltimoTurno: identical(opcionesUltimoTurno, _kSentinel)
+          ? this.opcionesUltimoTurno
+          : opcionesUltimoTurno as BloqueOpciones?,
       modeloUltimoTurno: identical(modeloUltimoTurno, _kSentinel)
           ? this.modeloUltimoTurno
           : modeloUltimoTurno as String?,
@@ -153,6 +162,8 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
       enviando: true,
       errorUltimoEnvio: null,
       accionesUltimoTurno: const <String>[],
+      // Al mandar un mensaje nuevo, el bloque de opciones anterior ya no aplica.
+      opcionesUltimoTurno: null,
     );
 
     try {
@@ -173,6 +184,7 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
         mensajes: [...state.mensajes, ans],
         enviando: false,
         accionesUltimoTurno: turno.toolsUsadas,
+        opcionesUltimoTurno: turno.opciones,
         modeloUltimoTurno: turno.modeloUsado,
         autoUltimoTurno: turno.auto,
       );

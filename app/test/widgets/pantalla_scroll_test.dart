@@ -6,7 +6,7 @@ import 'package:matix/widgets/pantalla_scroll.dart';
 /// (scroll) y que se reserve colchón inferior (para no quedar tapado por la
 /// barra de navegación).
 void main() {
-  List<Widget> _muchos(String prefijo) =>
+  List<Widget> muchos(String prefijo) =>
       [for (var i = 0; i < 40; i++) SizedBox(height: 60, child: Text('$prefijo-$i'))];
 
   testWidgets('PantallaScroll deja scrollear hasta el último ítem', (tester) async {
@@ -14,7 +14,7 @@ void main() {
       home: PantallaScroll(
         appBar: AppBar(title: const Text('t')),
         bajoNav: true,
-        children: _muchos('p'),
+        children: muchos('p'),
       ),
     ));
     // El último ítem no entra en pantalla al inicio…
@@ -48,7 +48,7 @@ void main() {
   testWidgets('HojaScroll deja scrollear contenido alto', (tester) async {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
-        body: HojaScroll(children: _muchos('h')),
+        body: HojaScroll(children: muchos('h')),
       ),
     ));
     // El contenido vive en un scroll view (no se corta).

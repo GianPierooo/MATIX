@@ -13,6 +13,33 @@ import '../domain/mensaje.dart';
 /// calls (p.ej. `["tareas"]` si creó una tarea). La capa de
 /// providers la usa para invalidar lo justo y refrescar el hub al
 /// instante.
+/// Bloque interactivo de opciones tocables (estilo Claude). Matix lo emite
+/// con `preguntar_con_opciones`; la app lo pinta debajo del mensaje.
+class BloqueOpciones {
+  const BloqueOpciones({
+    required this.pregunta,
+    required this.opciones,
+    required this.tipo,
+  });
+
+  final String pregunta;
+  final List<String> opciones;
+
+  /// 'seleccion_unica' | 'seleccion_multiple' | 'texto'.
+  final String tipo;
+
+  bool get esTexto => tipo == 'texto';
+  bool get esMultiple => tipo == 'seleccion_multiple';
+
+  factory BloqueOpciones.fromJson(Map<String, dynamic> j) => BloqueOpciones(
+        pregunta: (j['pregunta'] as String?) ?? '',
+        opciones: (j['opciones'] as List? ?? const [])
+            .map((e) => e.toString())
+            .toList(growable: false),
+        tipo: (j['tipo'] as String?) ?? 'seleccion_unica',
+      );
+}
+
 class ChatTurno {
   const ChatTurno({
     required this.respuesta,
@@ -20,6 +47,7 @@ class ChatTurno {
     required this.tablasCambiadas,
     this.navegacion,
     this.modoActivo,
+    this.opciones,
     this.modeloUsado,
     this.auto = false,
   });
@@ -35,6 +63,10 @@ class ChatTurno {
   /// Modo de Matix activo DESPUÉS del turno (el modelo pudo cambiarlo con
   /// `activar_modo`/`desactivar_modo`). `null` = modo normal.
   final String? modoActivo;
+
+  /// Bloque interactivo de opciones tocables, o `null`. Si viene, la app lo
+  /// pinta debajo del mensaje y tocar una opción la manda como respuesta.
+  final BloqueOpciones? opciones;
 
   /// Id del modelo que respondió este turno (transparencia). `null` si el
   /// cerebro no lo reportó (versión vieja).
@@ -103,6 +135,9 @@ class MatixChatRepository {
           .toList(growable: false),
       navegacion: j['navegacion'] as String?,
       modoActivo: j['modo_activo'] as String?,
+      opciones: j['opciones'] is Map<String, dynamic>
+          ? BloqueOpciones.fromJson(j['opciones'] as Map<String, dynamic>)
+          : null,
       modeloUsado: j['modelo_usado'] as String?,
       auto: (j['auto'] as bool?) ?? false,
     );

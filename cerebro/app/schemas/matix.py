@@ -291,6 +291,25 @@ class ExtraerReciboResponse(BaseModel):
     recibo: ReciboPropuesto = Field(default_factory=ReciboPropuesto)
 
 
+class BloqueOpciones(BaseModel):
+    """Bloque interactivo de opciones tocables (estilo Claude).
+
+    Matix lo emite con `preguntar_con_opciones` cuando ofrecer una elección o
+    pedir una preferencia ayuda. La app pinta las opciones debajo del mensaje;
+    tocar una (o enviar el campo de texto) manda esa respuesta y la
+    conversación sigue.
+
+    `tipo`:
+    - `seleccion_unica`  → chips; tocar uno responde.
+    - `seleccion_multiple` → chips toggle + botón Enviar (responde la lista).
+    - `texto` → un campo para escribir (las `opciones` van vacías).
+    """
+
+    pregunta: str
+    opciones: list[str] = Field(default_factory=list)
+    tipo: Literal["seleccion_unica", "seleccion_multiple", "texto"]
+
+
 class ChatResponse(BaseModel):
     """Respuesta del endpoint `/matix/chat`.
 
@@ -313,6 +332,9 @@ class ChatResponse(BaseModel):
     # Modo de Matix activo DESPUÉS del turno (tono/conocimiento/prioridades).
     # `null` = modo normal. La app lo usa para el indicador del chat.
     modo_activo: str | None = None
+    # Bloque interactivo de opciones tocables (elicitación), o `null`. La app
+    # lo pinta debajo del mensaje; tocar una opción la manda como respuesta.
+    opciones: BloqueOpciones | None = None
     # Transparencia del modelo: qué modelo (id del catálogo) respondió este
     # turno, y si lo eligió el modo Automático. La app muestra una etiqueta
     # pequeña — sobre todo cuando `auto` — para ver qué se usó.
