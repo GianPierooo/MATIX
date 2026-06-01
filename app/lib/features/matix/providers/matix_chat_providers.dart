@@ -109,17 +109,17 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
   /// recargar la pestaña.
   Future<void> enviar(
     String texto, {
-    String? imagenDataUrl,
-    String? imagenPath,
+    List<String> imagenesDataUrl = const [],
+    List<String> imagenPaths = const [],
     String? documentoNombre,
     String? documentoTexto,
   }) async {
     final t = texto.trim();
     final hayDocumento = documentoTexto != null && documentoTexto.isNotEmpty;
-    // Permitimos mandar solo imagen o solo documento (sin texto). Si no hay
+    final hayImagenes = imagenesDataUrl.isNotEmpty;
+    // Permitimos mandar solo imágenes o solo documento (sin texto). Si no hay
     // nada de eso, no hay nada que enviar.
-    if ((t.isEmpty && imagenDataUrl == null && !hayDocumento) ||
-        state.enviando) {
+    if ((t.isEmpty && !hayImagenes && !hayDocumento) || state.enviando) {
       return;
     }
 
@@ -131,6 +131,8 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
       mensaje = t;
     } else if (hayDocumento) {
       mensaje = 'Lee este documento y dime de qué trata.';
+    } else if (imagenesDataUrl.length > 1) {
+      mensaje = 'Mira estas imágenes y ayúdame con lo que muestren.';
     } else {
       mensaje = 'Mira esta imagen y ayúdame con lo que muestre.';
     }
@@ -144,7 +146,7 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
       rol: RolMensaje.usuario,
       contenido: t,
       enviadoEn: DateTime.now(),
-      imagenPath: imagenPath,
+      imagenPaths: imagenPaths,
     );
     state = state.copyWith(
       mensajes: [...historialPrevio, propio],
@@ -158,7 +160,7 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
       final turno = await repo.enviar(
         historial: historialPrevio,
         mensaje: mensaje,
-        imagenDataUrl: imagenDataUrl,
+        imagenes: imagenesDataUrl,
         documentoNombre: documentoNombre,
         documentoTexto: documentoTexto,
       );

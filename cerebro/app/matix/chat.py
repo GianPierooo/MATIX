@@ -61,12 +61,18 @@ def _ahora_lima_es() -> str:
     )
 
 
+# Tope de imágenes por mensaje: varias ayudan (un recibo de dos páginas, dos
+# capturas), pero cada una infla tokens. 5 es un techo razonable.
+_MAX_IMAGENES = 5
+
+
 async def conversar(
     db: Postgrest,
     *,
     historial: list[dict],
     mensaje: str,
     imagen: str | None = None,
+    imagenes: list[str] | None = None,
     documento: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Genera la respuesta de Matix a `mensaje`, considerando
@@ -151,6 +157,14 @@ async def conversar(
             }
         )
 
+    # Imágenes del turno. `imagen` (singular) se mantiene por compatibilidad;
+    # `imagenes` permite varias. Se normaliza a UNA lista, se quitan vacías y
+    # se capa a `_MAX_IMAGENES` (no inflar tokens). Solo viajan en ESTE turno.
+    imgs = list(imagenes or [])
+    if imagen:
+        imgs.insert(0, imagen)
+    imgs = [u for u in imgs if u][:_MAX_IMAGENES]
+
     # Modelo (y por ende proveedor) del CHAT: se resuelve UNA sola vez al
     # arrancar el turno y se usa en TODAS las vueltas del loop. Crítico: si el
     # usuario cambia de modelo a mitad de conversación, el cambio aplica desde
@@ -173,7 +187,7 @@ async def conversar(
         # pero leer/analizar un documento o una captura (Yape/banco) merece el
         # modelo a fondo — mejor lectura, menos errores de clasificación. Sube
         # algo el costo en mensajes con adjunto, pero la precisión lo vale.
-        if doc_texto or imagen:
+        if doc_texto or imgs:
             modelo = fuerte
         else:
             decision = enrutador.elegir(
@@ -211,15 +225,16 @@ async def conversar(
         contenido = (m.get("contenido") or "").strip() or "(adjunto)"
         mensajes.append({"role": rol, "content": contenido})
 
-    # El turno actual: si trae imagen, el `content` es una lista
-    # multimodal [texto, imagen] que el modelo de visión entiende. La
-    # imagen solo viaja en ESTE turno — no entra al historial, así no
-    # se re-manda en turnos siguientes.
-    if imagen:
-        contenido_usuario: Any = [
-            {"type": "text", "text": mensaje},
-            {"type": "image_url", "image_url": {"url": imagen}},
-        ]
+    # El turno actual: si trae imágenes, el `content` es una lista multimodal
+    # [texto, imagen, imagen…] que el modelo de visión entiende (OpenAI y
+    # Anthropic aceptan varios bloques de imagen). Las imágenes solo viajan en
+    # ESTE turno — no entran al historial, así no se re-mandan después.
+    if imgs:
+        contenido_usuario: Any = [{"type": "text", "text": mensaje}]
+        for url in imgs:
+            contenido_usuario.append(
+                {"type": "image_url", "image_url": {"url": url}}
+            )
     else:
         contenido_usuario = mensaje
     mensajes.append({"role": "user", "content": contenido_usuario})

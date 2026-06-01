@@ -71,7 +71,7 @@ class MatixChatRepository {
   Future<ChatTurno> enviar({
     required List<Mensaje> historial,
     required String mensaje,
-    String? imagenDataUrl,
+    List<String> imagenes = const [],
     String? documentoNombre,
     String? documentoTexto,
   }) async {
@@ -80,9 +80,10 @@ class MatixChatRepository {
           .map((m) => m.toJsonParaCerebro())
           .toList(growable: false),
       'mensaje': mensaje,
-      // La imagen (data URL) solo viaja en este turno; el cerebro la
-      // pasa al modelo de visión y no la guarda en el historial.
-      if (imagenDataUrl != null) 'imagen': imagenDataUrl,
+      // Las imágenes (data URL) solo viajan en este turno; el cerebro las
+      // pasa al modelo de visión y no las guarda en el historial. Se pueden
+      // mandar varias por mensaje.
+      if (imagenes.isNotEmpty) 'imagenes': imagenes,
       // El documento adjunto (texto ya extraído por el cerebro) también es
       // contexto solo de este turno.
       if (documentoTexto != null && documentoTexto.isNotEmpty)

@@ -15,7 +15,6 @@ import '../../../theme/matix_colors.dart';
 import '../../../theme/matix_spacing.dart';
 import '../../../theme/matix_typography.dart';
 import '../../apuntes/providers/apuntes_providers.dart';
-import '../../captura_camara/presentation/captura_camara_screen.dart';
 import '../../modelos/providers/modelos_providers.dart';
 import '../../modos/providers/modos_providers.dart';
 import '../data/contacto_memoria.dart';
@@ -51,9 +50,13 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
   final _focusInput = FocusNode();
   final _picker = ImagePicker();
 
-  /// Imagen adjunta lista para mandar con el próximo mensaje (Capa 2 ·
-  /// chat multimodal). Null = ninguna.
-  XFile? _imagenAdjunta;
+  /// Imágenes adjuntas para mandar con el próximo mensaje (chat multimodal).
+  /// Se pueden adjuntar VARIAS (galería o cámara); van todas juntas a Matix.
+  final List<XFile> _imagenesAdjuntas = [];
+
+  /// Tope de imágenes por mensaje (coincide con el del cerebro): varias
+  /// ayudan, pero cada una infla tokens.
+  static const int _maxImagenes = 5;
 
   /// Documento adjunto (texto ya extraído por el cerebro) listo para mandar
   /// con el próximo mensaje. Null = ninguno.
@@ -96,39 +99,53 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
 
   Future<void> _enviar() async {
     final texto = _controller.text.trim();
-    final img = _imagenAdjunta;
+    final imgs = List<XFile>.from(_imagenesAdjuntas);
     final doc = _documentoAdjunto;
-    if (texto.isEmpty && img == null && doc == null) return;
+    if (texto.isEmpty && imgs.isEmpty && doc == null) return;
 
-    String? dataUrl;
-    String? imagenPath;
-    if (img != null) {
+    final dataUrls = <String>[];
+    final paths = <String>[];
+    for (final img in imgs) {
       final bytes = await File(img.path).readAsBytes();
       if (bytes.length > _maxImagenBytes) {
         if (mounted) {
-          _mostrarAviso('La imagen es muy pesada (máx 4 MB). Prueba otra.');
+          _mostrarAviso('Una imagen es muy pesada (máx 4 MB). Quítala o usa otra.');
         }
         return;
       }
       // image_picker, al comprimir con imageQuality, entrega JPEG.
-      dataUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
-      imagenPath = img.path;
+      dataUrls.add('data:image/jpeg;base64,${base64Encode(bytes)}');
+      paths.add(img.path);
     }
 
     _controller.clear();
     setState(() {
-      _imagenAdjunta = null;
+      _imagenesAdjuntas.clear();
       _documentoAdjunto = null;
     });
     await ref.read(chatMatixProvider.notifier).enviar(
           texto,
-          imagenDataUrl: dataUrl,
-          imagenPath: imagenPath,
+          imagenesDataUrl: dataUrls,
+          imagenPaths: paths,
           documentoNombre: doc?.nombre,
           documentoTexto: doc?.texto,
         );
     _scrollAlFinal();
     if (mounted) _focusInput.requestFocus();
+  }
+
+  /// Agrega imágenes respetando el tope; avisa si ya no caben.
+  void _agregarImagenes(List<XFile> nuevas) {
+    if (nuevas.isEmpty) return;
+    final libres = _maxImagenes - _imagenesAdjuntas.length;
+    if (libres <= 0) {
+      _mostrarAviso('Ya tienes $_maxImagenes imágenes (el máximo).');
+      return;
+    }
+    setState(() => _imagenesAdjuntas.addAll(nuevas.take(libres)));
+    if (nuevas.length > libres) {
+      _mostrarAviso('Adjunté $libres; el máximo por mensaje es $_maxImagenes.');
+    }
   }
 
   void _mostrarAviso(String msg) {
@@ -158,28 +175,36 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
     }
   }
 
-  /// Foto desde la galería → se adjunta para el flujo de VISIÓN (Matix la ve).
-  /// Video: por ahora no (se avisa). La comprime para no mandar 8 MP.
+  /// Foto/s desde la galería → se adjuntan para el flujo de VISIÓN (Matix las
+  /// ve). Permite VARIAS. Video: por ahora no. Las comprime.
   Future<void> _adjuntarFoto() async {
     try {
-      final x = await _picker.pickImage(
-        source: ImageSource.gallery,
+      final xs = await _picker.pickMultiImage(
         imageQuality: 70,
         maxWidth: 1280,
         maxHeight: 1280,
       );
-      if (x != null && mounted) setState(() => _imagenAdjunta = x);
+      if (mounted) _agregarImagenes(xs);
     } catch (e) {
       if (mounted) _mostrarAviso('No pude abrir la galería: $e');
     }
   }
 
-  /// Cámara → la pantalla de captura con OCR on-device (flujo existente):
-  /// rutea solo a tareas, eventos o apunte. La imagen no sale del teléfono.
+  /// Cámara NORMAL: toma una foto y la adjunta para mandarla al chat (visión),
+  /// para seguir la conversación. (La cámara inteligente con OCR vive en otras
+  /// entradas: Inicio, Tareas, Apuntes, Calendario.)
   Future<void> _abrirCamara() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const CapturaCamaraScreen()),
-    );
+    try {
+      final x = await _picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 70,
+        maxWidth: 1280,
+        maxHeight: 1280,
+      );
+      if (x != null && mounted) _agregarImagenes([x]);
+    } catch (e) {
+      if (mounted) _mostrarAviso('No pude abrir la cámara: $e');
+    }
   }
 
   /// Documento (PDF/DOCX/TXT/MD): el selector del sistema (SAF) → lo subimos
@@ -625,10 +650,11 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen> {
                       },
                     ),
             ),
-            if (_imagenAdjunta != null)
-              _PreviewAdjunto(
-                path: _imagenAdjunta!.path,
-                onQuitar: () => setState(() => _imagenAdjunta = null),
+            if (_imagenesAdjuntas.isNotEmpty)
+              _PreviewImagenes(
+                paths: _imagenesAdjuntas.map((x) => x.path).toList(),
+                onQuitar: (i) =>
+                    setState(() => _imagenesAdjuntas.removeAt(i)),
               ),
             if (_procesandoAdjunto)
               const _PreviewProcesando()
@@ -766,16 +792,23 @@ class _Burbuja extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (mensaje.imagenPath != null) ...[
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: Image.file(
-                        File(mensaje.imagenPath!),
-                        width: 180,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stack) =>
-                            const SizedBox.shrink(),
-                      ),
+                  if (mensaje.imagenPaths.isNotEmpty) ...[
+                    Wrap(
+                      spacing: MatixSpacing.s,
+                      runSpacing: MatixSpacing.s,
+                      children: [
+                        for (final p in mensaje.imagenPaths)
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.file(
+                              File(p),
+                              width: mensaje.imagenPaths.length > 1 ? 110 : 180,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stack) =>
+                                  const SizedBox.shrink(),
+                            ),
+                          ),
+                      ],
                     ),
                     if (mensaje.contenido.isNotEmpty)
                       const SizedBox(height: MatixSpacing.s),
@@ -1078,10 +1111,10 @@ class _ChipPill extends StatelessWidget {
 // ─── Composer (input + mic + botón enviar) ───────────────────────────────
 
 /// Tira de previsualización de la imagen adjunta, encima del composer.
-class _PreviewAdjunto extends StatelessWidget {
-  const _PreviewAdjunto({required this.path, required this.onQuitar});
-  final String path;
-  final VoidCallback onQuitar;
+class _PreviewImagenes extends StatelessWidget {
+  const _PreviewImagenes({required this.paths, required this.onQuitar});
+  final List<String> paths;
+  final void Function(int index) onQuitar;
 
   @override
   Widget build(BuildContext context) {
@@ -1089,29 +1122,47 @@ class _PreviewAdjunto extends StatelessWidget {
       color: MatixColors.bg,
       padding: const EdgeInsets.fromLTRB(
           MatixSpacing.xl, MatixSpacing.s, MatixSpacing.xl, 0),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.file(
-              File(path),
-              width: 48,
-              height: 48,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stack) => const Icon(
-                  Icons.broken_image_outlined, color: MatixColors.muted),
-            ),
+      child: SizedBox(
+        height: 64,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: paths.length,
+          separatorBuilder: (_, _) => const SizedBox(width: MatixSpacing.s),
+          itemBuilder: (ctx, i) => Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.file(
+                  File(paths[i]),
+                  width: 56,
+                  height: 56,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stack) => const SizedBox(
+                    width: 56,
+                    height: 56,
+                    child: Icon(Icons.broken_image_outlined,
+                        color: MatixColors.muted),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 0,
+                right: 0,
+                child: GestureDetector(
+                  onTap: () => onQuitar(i),
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    padding: const EdgeInsets.all(2),
+                    child: const Icon(Icons.close, size: 14, color: Colors.white),
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: MatixSpacing.m),
-          Expanded(
-            child: Text('Imagen adjunta', style: MatixText.small),
-          ),
-          IconButton(
-            tooltip: 'Quitar imagen',
-            onPressed: onQuitar,
-            icon: const Icon(Icons.close, size: 18, color: MatixColors.muted),
-          ),
-        ],
+        ),
       ),
     );
   }

@@ -185,8 +185,8 @@ class _CapturaCamaraScreenState extends ConsumerState<CapturaCamaraScreen>
       // turno se completa aunque dejemos esta pantalla.
       ref.read(chatMatixProvider.notifier).enviar(
             '¿Qué ves en esta foto?',
-            imagenDataUrl: dataUrl,
-            imagenPath: foto.path,
+            imagenesDataUrl: [dataUrl],
+            imagenPaths: [foto.path],
           );
       if (!mounted) return;
       Navigator.of(context).pushReplacement(

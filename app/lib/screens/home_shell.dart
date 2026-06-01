@@ -69,6 +69,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         setState(() => _index = 0);
       case SeccionMatix.tareas:
         setState(() => _index = 1);
+      case SeccionMatix.matix:
+        setState(() => _index = 2);
       case SeccionMatix.calendario:
         setState(() => _index = 3);
       case SeccionMatix.proyectos:

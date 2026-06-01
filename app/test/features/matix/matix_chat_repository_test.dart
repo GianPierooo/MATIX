@@ -6,9 +6,9 @@ import 'package:matix/api/matix_client.dart';
 import 'package:matix/features/matix/data/matix_chat_repository.dart';
 import 'package:matix/features/matix/domain/mensaje.dart';
 
-/// Tests del `MatixChatRepository` para el chat multimodal: que la
-/// imagen (data URL) viaje en el body cuando se adjunta, y que NO
-/// aparezca cuando no hay imagen.
+/// Tests del `MatixChatRepository` para el chat multimodal: que las imágenes
+/// (data URL) viajen en el body como lista `imagenes` cuando se adjuntan
+/// (una o varias), y que NO aparezcan cuando no hay ninguna.
 
 class _FakeClient extends http.BaseClient {
   Map<String, dynamic>? bodyEnviado;
@@ -19,7 +19,7 @@ class _FakeClient extends http.BaseClient {
     bodyEnviado = json.decode(r.body) as Map<String, dynamic>;
     return http.StreamedResponse(
       Stream.value(utf8.encode(json.encode({
-        'respuesta': 'Veo la imagen.',
+        'respuesta': 'Veo las imágenes.',
         'tools_usadas': <String>[],
         'tablas_cambiadas': <String>[],
       }))),
@@ -30,7 +30,7 @@ class _FakeClient extends http.BaseClient {
 }
 
 void main() {
-  test('adjunta `imagen` (data URL) en el body cuando hay imagen', () async {
+  test('adjunta UNA imagen como lista `imagenes` en el body', () async {
     final fake = _FakeClient();
     final repo = MatixChatRepository(MatixClient(inner: fake));
     const dataUrl = 'data:image/jpeg;base64,/9j/4AAQ==';
@@ -38,20 +38,37 @@ void main() {
     final turno = await repo.enviar(
       historial: const <Mensaje>[],
       mensaje: 'mira esto',
-      imagenDataUrl: dataUrl,
+      imagenes: const [dataUrl],
     );
 
-    expect(turno.respuesta, 'Veo la imagen.');
+    expect(turno.respuesta, 'Veo las imágenes.');
     expect(fake.bodyEnviado!['mensaje'], 'mira esto');
-    expect(fake.bodyEnviado!['imagen'], dataUrl);
+    expect(fake.bodyEnviado!['imagenes'], const [dataUrl]);
   });
 
-  test('sin imagen, el body NO incluye la clave `imagen`', () async {
+  test('adjunta VARIAS imágenes en el body', () async {
+    final fake = _FakeClient();
+    final repo = MatixChatRepository(MatixClient(inner: fake));
+    const a = 'data:image/jpeg;base64,AAAA';
+    const b = 'data:image/jpeg;base64,BBBB';
+
+    await repo.enviar(
+      historial: const <Mensaje>[],
+      mensaje: 'mira estas',
+      imagenes: const [a, b],
+    );
+
+    final imgs = fake.bodyEnviado!['imagenes'] as List;
+    expect(imgs, hasLength(2));
+    expect(imgs, containsAll(const [a, b]));
+  });
+
+  test('sin imágenes, el body NO incluye la clave `imagenes`', () async {
     final fake = _FakeClient();
     final repo = MatixChatRepository(MatixClient(inner: fake));
 
     await repo.enviar(historial: const <Mensaje>[], mensaje: 'hola');
 
-    expect(fake.bodyEnviado!.containsKey('imagen'), isFalse);
+    expect(fake.bodyEnviado!.containsKey('imagenes'), isFalse);
   });
 }

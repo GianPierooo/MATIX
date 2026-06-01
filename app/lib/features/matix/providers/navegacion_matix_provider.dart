@@ -16,6 +16,9 @@ enum SeccionMatix {
   finanzas,
   apuntes,
   ajustes,
+  // Solo para uso interno de la app (no la emite el cerebro): abrir la
+  // pestaña del chat de Matix, p.ej. tras escanear un recibo en Finanzas.
+  matix,
 }
 
 /// Traduce el string del cerebro a la sección, o `null` si no la

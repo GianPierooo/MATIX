@@ -39,7 +39,11 @@ class ChatRequest(BaseModel):
 
     historial: list[MensajeChat] = Field(default_factory=list)
     mensaje: str = Field(min_length=1)
+    # `imagen` (singular) se mantiene por compatibilidad; `imagenes` permite
+    # adjuntar VARIAS en un mismo turno (ambos proveedores aceptan varios
+    # bloques de imagen). Las dos van como data URL y solo en ESE turno.
     imagen: str | None = None
+    imagenes: list[str] | None = None
     documento: DocumentoChat | None = None
 
 

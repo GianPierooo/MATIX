@@ -1,9 +1,15 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../../theme/matix_colors.dart';
 import '../../../theme/matix_spacing.dart';
+import '../../matix/providers/matix_chat_providers.dart';
+import '../../matix/providers/navegacion_matix_provider.dart';
 import '../domain/movimiento.dart';
 import '../providers/movimientos_providers.dart';
 import 'dashboard_finanzas_screen.dart';
@@ -42,6 +48,85 @@ class _FinanzasScreenState extends ConsumerState<FinanzasScreen> {
     );
   }
 
+  /// Escanear un recibo: cámara o galería → manda la foto a Matix (visión)
+  /// con la instrucción de finanzas, y abre el chat para ver la clasificación
+  /// y confirmar el gasto. Reutiliza el flujo de finanzas desde imagen (no
+  /// pasa por la cámara inteligente con OCR).
+  Future<void> _escanearRecibo() async {
+    final origen = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: MatixColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined,
+                  color: MatixColors.accent),
+              title: const Text('Tomar foto del recibo'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined,
+                  color: MatixColors.accent),
+              title: const Text('Elegir de la galería'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (origen == null) return;
+
+    final XFile? foto;
+    try {
+      foto = await ImagePicker().pickImage(
+        source: origen,
+        imageQuality: 70,
+        maxWidth: 1280,
+        maxHeight: 1280,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No pude abrir la cámara / galería: $e')),
+        );
+      }
+      return;
+    }
+    if (foto == null || !mounted) return;
+
+    final bytes = await File(foto.path).readAsBytes();
+    if (bytes.length > 4 * 1024 * 1024) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('La foto es muy pesada (máx 4 MB).')),
+        );
+      }
+      return;
+    }
+    final dataUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+
+    // Disparamos el turno (el provider del chat es global) con la instrucción
+    // de finanzas, y abrimos la pestaña de Matix para ver la clasificación y
+    // confirmar.
+    ref.read(chatMatixProvider.notifier).enviar(
+          'Te paso la foto de un recibo. Léelo y dime qué gasto registrarías '
+          '(monto y categoría); espera mi confirmación antes de guardarlo.',
+          imagenesDataUrl: [dataUrl],
+          imagenPaths: [foto.path],
+        );
+    if (!mounted) return;
+    // Volvemos a la cáscara y abrimos la pestaña de Matix.
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    ref.read(objetivoNavegacionProvider.notifier).state = SeccionMatix.matix;
+  }
+
   @override
   Widget build(BuildContext context) {
     final movimientosAsync = ref.watch(movimientosListProvider);
@@ -50,6 +135,11 @@ class _FinanzasScreenState extends ConsumerState<FinanzasScreen> {
       appBar: AppBar(
         title: const Text('Finanzas'),
         actions: [
+          IconButton(
+            tooltip: 'Escanear recibo',
+            icon: const Icon(Icons.receipt_long_outlined),
+            onPressed: _escanearRecibo,
+          ),
           IconButton(
             tooltip: 'Dashboard',
             icon: const Icon(Icons.insights_outlined),

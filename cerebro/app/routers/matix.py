@@ -95,27 +95,39 @@ def _mime_audio(nombre: str, content_type: str | None) -> str:
 # ≈ 6.7M chars; dejamos margen. La app además comprime antes de mandar.
 _MAX_IMAGEN_CHARS = 7_000_000
 
+# Tope de imágenes por mensaje (debe coincidir con el del cliente y el de
+# `chat._MAX_IMAGENES`): varias ayudan, pero cada una infla tokens.
+_MAX_IMAGENES_CHAT = 5
+
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, db: Postgrest = Depends(get_db)) -> dict:
-    imagen = body.imagen
-    if imagen is not None:
-        if not imagen.startswith("data:image/"):
+    # Imágenes del turno: `imagen` (singular, compat) + `imagenes` (varias).
+    todas = list(body.imagenes or [])
+    if body.imagen:
+        todas.insert(0, body.imagen)
+    if len(todas) > _MAX_IMAGENES_CHAT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Demasiadas imágenes: máximo {_MAX_IMAGENES_CHAT} por mensaje.",
+        )
+    for img in todas:
+        if not img.startswith("data:image/"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="La imagen debe venir como data URL (data:image/…).",
+                detail="Cada imagen debe venir como data URL (data:image/…).",
             )
-        if len(imagen) > _MAX_IMAGEN_CHARS:
+        if len(img) > _MAX_IMAGEN_CHARS:
             raise HTTPException(
                 status_code=413,  # Content Too Large
-                detail="La imagen es muy pesada. Adjunta una más liviana.",
+                detail="Una imagen es muy pesada. Adjunta una más liviana.",
             )
     try:
         resultado = await conversar(
             db,
             historial=[m.model_dump() for m in body.historial],
             mensaje=body.mensaje,
-            imagen=imagen,
+            imagenes=todas,
             documento=body.documento.model_dump() if body.documento else None,
         )
     except RuntimeError as e:

@@ -120,6 +120,69 @@ async def test_auto_rutea_por_mensaje(monkeypatch):
     assert capturas[-1]["model"] == "claude-sonnet-4-6"
 
 
+async def test_varias_imagenes_en_un_mensaje(monkeypatch):
+    """Un mensaje con VARIAS imágenes arma un content multimodal con un bloque
+    por imagen (texto + N imágenes), las capa a 5, y en auto rutea a fuerte."""
+    capturas: list[dict] = []
+
+    async def fake_resp(messages, tools, *, model=None, temperature=0.6, tool_choice="auto"):
+        capturas.append({"model": model, "messages": list(messages)})
+        return {"tipo": "texto", "contenido": "ok", "raw": {"role": "assistant", "content": "ok"}}
+
+    monkeypatch.setattr(chat_mod.llm, "responder_con_tools", fake_resp)
+    monkeypatch.setattr(chat_mod, "contexto_vivo", _sin_contexto)
+    monkeypatch.setattr(chat_mod.memoria, "bloque_memoria", _sin_memoria)
+    monkeypatch.setattr(chat_mod.modos, "modo_activo", _sin_modo)
+
+    async def sel_auto(db):
+        return chat_mod.modelos_llm.AUTO
+
+    async def par(db):
+        return ("gpt-4o-mini", "claude-sonnet-4-6")
+
+    monkeypatch.setattr(chat_mod.modelos_llm, "seleccion_guardada", sel_auto)
+    monkeypatch.setattr(chat_mod.modelos_llm, "par_barato_fuerte", par)
+
+    imgs = [f"data:image/jpeg;base64,img{i}" for i in range(7)]  # 7 → cap a 5
+    r = await chat_mod.conversar(None, historial=[], mensaje="mira estas", imagenes=imgs)
+
+    # El último mensaje (user) trae texto + un bloque de imagen por cada una.
+    user_msg = capturas[-1]["messages"][-1]
+    assert user_msg["role"] == "user"
+    bloques = user_msg["content"]
+    imgs_blocks = [b for b in bloques if b.get("type") == "image_url"]
+    assert len(imgs_blocks) == 5  # capadas a _MAX_IMAGENES
+    assert bloques[0]["type"] == "text"
+    # Con imágenes, en auto va al modelo fuerte (mejor lectura).
+    assert r["modelo_usado"] == "claude-sonnet-4-6"
+
+
+async def test_imagen_singular_sigue_funcionando(monkeypatch):
+    """Back-compat: el viejo `imagen` (una sola) sigue armando un bloque."""
+    capturas: list[dict] = []
+
+    async def fake_resp(messages, tools, *, model=None, temperature=0.6, tool_choice="auto"):
+        capturas.append(list(messages))
+        return {"tipo": "texto", "contenido": "ok", "raw": {"role": "assistant", "content": "ok"}}
+
+    monkeypatch.setattr(chat_mod.llm, "responder_con_tools", fake_resp)
+    monkeypatch.setattr(chat_mod, "contexto_vivo", _sin_contexto)
+    monkeypatch.setattr(chat_mod.memoria, "bloque_memoria", _sin_memoria)
+    monkeypatch.setattr(chat_mod.modos, "modo_activo", _sin_modo)
+
+    async def sel(db):
+        return "gpt-4o-mini"
+
+    monkeypatch.setattr(chat_mod.modelos_llm, "seleccion_guardada", sel)
+
+    await chat_mod.conversar(
+        None, historial=[], mensaje="qué ves", imagen="data:image/jpeg;base64,uno"
+    )
+    user_msg = capturas[-1][-1]
+    imgs_blocks = [b for b in user_msg["content"] if b.get("type") == "image_url"]
+    assert len(imgs_blocks) == 1
+
+
 async def test_documento_adjunto_se_inyecta_y_rutea_a_fuerte(monkeypatch):
     """Un documento adjunto entra como contexto `system` del turno y, en
     Automático, fuerza el modelo fuerte aunque el mensaje sea corto."""
