@@ -217,7 +217,7 @@ class WakeWordService : Service() {
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle("Matix está escuchando")
             .setContentText(texto)
-            .setStyle(NotificationCompat.BigTextStyle().bigText("$texto\nDi \"hey jarvis\" para abrir el modo de voz."))
+            .setStyle(NotificationCompat.BigTextStyle().bigText("$texto\nDi la palabra para abrir el modo de voz."))
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

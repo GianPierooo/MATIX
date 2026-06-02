@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 
 import 'wakeword_log.dart';
+import 'wakeword_modelo.dart';
 
 /// Puente Dart ↔ foreground service nativo del wake word en segundo plano
 /// (`WakeWordService.kt`). Controla iniciar/detener el service, pide la
@@ -30,7 +31,7 @@ class WakeWordBgService {
 
   Future<void> iniciar({
     required double umbral,
-    String clasificador = 'hey_jarvis_v0.1.onnx',
+    String clasificador = WakeWordModelo.archivo,
   }) async {
     try {
       await _canal.invokeMethod('iniciar', {

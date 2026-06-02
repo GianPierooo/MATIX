@@ -27,6 +27,7 @@ import '../features/planificador/domain/disponibilidad.dart';
 import '../features/push/data/push_repository.dart';
 import '../features/repaso/presentation/repaso_semanal_screen.dart';
 import '../features/repaso/providers/repaso_providers.dart';
+import '../features/wakeword/data/wakeword_modelo.dart';
 import '../features/wakeword/providers/wakeword_providers.dart';
 import '../theme/matix_colors.dart';
 
@@ -1005,8 +1006,7 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
           'No pude iniciar la escucha. Apágala y enciéndela otra vez.';
       subColor = MatixColors.red;
     } else if (!_activo) {
-      subtitulo = 'Di la palabra y Matix abre el modo de voz. '
-          'En esta versión de prueba responde a "hey jarvis".';
+      subtitulo = 'Di "${WakeWordModelo.frase}" y Matix abre el modo de voz.';
     } else if (fase == FaseWakeWord.sinPermiso) {
       subtitulo = 'Necesito permiso del micrófono. Concédelo y vuelve a '
           'activarla.';

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 
 import 'wakeword_log.dart';
+import 'wakeword_modelo.dart';
 import 'wakeword_pipeline.dart';
 
 /// Falla controlada al cargar/usar un modelo ONNX. Lleva el nombre del modelo
@@ -32,7 +33,7 @@ class WakeWordOnnxError implements Exception {
 class OnnxWakeWordBackend implements WakeWordBackend {
   OnnxWakeWordBackend({
     this.dirAssets = 'assets/models/wakeword',
-    this.archivoClasificador = 'hey_jarvis_v0.1.onnx',
+    this.archivoClasificador = WakeWordModelo.archivo,
   });
 
   /// Carpeta de assets donde viven los .onnx.
