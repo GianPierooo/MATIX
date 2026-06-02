@@ -344,3 +344,19 @@ class ChatResponse(BaseModel):
     # pequeña — sobre todo cuando `auto` — para ver qué se usó.
     modelo_usado: str | None = None
     auto: bool = False
+
+
+class ConteoMuestrasResponse(BaseModel):
+    """Cuántas muestras de voz hay guardadas para entrenar el wake word."""
+
+    positivo: int = 0
+    negativo: int = 0
+    total: int = 0
+
+
+class MuestraVozResponse(BaseModel):
+    """Resultado de subir un clip de voz para el wake word."""
+
+    ok: bool = True
+    objeto: str
+    conteo: ConteoMuestrasResponse

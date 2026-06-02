@@ -28,6 +28,7 @@ import '../features/push/data/push_repository.dart';
 import '../features/repaso/presentation/repaso_semanal_screen.dart';
 import '../features/repaso/providers/repaso_providers.dart';
 import '../features/wakeword/data/wakeword_modelo.dart';
+import '../features/wakeword/presentation/entrenar_voz_screen.dart';
 import '../features/wakeword/providers/wakeword_providers.dart';
 import '../theme/matix_colors.dart';
 
@@ -1124,6 +1125,35 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
                 ],
               ),
             ),
+          // Entrenar el wake word con la voz real del usuario. Mejora la
+          // detección muchísimo (el modelo base es de voces sintéticas).
+          const Divider(color: MatixColors.hairline, height: 16),
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<bool>(
+                builder: (_) => const EntrenarVozScreen(),
+              ),
+            ),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+              child: Row(
+                children: [
+                  Icon(Icons.record_voice_over_outlined,
+                      color: MatixColors.purple, size: 18),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Entrenar mi voz\n(graba "oye matix" para que te reconozca '
+                      'mejor)',
+                      style: TextStyle(fontSize: 12, color: MatixColors.muted),
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, color: MatixColors.muted, size: 20),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );

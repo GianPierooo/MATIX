@@ -15,11 +15,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import Response
 
 from ..db import Postgrest, get_db
-from ..matix import extraccion_documentos, idempotencia, llm
+from ..matix import extraccion_documentos, idempotencia, llm, muestras_voz
 from ..matix.chat import capturar_apunte, conversar
 from ..matix.uso import medidor
 from ..schemas.matix import (
@@ -29,6 +29,7 @@ from ..schemas.matix import (
     ChatResponse,
     ClasificarCapturaRequest,
     ClasificarCapturaResponse,
+    ConteoMuestrasResponse,
     DesglosarTareaRequest,
     DesglosarTareaResponse,
     DocumentoExtraidoResponse,
@@ -40,6 +41,7 @@ from ..schemas.matix import (
     ExtraerReciboResponse,
     ExtraerTareasRequest,
     ExtraerTareasResponse,
+    MuestraVozResponse,
     TranscripcionResponse,
     VozRequest,
 )
@@ -569,5 +571,114 @@ async def voz(body: VozRequest) -> Response:
         headers={
             "Cache-Control": "no-store",
             "Content-Length": str(len(audio)),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Wake word personalizado — muestras de voz del usuario.
+#
+# La app graba clips ("oye matix" = positivo; otras frases = negativo) y los
+# sube uno a uno. Los guardamos en un bucket PRIVADO de Supabase Storage con la
+# service_role (server-side). Luego se bajan en un .zip para reentrenar el
+# modelo "oye matix" afinado a la voz real del usuario.
+# ---------------------------------------------------------------------------
+
+
+@router.post("/wakeword/muestras", response_model=MuestraVozResponse)
+async def subir_muestra_voz(
+    tipo: str = Form(..., description="positivo | negativo"),
+    indice: int = Form(..., description="Índice del clip dentro de su tipo."),
+    file: UploadFile = File(..., description="Clip WAV 16 kHz mono."),
+) -> dict:
+    """Recibe un clip de voz y lo guarda en Storage (upsert por tipo+índice)."""
+    if tipo not in muestras_voz.TIPOS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"tipo inválido (usa {' | '.join(muestras_voz.TIPOS)}).",
+        )
+    if indice < 0 or indice > 999:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="índice fuera de rango (0..999).",
+        )
+    datos = await file.read()
+    if not datos:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="El clip está vacío."
+        )
+    if len(datos) > muestras_voz.MAX_CLIP_BYTES:
+        raise HTTPException(
+            status_code=413, detail="El clip supera el tope de 2 MB."
+        )
+    try:
+        objeto = await muestras_voz.subir(tipo, indice, datos)
+        c = await muestras_voz.conteo()
+    except muestras_voz.StorageNoConfigurado as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"No pude guardar el clip: {e}",
+        ) from e
+    return {"ok": True, "objeto": objeto, "conteo": c}
+
+
+@router.get("/wakeword/muestras/conteo", response_model=ConteoMuestrasResponse)
+async def conteo_muestras_voz() -> dict:
+    """Cuántos clips hay guardados (positivos / negativos / total)."""
+    try:
+        return await muestras_voz.conteo()
+    except muestras_voz.StorageNoConfigurado as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)
+        ) from e
+
+
+@router.delete("/wakeword/muestras", response_model=ConteoMuestrasResponse)
+async def borrar_muestras_voz() -> dict:
+    """Vacía el bucket para empezar una grabación desde cero."""
+    try:
+        await muestras_voz.borrar_todos()
+        return await muestras_voz.conteo()
+    except muestras_voz.StorageNoConfigurado as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)
+        ) from e
+
+
+@router.get("/wakeword/muestras.zip")
+async def descargar_muestras_voz_zip() -> Response:
+    """Devuelve TODAS las muestras en un .zip (carpetas positivo/ y negativo/).
+
+    Lo bajo a la PC con la clave para alimentar el reentrenamiento en Colab.
+    """
+    try:
+        datos = await muestras_voz.zip_todos()
+    except muestras_voz.StorageNoConfigurado as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"No pude armar el zip: {e}",
+        ) from e
+    return Response(
+        content=datos,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": "attachment; filename=oye_matix_muestras.zip",
+            "Content-Length": str(len(datos)),
         },
     )
