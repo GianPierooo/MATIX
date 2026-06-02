@@ -87,3 +87,8 @@ desktop.ini
 matix_*.png
 hs_err_pid*.log
 app/android/hs_err_pid*.log
+
+# Grabaciones de voz personales (no versionar)
+mi_voz/
+/oye_matix.onnx
+/logo_matix.png
