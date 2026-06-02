@@ -65,7 +65,7 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "iniciar" -> {
                         val umbral = call.argument<Double>("umbral") ?: 0.30
-                        val clf = call.argument<String>("clasificador") ?: "hey_jarvis_v0.1.onnx"
+                        val clf = call.argument<String>("clasificador") ?: "oye_matix.onnx"
                         iniciarService(umbral, clf)
                         result.success(true)
                     }

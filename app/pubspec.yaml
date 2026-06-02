@@ -173,10 +173,11 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # Modelos ONNX de openWakeWord (pre-entrenados, de la release v0.5.1 del
-  # repo dscripka/openWakeWord). La cadena compartida (melspectrograma +
-  # embedding) más el clasificador de la palabra de prueba "hey jarvis".
-  # Cuando entrenemos "oye matix" solo se reemplaza el .onnx del clasificador.
+  # Modelos ONNX de openWakeWord. La cadena compartida (melspectrograma +
+  # embedding) viene de la release v0.5.1 del repo dscripka/openWakeWord; el
+  # clasificador es "oye_matix.onnx", entrenado en español con openWakeWord
+  # (misma interfaz [1,16,96] -> [1,1]). Se conserva "hey_jarvis_v0.1.onnx" como
+  # respaldo de la palabra de prueba en inglés.
   assets:
     - assets/models/wakeword/
 

@@ -914,8 +914,8 @@ class _RepasoSemanalTile extends ConsumerWidget {
 ///
 /// Estado del dispositivo (SharedPreferences), no del hub: encenderla aquí
 /// hace que el teléfono escuche la palabra mientras la app está abierta y, al
-/// oírla, abra el modo manos libres. En esta versión de prueba responde a la
-/// palabra pre-entrenada "hey jarvis" (luego se reemplaza por "oye matix").
+/// oírla, abra el modo manos libres. Responde a la palabra "oye matix"
+/// (modelo en español entrenado con openWakeWord).
 class _WakeWordTile extends ConsumerStatefulWidget {
   const _WakeWordTile();
 

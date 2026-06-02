@@ -66,7 +66,7 @@ class WakeWordService : Service() {
             sp.getFloat("umbral", 0.30f).toDouble()
         }
         val clf = intent?.getStringExtra(EXTRA_CLASIFICADOR)
-            ?: sp.getString("clasificador", null) ?: "hey_jarvis_v0.1.onnx"
+            ?: sp.getString("clasificador", null) ?: "oye_matix.onnx"
         umbralActual = umbral
         crearCanales()
         // startForeground con el type de micrófono (obligatorio en Android 10+).

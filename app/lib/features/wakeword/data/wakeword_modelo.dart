@@ -18,8 +18,8 @@ class WakeWordModelo {
   /// Archivo del clasificador dentro de `assets/models/wakeword/`. Lo usan el
   /// pipeline Dart (app abierta) y, vía el canal, el service nativo (segundo
   /// plano), así que cambiarlo aquí cambia AMBOS.
-  static const String archivo = 'hey_jarvis_v0.1.onnx';
+  static const String archivo = 'oye_matix.onnx';
 
   /// Frase que se muestra en la UI (sin comillas).
-  static const String frase = 'hey jarvis';
+  static const String frase = 'oye matix';
 }
