@@ -66,10 +66,12 @@ class MainActivity : FlutterActivity() {
                     "iniciar" -> {
                         val umbral = call.argument<Double>("umbral") ?: 0.30
                         val clf = call.argument<String>("clasificador") ?: "oye_matix.onnx"
+                        DiagLog.log(this, "channel 'iniciar' recibido (umbral=$umbral)")
                         iniciarService(umbral, clf)
                         result.success(true)
                     }
                     "detener" -> {
+                        DiagLog.log(this, "channel 'detener' recibido")
                         detenerService()
                         result.success(true)
                     }
@@ -115,10 +117,21 @@ class MainActivity : FlutterActivity() {
             putExtra(WakeWordService.EXTRA_UMBRAL, umbral)
             putExtra(WakeWordService.EXTRA_CLASIFICADOR, clf)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
+        // En Android 14+ arrancar un FGS de micrófono desde background puede
+        // lanzar ForegroundServiceStartNotAllowedException. Lo atrapamos y
+        // logueamos para diagnosticar (punto a): si la app ya está exenta de
+        // batería suele permitirlo, si no, falla aquí.
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+            android.util.Log.i("WAKEWORD_BG", "iniciarService OK (umbral=$umbral)")
+            DiagLog.log(this, "startForegroundService OK")
+        } catch (e: Exception) {
+            android.util.Log.e("WAKEWORD_BG", "iniciarService FALLÓ (bg-start restringido?): $e")
+            DiagLog.log(this, "startForegroundService FALLÓ: $e")
         }
     }
 

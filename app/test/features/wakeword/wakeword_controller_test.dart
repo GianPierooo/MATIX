@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:matix/features/wakeword/data/wakeword_crumbs.dart';
@@ -284,5 +285,104 @@ void main() {
     expect(fake.detenerCount, greaterThanOrEqualTo(1));
     expect(await ctrl.estaActivo(), isFalse);
     expect(c.read(wakeWordControllerProvider).fase, FaseWakeWord.desactivado);
+  });
+
+  // ── Motor en SEGUNDO PLANO (foreground service nativo) ────────────────
+  //
+  // Con "escuchar en segundo plano" ON, el motor del wake word es el FGS
+  // nativo (no el pipeline in-app), y se arranca DESDE PRIMER PLANO — clave en
+  // Android 14+, donde un FGS de micrófono no puede iniciarse desde background.
+
+  /// Captura las llamadas salientes al canal nativo del bg service.
+  List<String> espiarCanalBg() {
+    final llamadas = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('dev.matix.matix/wakeword_bg'),
+      (call) async {
+        llamadas.add(call.method);
+        return true;
+      },
+    );
+    addTearDown(() => TestDefaultBinaryMessengerBinding
+        .instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('dev.matix.matix/wakeword_bg'),
+          null,
+        ));
+    return llamadas;
+  }
+
+  test('segundo plano ON: el motor es el FGS, no el in-app', () async {
+    SharedPreferences.setMockInitialValues({
+      'wakeword_activo': true,
+      'wakeword_bg_activo': true,
+    });
+    final bg = espiarCanalBg();
+    final fake = _FakeEscucha();
+    final c = hacerContainer(fake);
+    final ctrl = c.read(wakeWordControllerProvider.notifier);
+
+    await ctrl.alFrente();
+    // El in-app NO se usa como motor; el FGS nativo SÍ arranca.
+    expect(fake.iniciarCount, 0);
+    expect(bg.contains('iniciar'), isTrue);
+    expect(c.read(wakeWordControllerProvider).fase, FaseWakeWord.escuchando);
+  });
+
+  test('segundo plano ON: a fondo el FGS sigue (no se detiene)', () async {
+    SharedPreferences.setMockInitialValues({
+      'wakeword_activo': true,
+      'wakeword_bg_activo': true,
+    });
+    final bg = espiarCanalBg();
+    final fake = _FakeEscucha();
+    final c = hacerContainer(fake);
+    final ctrl = c.read(wakeWordControllerProvider.notifier);
+
+    await ctrl.alFrente();
+    bg.clear();
+    await ctrl.alFondo();
+    // No se manda 'detener' al ir a background: el FGS debe seguir vivo.
+    expect(bg.contains('detener'), isFalse);
+  });
+
+  test('segundo plano ON: manos libres suelta el FGS y al volver lo retoma',
+      () async {
+    SharedPreferences.setMockInitialValues({
+      'wakeword_activo': true,
+      'wakeword_bg_activo': true,
+    });
+    final bg = espiarCanalBg();
+    final fake = _FakeEscucha();
+    final c = hacerContainer(fake);
+    final ctrl = c.read(wakeWordControllerProvider.notifier);
+
+    await ctrl.alFrente();
+    bg.clear();
+    ctrl.pausarPorVoz(); // manos libres toma el micro
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    expect(bg.contains('detener'), isTrue);
+
+    bg.clear();
+    await ctrl.reanudarTrasVoz(); // manos libres terminó
+    expect(bg.contains('iniciar'), isTrue);
+  });
+
+  test('fijarBgActivo(true) cambia el motor a FGS desde primer plano',
+      () async {
+    SharedPreferences.setMockInitialValues({'wakeword_activo': true});
+    final bg = espiarCanalBg();
+    final fake = _FakeEscucha();
+    final c = hacerContainer(fake);
+    final ctrl = c.read(wakeWordControllerProvider.notifier);
+
+    await ctrl.alFrente(); // arranca in-app (bg off)
+    expect(fake.iniciarCount, 1);
+
+    bg.clear();
+    await ctrl.fijarBgActivo(true); // pasa a FGS
+    expect(bg.contains('iniciar'), isTrue);
+    expect(c.read(wakeWordControllerProvider).fase, FaseWakeWord.escuchando);
   });
 }

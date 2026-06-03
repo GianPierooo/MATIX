@@ -965,16 +965,16 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
 
   Future<void> _cambiarBg(bool v) async {
     setState(() => _bgActivo = v);
-    await ref.read(wakeWordPrefsProvider).fijarBgActivo(v);
-    final bg = ref.read(wakeWordBgServiceProvider);
     if (v) {
-      // Opt-in: pedimos la excepción de batería (clave en MagicOS/Honor). El
-      // service arranca solo cuando la app pasa a segundo plano.
-      await bg.pedirIgnorarBateria();
-      if (mounted) _mostrarNotaMagicOS();
-    } else {
-      await bg.detener();
+      // Opt-in: pedimos la excepción de batería (clave en MagicOS/Honor) ANTES
+      // de levantar el service.
+      await ref.read(wakeWordBgServiceProvider).pedirIgnorarBateria();
     }
+    // El controller orquesta el cambio de motor: al activar levanta el FGS
+    // nativo DESDE PRIMER PLANO (estado elegible en Android 14+) y apaga el
+    // in-app; al desactivar para el FGS y vuelve al in-app.
+    await ref.read(wakeWordControllerProvider.notifier).fijarBgActivo(v);
+    if (v && mounted) _mostrarNotaMagicOS();
   }
 
   void _mostrarNotaMagicOS() {
@@ -1015,10 +1015,16 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
     } else if (fase == FaseWakeWord.pausadoPorVoz) {
       subtitulo = 'En pausa mientras usas el modo de voz. Vuelve sola al '
           'terminar.';
+    } else if (_bgActivo) {
+      // Con "segundo plano" ON el motor es el servicio NATIVO (fg + bg). El
+      // readout de score vive en su notificación persistente, no aquí.
+      subtitulo = 'Escuchando en segundo plano (servicio nativo). El score y el '
+          'umbral aparecen en la notificación "Matix está escuchando".';
+      subColor = MatixColors.green;
     } else {
       // Mostramos el score en vivo y el umbral activo: así se ve qué tan cerca
       // está de disparar (diagnóstico sin depender de logcat, que el Honor
-      // filtra). El mismo umbral lo usa también el modo segundo plano.
+      // filtra).
       final maxS = estado.maxScore.toStringAsFixed(2);
       final ultS = estado.ultimoScore.toStringAsFixed(2);
       subtitulo = 'Escuchando · score máx $maxS (ahora $ultS) · '

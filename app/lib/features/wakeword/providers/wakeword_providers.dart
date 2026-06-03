@@ -107,6 +107,7 @@ class WakeWordController extends Notifier<WakeWordEstado> {
   WakeWordEscucha get _svc => ref.read(wakeWordServiceProvider);
   WakeWordPrefs get _prefs => ref.read(wakeWordPrefsProvider);
   WakeWordCrumbs get _crumbs => ref.read(wakeWordCrumbsProvider);
+  WakeWordBgService get _bg => ref.read(wakeWordBgServiceProvider);
 
   bool _enFrente = true;
   bool _pausadoPorVoz = false;
@@ -142,6 +143,40 @@ class WakeWordController extends Notifier<WakeWordEstado> {
     _svc.fijarUmbral(v);
   }
 
+  /// Cambia "escuchar en segundo plano" desde Ajustes (app en primer plano).
+  ///
+  /// Reorganiza el MOTOR del wake word:
+  /// - activar  → apaga el in-app y levanta el FGS nativo AQUÍ (primer plano =
+  ///   estado elegible para un FGS de micrófono en Android 14+); luego sigue
+  ///   vivo en background.
+  /// - desactivar → para el FGS y vuelve al pipeline in-app.
+  ///
+  /// Si la palabra está apagada, solo persiste. Si manos libres tiene el micro,
+  /// persiste y al volver `_arrancar` ya elige el motor correcto.
+  Future<void> fijarBgActivo(bool v) async {
+    await _prefs.fijarBgActivo(v);
+    if (!await _prefs.activo()) {
+      await _bg.detener();
+      return;
+    }
+    if (_pausadoPorVoz) return;
+    if (v) {
+      await _svc.detener();
+      if (_enFrente) {
+        try {
+          await _bg.iniciar(umbral: await _prefs.umbral());
+          state = const WakeWordEstado(fase: FaseWakeWord.escuchando);
+        } catch (e) {
+          wlog('fijarBgActivo(true): FGS falló → $e');
+          state = WakeWordEstado(fase: FaseWakeWord.error, error: '$e');
+        }
+      }
+    } else {
+      await _bg.detener();
+      await _arrancar();
+    }
+  }
+
   /// Enciende/apaga la palabra desde Ajustes. Al encender pide el permiso de
   /// micrófono; si se niega, queda en [FaseWakeWord.sinPermiso].
   Future<void> activar(bool v) async {
@@ -154,7 +189,9 @@ class WakeWordController extends Notifier<WakeWordEstado> {
         await _crumbs.limpiar();
         await _arrancar();
       } else {
+        // Apagar la palabra detiene AMBOS motores (in-app y servicio nativo).
         await _svc.detener();
+        await _bg.detener();
         state = const WakeWordEstado(fase: FaseWakeWord.desactivado);
       }
     } catch (e) {
@@ -189,20 +226,30 @@ class WakeWordController extends Notifier<WakeWordEstado> {
     await _arrancar();
   }
 
-  /// La app pasó a segundo plano: soltamos el micro (v1 solo escucha con la
-  /// app abierta).
+  /// La app pasó a segundo plano.
+  ///
+  /// - Con "segundo plano" ON: el FGS nativo YA está corriendo (se lanzó en
+  ///   primer plano) y DEBE seguir vivo — no lo tocamos. La escucha continúa.
+  /// - Con "segundo plano" OFF: soltamos el micro del pipeline in-app (solo
+  ///   escucha con la app abierta).
   Future<void> alFondo() async {
     _enFrente = false;
+    if (await _prefs.bgActivo()) {
+      // El servicio nativo sigue escuchando; nada que parar aquí.
+      return;
+    }
     await _svc.detener();
     if (state.fase == FaseWakeWord.escuchando) {
       state = const WakeWordEstado(fase: FaseWakeWord.desactivado);
     }
   }
 
-  /// Manos libres tomó el micro: soltamos la escucha.
+  /// Manos libres tomó el micro: soltamos la escucha de AMBOS motores (in-app y
+  /// servicio nativo), porque solo puede haber un dueño del micrófono.
   void pausarPorVoz() {
     _pausadoPorVoz = true;
     unawaited(_svc.detener());
+    unawaited(_bg.detener());
     if (state.fase == FaseWakeWord.escuchando) {
       state = state.copyWith(fase: FaseWakeWord.pausadoPorVoz);
     }
@@ -220,7 +267,28 @@ class WakeWordController extends Notifier<WakeWordEstado> {
       wlog('_arrancar(): condiciones no dadas (frente=$_enFrente, pausa=$_pausadoPorVoz)');
       return;
     }
+    // Selección de MOTOR según "escuchar en segundo plano":
+    //
+    // - bgActivo ON  → el foreground service NATIVO es el único motor (fg + bg).
+    //   CLAVE Android 14+: un FGS de micrófono NO puede arrancar desde
+    //   background (SecurityException). Por eso lo lanzamos AQUÍ, con la app en
+    //   primer plano (estado elegible); una vez vivo, sigue capturando con la
+    //   pantalla apagada. El pipeline in-app NO corre (evita pelea por el micro).
+    // - bgActivo OFF → pipeline in-app, solo con la app abierta (como antes).
+    final bg = await _prefs.bgActivo();
+    if (bg) {
+      try {
+        await _svc.detener(); // nunca dos dueños del micro a la vez
+        await _bg.iniciar(umbral: await _prefs.umbral());
+        state = const WakeWordEstado(fase: FaseWakeWord.escuchando);
+      } catch (e) {
+        wlog('_arrancar(): FGS falló → $e');
+        state = WakeWordEstado(fase: FaseWakeWord.error, error: '$e');
+      }
+      return;
+    }
     try {
+      await _bg.detener(); // por si veníamos de modo background
       _scoreTicks = 0;
       await _svc.iniciar(
         umbral: await _prefs.umbral(),

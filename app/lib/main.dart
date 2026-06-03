@@ -142,16 +142,15 @@ class _MatixAppState extends ConsumerState<MatixApp>
       // Wake word en SEGUNDO PLANO (foreground service nativo). Si la app la
       // lanzó el service al detectar (full-screen intent), abrimos manos
       // libres; y registramos el callback para cuando detecte con la app ya
-      // viva en background.
+      // viva en background. El ARRANQUE/PARADA del service lo decide el
+      // controller (motor in-app vs nativo según "segundo plano"); aquí solo
+      // cableamos la apertura por detección.
       final bg = ref.read(wakeWordBgServiceProvider);
       bg.registrarAlAbrir(_abrirManosLibresPorWakeWord);
       unawaited(() async {
         if (await bg.consumirApertura()) {
           _abrirManosLibresPorWakeWord();
         }
-        // Como arrancamos en primer plano, el service de fondo no debe correr
-        // (el escuchador in-app toma el relevo). Lo detenemos por si quedó vivo.
-        await bg.detener();
       }());
     });
   }
@@ -165,23 +164,19 @@ class _MatixAppState extends ConsumerState<MatixApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState estado) {
     final wake = ref.read(wakeWordControllerProvider.notifier);
-    final bg = ref.read(wakeWordBgServiceProvider);
-    final prefs = ref.read(wakeWordPrefsProvider);
     if (estado == AppLifecycleState.resumed) {
-      // Volvimos al frente: el escuchador in-app toma el relevo; paramos el
-      // service de fondo (un solo dueño del micro a la vez).
-      unawaited(bg.detener());
+      // Volvimos al frente. El controller decide el motor:
+      // - "segundo plano" ON  → asegura el FGS nativo vivo (lo (re)lanza DESDE
+      //   primer plano, estado elegible en Android 14+). No lo paramos en un
+      //   `resumed` espurio: eso era lo que lo mataba a los 0 s.
+      // - "segundo plano" OFF → pipeline in-app.
       unawaited(wake.alFrente());
     } else if (estado == AppLifecycleState.paused ||
         estado == AppLifecycleState.detached) {
-      // Nos vamos a segundo plano: paramos el escuchador in-app y, si el modo
-      // de fondo está activado, arrancamos el foreground service nativo.
+      // A segundo plano. Con "segundo plano" ON el FGS YA está corriendo y
+      // sigue vivo (no se arranca desde aquí — un FGS de micrófono no puede
+      // iniciarse en background). Con OFF, soltamos el micro del in-app.
       unawaited(wake.alFondo());
-      unawaited(() async {
-        if (await prefs.bgActivo()) {
-          await bg.iniciar(umbral: await prefs.umbral());
-        }
-      }());
     }
   }
 
