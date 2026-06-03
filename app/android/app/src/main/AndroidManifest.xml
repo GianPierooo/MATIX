@@ -32,6 +32,13 @@
          bloqueado (patrón de "llamada entrante" con full-screen intent). -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- "Mostrar sobre otras apps" (overlay). Tenerlo CONCEDIDO exime a la app
+         de las restricciones de lanzamiento de actividades desde background
+         (Android 10+), así el service puede traer la UI al frente al detectar
+         la palabra con la pantalla apagada. En Honor/MagicOS equivale a
+         "ventanas emergentes en segundo plano". Se pide al activar el modo de
+         fondo. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
     <!-- Pedir la excepción de optimización de batería (los OEM como Honor matan
          servicios en background; sin esto el service no sobrevive). -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>

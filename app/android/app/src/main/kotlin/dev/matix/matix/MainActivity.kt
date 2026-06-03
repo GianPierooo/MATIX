@@ -77,6 +77,16 @@ class MainActivity : FlutterActivity() {
                     }
                     "pedirIgnorarBateria" -> result.success(pedirIgnorarBateria())
                     "estaIgnorandoBateria" -> result.success(estaIgnorandoBateria())
+                    // Full-screen intent: en Android 14+ hace falta el permiso
+                    // CONCEDIDO para que el service pueda LANZAR la UI desde
+                    // background al detectar (si no, la notificación no auto-abre).
+                    "puedeFullScreenIntent" -> result.success(puedeFullScreenIntent())
+                    "pedirFullScreenIntent" -> result.success(pedirFullScreenIntent())
+                    // Overlay ("mostrar sobre otras apps"): exime del bloqueo de
+                    // lanzamiento desde background y, en Honor, habilita las
+                    // ventanas emergentes en segundo plano.
+                    "puedeOverlay" -> result.success(puedeOverlay())
+                    "pedirOverlay" -> result.success(pedirOverlay())
                     // Flutter lo llama al arrancar para saber si debe abrir el
                     // modo de voz (la app la lanzó el wake word). Una sola vez.
                     "consumirAperturaWakeWord" -> {
@@ -142,6 +152,51 @@ class MainActivity : FlutterActivity() {
     private fun estaIgnorandoBateria(): Boolean {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         return pm.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    /** ¿La app puede usar full-screen intents para auto-lanzar UI? Antes de
+     * Android 14 (SDK 34) siempre sí; desde 14 requiere permiso especial. */
+    private fun puedeFullScreenIntent(): Boolean {
+        if (Build.VERSION.SDK_INT < 34) return true
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE)
+            as android.app.NotificationManager
+        return nm.canUseFullScreenIntent()
+    }
+
+    /** Abre los Ajustes del sistema para que el usuario conceda el full-screen
+     * intent (Android 14+). Devuelve true si ya estaba concedido. */
+    private fun pedirFullScreenIntent(): Boolean {
+        if (puedeFullScreenIntent()) return true
+        return try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                    Uri.parse("package:$packageName"),
+                ),
+            )
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun puedeOverlay(): Boolean = Settings.canDrawOverlays(this)
+
+    /** Abre los Ajustes para conceder "mostrar sobre otras apps". Devuelve true
+     * si ya estaba concedido. */
+    private fun pedirOverlay(): Boolean {
+        if (puedeOverlay()) return true
+        return try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName"),
+                ),
+            )
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun pedirIgnorarBateria(): Boolean {

@@ -137,6 +137,13 @@ class _MatixAppState extends ConsumerState<MatixApp>
     // ciclo de vida. Al detectar la palabra abrimos el modo manos libres
     // (mismo flujo que tocar para hablar).
     WidgetsBinding.instance.addObserver(this);
+    // Blindaje del de-dup: cuando manos libres se cierra de verdad
+    // (modoVozActivo→false), liberamos el flag SIEMPRE — así nunca queda en true
+    // bloqueando un lanzamiento legítimo de "oye matix" (el guard solo debe
+    // evitar APILAR, jamás frenar el primer/único launch).
+    ref.listenManual<bool>(modoVozActivoProvider, (_, activo) {
+      if (!activo) _manosLibresEnStack = false;
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final wake = ref.read(wakeWordControllerProvider.notifier);
       wake.registrarAlDetectar(_abrirManosLibresPorWakeWord);

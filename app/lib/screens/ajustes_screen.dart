@@ -966,9 +966,21 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
   Future<void> _cambiarBg(bool v) async {
     setState(() => _bgActivo = v);
     if (v) {
-      // Opt-in: pedimos la excepción de batería (clave en MagicOS/Honor) ANTES
-      // de levantar el service.
-      await ref.read(wakeWordBgServiceProvider).pedirIgnorarBateria();
+      final bg = ref.read(wakeWordBgServiceProvider);
+      // Permisos para que el service pueda ABRIR la app desde background al oír
+      // la palabra con la pantalla apagada. Sin estos, detecta y notifica pero
+      // NO auto-lanza (lo que pasaba en el Honor). Pedimos solo los que falten.
+      // 1) Batería (clave en MagicOS).
+      await bg.pedirIgnorarBateria();
+      // 2) Full-screen intent: Android 14+ lo exige para auto-lanzar UI desde bg.
+      if (!await bg.puedeFullScreenIntent()) {
+        await bg.pedirFullScreenIntent();
+      }
+      // 3) "Mostrar sobre otras apps": exime del bloqueo de lanzamiento desde
+      //    background y, en Honor, habilita las ventanas emergentes en 2.º plano.
+      if (!await bg.puedeOverlay()) {
+        await bg.pedirOverlay();
+      }
     }
     // El controller orquesta el cambio de motor: al activar levanta el FGS
     // nativo DESDE PRIMER PLANO (estado elegible en Android 14+) y apaga el
@@ -984,10 +996,12 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
         const SnackBar(
           duration: Duration(seconds: 8),
           content: Text(
-            'En este Honor (MagicOS), además: mantén Matix en Ajustes > '
-            'Batería > Lanzamiento de apps (Ejecución en segundo plano + '
-            'Autoarranque), y bloquéala en Recientes. Si no, el sistema mata '
-            'la escucha.',
+            'Para que "oye matix" ABRA la app con la pantalla apagada, concede '
+            'los permisos que te pedí (pantalla completa + mostrar sobre otras '
+            'apps). En este Honor (MagicOS), además: Ajustes > Batería > '
+            'Lanzamiento de apps → Matix en manual (Autoarranque + Ejecución en '
+            'segundo plano + Ventanas emergentes en segundo plano), y bloquéala '
+            'en Recientes. Si no, el sistema bloquea el lanzamiento.',
           ),
         ),
       );

@@ -70,6 +70,44 @@ class WakeWordBgService {
     }
   }
 
+  /// ¿La app puede usar full-screen intents para AUTO-LANZAR el modo de voz
+  /// desde background al detectar? (Android 14+ requiere permiso especial.)
+  Future<bool> puedeFullScreenIntent() async {
+    try {
+      return (await _canal.invokeMethod<bool>('puedeFullScreenIntent')) ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Abre los Ajustes del sistema para conceder el full-screen intent.
+  Future<void> pedirFullScreenIntent() async {
+    try {
+      await _canal.invokeMethod('pedirFullScreenIntent');
+    } catch (e) {
+      wlog('bg: error pedir full-screen intent: $e');
+    }
+  }
+
+  /// ¿Tiene "mostrar sobre otras apps" (overlay)? Exime del bloqueo de
+  /// lanzamiento de actividades desde background (clave en Honor/MagicOS).
+  Future<bool> puedeOverlay() async {
+    try {
+      return (await _canal.invokeMethod<bool>('puedeOverlay')) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Abre los Ajustes para conceder "mostrar sobre otras apps".
+  Future<void> pedirOverlay() async {
+    try {
+      await _canal.invokeMethod('pedirOverlay');
+    } catch (e) {
+      wlog('bg: error pedir overlay: $e');
+    }
+  }
+
   /// Al arrancar: ¿la app la lanzó el wake word de fondo? (se consume una vez)
   Future<bool> consumirApertura() async {
     try {

@@ -316,12 +316,23 @@ class WakeWordService : Service() {
             .setAutoCancel(true)
             .setTimeoutAfter(8000)
             .build()
-        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
-            .notify(NOTIF_ALERTA, notif)
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIF_ALERTA, notif)
+        // Diagnóstico del LANZAMIENTO desde background (lo que falla en Honor):
+        // ¿está concedido el full-screen intent (Android 14+)? ¿overlay?
+        val fsi = if (Build.VERSION.SDK_INT >= 34) nm.canUseFullScreenIntent() else true
+        val overlay = android.provider.Settings.canDrawOverlays(this)
+        DiagLog.log(this, "dispararAlerta · canUseFSI=$fsi · overlay=$overlay")
+        // Lanzamiento directo: restringido desde background en Android 10+, salvo
+        // exenciones (overlay concedido). Con overlay suele funcionar; sin él
+        // queda el full-screen intent (que requiere su permiso). Logueamos el
+        // resultado para saber qué vía abrió.
         try {
             startActivity(intent)
+            DiagLog.log(this, "startActivity OK")
         } catch (e: Exception) {
             Log.w(TAG, "startActivity directo falló: $e")
+            DiagLog.log(this, "startActivity FALLÓ: ${e.javaClass.simpleName}")
         }
     }
 
