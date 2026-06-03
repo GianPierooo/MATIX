@@ -459,9 +459,11 @@ async def test_movimientos_crud(
     assert ed["ok"], ed
     assert float(ed["datos"]["monto"]) == 45
 
-    # Eliminar (permanente: finanzas no tiene papelera).
+    # Eliminar (permanente: finanzas no tiene papelera). Requiere confirmado.
     el = await ejecutar_tool(
-        _fresh_db, "eliminar_movimiento", {"movimiento_id": mid}
+        _fresh_db,
+        "eliminar_movimiento",
+        {"movimiento_id": mid, "confirmado": True},
     )
     assert el["ok"], el
     assert el["datos"]["reversible"] is False
@@ -475,7 +477,9 @@ async def test_eliminar_movimiento_inexistente(_fresh_db: Postgrest) -> None:
     from uuid import uuid4
 
     r = await ejecutar_tool(
-        _fresh_db, "eliminar_movimiento", {"movimiento_id": str(uuid4())}
+        _fresh_db,
+        "eliminar_movimiento",
+        {"movimiento_id": str(uuid4()), "confirmado": True},
     )
     assert r["ok"] is False
     assert r["tipo"] == "no_existe"

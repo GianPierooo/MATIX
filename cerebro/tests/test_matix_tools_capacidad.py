@@ -65,7 +65,9 @@ async def test_eliminar_tarea_es_reversible(
     ).json()
     tid = creada["id"]
     try:
-        r = await ejecutar_tool(_fresh_db, "eliminar_tarea", {"tarea_id": tid})
+        r = await ejecutar_tool(
+            _fresh_db, "eliminar_tarea", {"tarea_id": tid, "confirmado": True}
+        )
         assert r["ok"], r
         assert r["datos"]["reversible"] is True
         # La fila sigue existiendo
@@ -116,7 +118,7 @@ async def test_eliminar_evento_es_reversible(
     eid = creada["id"]
     try:
         r = await ejecutar_tool(
-            _fresh_db, "eliminar_evento", {"evento_id": eid}
+            _fresh_db, "eliminar_evento", {"evento_id": eid, "confirmado": True}
         )
         assert r["ok"], r
         actual = (await client.get(f"/api/v1/eventos/{eid}")).json()
@@ -168,7 +170,7 @@ async def test_eliminar_apunte_es_reversible(
     aid = creada["id"]
     try:
         r = await ejecutar_tool(
-            _fresh_db, "eliminar_apunte", {"apunte_id": aid}
+            _fresh_db, "eliminar_apunte", {"apunte_id": aid, "confirmado": True}
         )
         assert r["ok"], r
         actual = (await client.get(f"/api/v1/apuntes/{aid}")).json()
