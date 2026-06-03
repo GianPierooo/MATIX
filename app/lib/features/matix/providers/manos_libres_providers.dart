@@ -183,6 +183,47 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
     await _bucle();
   }
 
+  /// Entra al modo manos libres por "oye matix": Matix SALUDA por voz y, si hay
+  /// una conversación reciente, ofrece retomarla; luego queda escuchando. El
+  /// saludo es fijo e instantáneo (no pasa por el modelo), así no hay latencia
+  /// ni costo. Si el TTS falla, igual pasa a escuchar (nunca se queda mudo).
+  Future<void> entrarPorWakeWord() async {
+    if (state.fase != FaseManosLibres.inactivo) return;
+    _saliendo = false;
+    _seed = null;
+    ref.read(modoVozActivoProvider.notifier).state = true;
+
+    final hayConversacion = ref.read(chatMatixProvider).mensajes.isNotEmpty;
+    final saludo = saludoWakeWord(hayConversacion: hayConversacion);
+
+    state = state.copyWith(
+      fase: FaseManosLibres.iniciando,
+      error: null,
+      notaPausa: null,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    if (_saliendo) return;
+
+    try {
+      await _tts.hablar(
+        saludo,
+        onInicio: () {
+          if (_saliendo) return;
+          state = state.copyWith(
+            fase: FaseManosLibres.hablando,
+            reproduciendo: true,
+          );
+        },
+      );
+    } catch (_) {
+      // El saludo es un plus; si el TTS falla, seguimos a escuchar igual.
+    }
+    state = state.copyWith(reproduciendo: false);
+    if (_saliendo) return;
+
+    await _bucle();
+  }
+
   Future<void> salir() async {
     // SOLTAR el micro para el wake word: lo primero y síncrono (antes de awaits),
     // así el escuchador reanuda al instante. Se ejecuta por TODAS las vías de
@@ -419,6 +460,15 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
 }
 
 class _AbortoUsuario implements Exception {}
+
+/// Texto del saludo cuando se abre por "oye matix". Si hay una conversación
+/// reciente, ofrece retomarla; si no, saluda y queda escuchando. Español "tú",
+/// sin asteriscos. Función pura para poder testearla.
+String saludoWakeWord({required bool hayConversacion}) {
+  return hayConversacion
+      ? '¡Hola, Piero! ¿Seguimos con lo que estábamos?'
+      : '¡Hola, Piero!';
+}
 
 String _mensajeDeError(Object e) {
   if (e is MatixApiException) {

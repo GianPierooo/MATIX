@@ -83,6 +83,11 @@ class _MatixAppState extends ConsumerState<MatixApp>
   final GlobalKey<ScaffoldMessengerState> _messengerKey =
       GlobalKey<ScaffoldMessengerState>();
 
+  /// ¿Ya hay una pantalla de manos libres en el stack? Evita APILAR varias al
+  /// decir "oye matix" varias veces seguidas. Se pone en true (síncrono) al
+  /// empujarla y vuelve a false cuando se cierra (`.then` del push).
+  bool _manosLibresEnStack = false;
+
   @override
   void initState() {
     super.initState();
@@ -190,9 +195,24 @@ class _MatixAppState extends ConsumerState<MatixApp>
       wlog('navigatorKey.currentState es null — no pude navegar');
       return;
     }
-    nav.push(
-      MaterialPageRoute(builder: (_) => const ManosLibresScreen()),
-    );
+    // NO APILAR: si manos libres ya está abierto (por wake word o por el FAB),
+    // reutilizamos esa instancia. Doble guarda: el flag síncrono `_manosLibres
+    // EnStack` (evita la carrera de dos detecciones casi simultáneas) y
+    // `modoVozActivo` (verdad del notifier: el modo voz ya tiene el micro). La
+    // app ya viene al frente por el full-screen intent del service; basta no
+    // empujar otra pantalla.
+    if (_manosLibresEnStack || ref.read(modoVozActivoProvider)) {
+      wlog('manos libres ya abierto — no apilo otra instancia');
+      return;
+    }
+    _manosLibresEnStack = true;
+    nav
+        .push(
+          MaterialPageRoute(
+            builder: (_) => const ManosLibresScreen(porWakeWord: true),
+          ),
+        )
+        .then((_) => _manosLibresEnStack = false);
   }
 
   /// Si la app arrancó porque el usuario compartió texto/URL a Matix

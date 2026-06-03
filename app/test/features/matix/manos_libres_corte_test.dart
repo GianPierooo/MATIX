@@ -80,6 +80,21 @@ void main() {
     expect(fake.detenerCount, 0);
   });
 
+  group('saludoWakeWord', () {
+    test('sin conversación: saludo simple', () {
+      final s = saludoWakeWord(hayConversacion: false);
+      expect(s, '¡Hola, Piero!');
+      expect(s.contains('*'), isFalse); // sin asteriscos
+    });
+
+    test('con conversación: ofrece retomar', () {
+      final s = saludoWakeWord(hayConversacion: true);
+      expect(s.contains('Piero'), isTrue);
+      expect(s.toLowerCase().contains('seguimos'), isTrue);
+      expect(s.contains('*'), isFalse);
+    });
+  });
+
   test('salir() SUELTA el relevo de micro (modoVozActivo=false)', () async {
     // Regresión del bug "se queda en una conversación": el reset del flag debe
     // vivir en salir() (vía que siempre corre), no en el dispose() del widget.

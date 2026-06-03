@@ -28,13 +28,21 @@ import 'widgets/texto_con_enlaces.dart';
 /// Toda la lógica vive en `manosLibresProvider`. Esta pantalla solo
 /// pinta y dispara acciones.
 class ManosLibresScreen extends ConsumerStatefulWidget {
-  const ManosLibresScreen({super.key, this.seedMensaje});
+  const ManosLibresScreen({
+    super.key,
+    this.seedMensaje,
+    this.porWakeWord = false,
+  });
 
   /// Si no nulo, el modo arranca como si el usuario hubiera dicho
   /// este texto. Lo usan los botones de ritual de Inicio
   /// ("Buenos días" / "Cierre del día") para entrar al modo con
   /// la conversación ya disparada por el saludo correspondiente.
   final String? seedMensaje;
+
+  /// `true` cuando se abrió porque el usuario dijo "oye matix". Matix saluda
+  /// por voz ("Hola Piero!") y ofrece retomar si hay conversación reciente.
+  final bool porWakeWord;
 
   @override
   ConsumerState<ManosLibresScreen> createState() =>
@@ -52,9 +60,12 @@ class _ManosLibresScreenState extends ConsumerState<ManosLibresScreen> {
     // suelta. `salir()` se llama desde deactivate() (abajo), que SIEMPRE corre
     // al cerrar — así el wake word reanuda con seguridad y nunca queda pegado.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref
-          .read(manosLibresProvider.notifier)
-          .entrar(seedMensaje: widget.seedMensaje);
+      final notifier = ref.read(manosLibresProvider.notifier);
+      if (widget.porWakeWord) {
+        notifier.entrarPorWakeWord();
+      } else {
+        notifier.entrar(seedMensaje: widget.seedMensaje);
+      }
     });
   }
 
