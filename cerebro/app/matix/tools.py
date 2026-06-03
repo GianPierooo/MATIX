@@ -63,6 +63,7 @@ from ..schemas.movimientos import MovimientoCreate, MovimientoUpdate
 from ..schemas.proyectos import ProyectoCreate, ProyectoUpdate
 from ..schemas.tareas import TareaCreate, TareaUpdate
 from . import (
+    arbol_proyecto,
     automatizaciones,
     busqueda_web,
     finanzas,
@@ -1628,6 +1629,143 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         },
     },
+    # ── Árbol de descomposición vivo por proyecto (Paso 2) ──────────
+    {
+        "type": "function",
+        "function": {
+            "name": "generar_arbol_proyecto",
+            "description": (
+                "Arma desde el PERFIL un árbol de descomposición (plan) del "
+                "proyecto: fases/componentes → pasos. Es el sustrato del que más "
+                "adelante saldrán las subtareas diarias; NO es la lista de Tareas "
+                "del hub y NO se vuelca ahí. Elaboración progresiva: detalla fino "
+                "la fase ACTUAL y deja las lejanas gruesas. Es una PROPUESTA: "
+                "muéstrala y deja que el usuario la ajuste. Si ya hay plan, no lo "
+                "duplica (devuelve el existente para editar/refinar)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": {"type": "string"},
+                    "proyecto": {"type": "string"},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ver_arbol_proyecto",
+            "description": (
+                "Muestra el plan (árbol) de un proyecto: nodos con su estado e "
+                "id, y el progreso. Para «muéstrame el plan de [proyecto]». Los "
+                "ids sirven para editar/podar/marcar nodos."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": {"type": "string"},
+                    "proyecto": {"type": "string"},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agregar_nodo",
+            "description": (
+                "Agrega un nodo al árbol de un proyecto. `parent_id` (del plan) lo "
+                "cuelga de una fase; sin parent_id es una fase raíz. Úsalo cuando "
+                "el usuario quiere sumar una parte o un paso al plan."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": {"type": "string"},
+                    "proyecto": {"type": "string"},
+                    "titulo": {"type": "string"},
+                    "parent_id": {"type": "string", "description": "Nodo padre (fase) del plan."},
+                    "fase": {"type": "string"},
+                    "tamano": {"type": "string", "description": "chico | medio | grande (opcional)."},
+                    "notas": {"type": "string"},
+                },
+                "required": ["titulo"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "actualizar_nodo",
+            "description": (
+                "Edita un nodo del árbol por su id (lo ves en el plan): cambia "
+                "título, estado (pendiente/en_curso/hecho), orden, notas, tamaño "
+                "o fase. «Eso ya lo hice» → estado='hecho'; «estoy en eso» → "
+                "'en_curso'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nodo_id": {"type": "string"},
+                    "titulo": {"type": "string"},
+                    "estado": {"type": "string", "enum": ["pendiente", "en_curso", "hecho"]},
+                    "orden": {"type": "integer"},
+                    "notas": {"type": "string"},
+                    "tamano": {"type": "string"},
+                    "fase": {"type": "string"},
+                },
+                "required": ["nodo_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "eliminar_nodo",
+            "description": (
+                "Poda un nodo del árbol por su id (y sus hijos). Cuando el usuario "
+                "dice que algo sobra o ya no aplica en el plan."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"nodo_id": {"type": "string"}},
+                "required": ["nodo_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "refinar_fase",
+            "description": (
+                "Desglosa una fase GRUESA (lejana, marcada «por desglosar») en sus "
+                "pasos finos cuando el usuario se acerca a ella. Pasa `nodo_id` de "
+                "la fase y `subnodos` (lista de pasos). Guardrail: refina UNA fase, "
+                "la actual o la próxima — no desgloses fases lejanas de golpe."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nodo_id": {"type": "string"},
+                    "subnodos": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Los pasos (títulos) en que se divide la fase.",
+                    },
+                },
+                "required": ["nodo_id", "subnodos"],
+                "additionalProperties": False,
+            },
+        },
+    },
     # ── Automatizaciones (proactividad: el usuario las define) ───────
     {
         "type": "function",
@@ -2217,6 +2355,13 @@ async def _completar_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
     if actual.get("repeticion") and actual.get("vence_en"):
         await _crear_siguiente_instancia(db, actual, actual["repeticion"])
 
+    # Árbol vivo (Paso 2): si un nodo del plan estaba enlazado a esta tarea
+    # (lo hará el Paso 3 al promover), márcalo hecho. Best-effort.
+    try:
+        await arbol_proyecto.marcar_por_tarea(db, tarea_id=tarea_id, estado="hecho")
+    except Exception:  # noqa: BLE001
+        pass
+
     return _ok(
         {
             "id": tarea_id,
@@ -2270,6 +2415,12 @@ async def _reabrir_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
             "interno",
             "No se pudo reabrir la tarea (la BD no la devolvió).",
         )
+
+    # Árbol vivo: si la tarea estaba enlazada a un nodo, vuelve a pendiente.
+    try:
+        await arbol_proyecto.marcar_por_tarea(db, tarea_id=tarea_id, estado="pendiente")
+    except Exception:  # noqa: BLE001
+        pass
 
     return _ok({"id": tarea_id, "titulo": actual["titulo"]})
 
@@ -3887,6 +4038,106 @@ _GUIA_ENTREVISTA = (
 )
 
 
+# ── Árbol de descomposición vivo por proyecto (Paso 2) ──────────────────────
+
+async def _arbol_resumen(db: Postgrest, proyecto: dict) -> dict[str, Any]:
+    nodos = await arbol_proyecto.ver_arbol(db, proyecto=proyecto)
+    return {
+        "plan": arbol_proyecto.armar_arbol_texto(nodos),
+        "progreso": arbol_proyecto.progreso_arbol(nodos),
+    }
+
+
+async def _generar_arbol_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    r = await _resolver_proyecto_arg(db, args)
+    if not r["ok"]:
+        return r["error"]
+    res = await arbol_proyecto.generar_arbol(db, proyecto=r["proyecto"])
+    if res["estado"] == "sin_perfil":
+        return _error(
+            "sin_perfil",
+            "Ese proyecto casi no tiene perfil todavía.",
+            sugerencia="Propón llenar el perfil (iniciar_entrevista_proyecto) antes de armar el plan.",
+        )
+    nota = (
+        "Es una PROPUESTA: muéstrasela al usuario y dile que puede ajustarla "
+        "(agregar/editar/podar nodos, refinar una fase). No la des por hecha."
+        if res["estado"] == "generado"
+        else "Ya había un plan; muéstralo y ofrécele editarlo o refinar la fase actual."
+    )
+    return _ok({
+        "estado": res["estado"],
+        "proyecto": r["proyecto"]["nombre"],
+        "plan": arbol_proyecto.armar_arbol_texto(res.get("nodos", [])),
+        "nota": nota,
+    })
+
+
+async def _ver_arbol_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    r = await _resolver_proyecto_arg(db, args)
+    if not r["ok"]:
+        return r["error"]
+    return _ok({"proyecto": r["proyecto"]["nombre"], **await _arbol_resumen(db, r["proyecto"])})
+
+
+async def _agregar_nodo(db: Postgrest, args: dict) -> dict[str, Any]:
+    titulo = (args.get("titulo") or "").strip()
+    if not titulo:
+        return _error("validacion", "Pásame el `titulo` del nodo.")
+    r = await _resolver_proyecto_arg(db, args)
+    if not r["ok"]:
+        return r["error"]
+    fila = await arbol_proyecto.agregar_nodo(
+        db,
+        proyecto_id=r["proyecto"]["id"],
+        titulo=titulo,
+        parent_id=(args.get("parent_id") or "").strip() or None,
+        fase=(args.get("fase") or "").strip() or None,
+        tamano=(args.get("tamano") or "").strip() or None,
+        notas=(args.get("notas") or "").strip() or None,
+    )
+    return _ok({"nodo_id": fila["id"], "titulo": titulo})
+
+
+async def _actualizar_nodo(db: Postgrest, args: dict) -> dict[str, Any]:
+    nodo_id = (args.get("nodo_id") or "").strip()
+    if not nodo_id:
+        return _error("validacion", "Pásame el `nodo_id` (lo ves en el plan).")
+    estado = args.get("estado")
+    if estado is not None and estado not in ("pendiente", "en_curso", "hecho"):
+        return _error("validacion", "`estado` debe ser pendiente, en_curso o hecho.")
+    campos = {k: args.get(k) for k in ("titulo", "estado", "orden", "notas", "tamano", "fase")}
+    fila = await arbol_proyecto.actualizar_nodo(db, nodo_id=nodo_id, campos=campos)
+    if fila is None:
+        return _error("no_encontrado", "No encontré ese nodo.")
+    return _ok({"nodo_id": nodo_id, "actualizado": True})
+
+
+async def _eliminar_nodo(db: Postgrest, args: dict) -> dict[str, Any]:
+    nodo_id = (args.get("nodo_id") or "").strip()
+    if not nodo_id:
+        return _error("validacion", "Pásame el `nodo_id` a podar (lo ves en el plan).")
+    ok = await arbol_proyecto.eliminar_nodo(db, nodo_id=nodo_id)
+    if not ok:
+        return _error("no_encontrado", "No encontré ese nodo.")
+    return _ok({"nodo_id": nodo_id, "eliminado": True})
+
+
+async def _refinar_fase(db: Postgrest, args: dict) -> dict[str, Any]:
+    nodo_id = (args.get("nodo_id") or "").strip()
+    subnodos = args.get("subnodos")
+    if not nodo_id:
+        return _error("validacion", "Pásame el `nodo_id` de la fase a desglosar.")
+    if not isinstance(subnodos, list) or not subnodos:
+        return _error("validacion", "Pásame `subnodos`: la lista de pasos de esa fase.")
+    fila = await arbol_proyecto.refinar_fase(
+        db, nodo_id=nodo_id, subnodos=[str(s) for s in subnodos],
+    )
+    if fila is None:
+        return _error("no_encontrado", "No encontré esa fase.")
+    return _ok({"nodo_id": nodo_id, "refinada": True, "pasos": len(subnodos)})
+
+
 async def _crear_automatizacion(db: Postgrest, args: dict) -> dict[str, Any]:
     descripcion = (args.get("descripcion") or "").strip()
     recurrencia = (args.get("recurrencia") or "").strip()
@@ -4183,6 +4434,13 @@ _HANDLERS = {
     "borrar_detalle_proyecto": _borrar_detalle_proyecto,
     "iniciar_entrevista_proyecto": _iniciar_entrevista_proyecto,
     "continuar_entrevista_proyecto": _continuar_entrevista_proyecto,
+    # Árbol de descomposición vivo por proyecto (Paso 2)
+    "generar_arbol_proyecto": _generar_arbol_proyecto,
+    "ver_arbol_proyecto": _ver_arbol_proyecto,
+    "agregar_nodo": _agregar_nodo,
+    "actualizar_nodo": _actualizar_nodo,
+    "eliminar_nodo": _eliminar_nodo,
+    "refinar_fase": _refinar_fase,
     # Automatizaciones (proactividad)
     "crear_automatizacion": _crear_automatizacion,
     "listar_automatizaciones": _listar_automatizaciones,
@@ -4259,6 +4517,14 @@ TABLAS_AFECTADAS = {
     "borrar_detalle_proyecto": [],
     "iniciar_entrevista_proyecto": [],
     "continuar_entrevista_proyecto": [],
+    # Árbol de descomposición (tabla propia; sin pantalla en la app aún, y NO
+    # es la lista de Tareas: no se vuelca al hub)
+    "generar_arbol_proyecto": [],
+    "ver_arbol_proyecto": [],
+    "agregar_nodo": [],
+    "actualizar_nodo": [],
+    "eliminar_nodo": [],
+    "refinar_fase": [],
     # Automatizaciones (tabla propia; la app no tiene pantalla en v1)
     "crear_automatizacion": [],
     "listar_automatizaciones": [],

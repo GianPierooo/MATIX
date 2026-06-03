@@ -42,6 +42,11 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Plan por proyecto · árbol de descomposición (perfil profundo · Paso 2): cada
+  proyecto activo puede tener un plan en árbol (fases → pasos) que armo desde
+  su perfil, detallando fino solo la fase actual y dejando gruesas las lejanas.
+  Lo puedes ver y editar. Es el sustrato para, más adelante, proponer subtareas
+  diarias (eso aún no). No ensucia tu lista de Tareas.
 - Arreglo de seguridad (WhatsApp): mandar un WhatsApp a un contacto ya nunca
   abre el selector «Enviar a…» (que dejaba mandar a cualquiera o a varios).
   Siempre abro el chat de ESE contacto, verifico la cabecera, y confirmo
