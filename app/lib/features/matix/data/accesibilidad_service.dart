@@ -90,4 +90,88 @@ class AccesibilidadService {
       texto: aplanarPantalla(mapa),
     );
   }
+
+  // ── Tier C.1 · ACCIÓN (tap / setText), blindada ────────────────────
+
+  /// Lee el texto del primer nodo con ese viewId (verificar encabezado, caja).
+  Future<String?> leerTextoPorId(String viewId) async {
+    try {
+      return await _canal.invokeMethod<String>('leerTextoPorId', {'viewId': viewId});
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  /// Ejecuta una acción estructurada. Devuelve true si el servicio nativo la
+  /// realizó (allowlist OK, nodo encontrado, sin kill switch).
+  Future<bool> ejecutarAccion(Map<String, dynamic> accion) async {
+    try {
+      final crudo = await _canal.invokeMethod<String>('ejecutarAccion', {
+        'accion': jsonEncode(accion),
+      });
+      if (crudo == null) return false;
+      return (jsonDecode(crudo) as Map<String, dynamic>)['ok'] == true;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  /// Arranca un flujo de acción: limpia el kill switch y muestra la
+  /// notificación con el botón «Detener».
+  Future<void> iniciarFlujo() async {
+    try {
+      await _canal.invokeMethod('iniciarFlujo');
+    } on PlatformException {
+      // sin-op
+    }
+  }
+
+  /// Log VISIBLE de cada paso (se ve en la notificación, aunque WhatsApp esté
+  /// en primer plano): «Escribiendo…», «Enviando…».
+  Future<void> actualizarFlujo(String texto) async {
+    try {
+      await _canal.invokeMethod('actualizarFlujo', {'texto': texto});
+    } on PlatformException {
+      // sin-op
+    }
+  }
+
+  /// Cierra el flujo dejando un aviso final con el resultado (o lo quita si
+  /// `texto` está vacío).
+  Future<void> terminarFlujo([String texto = '']) async {
+    try {
+      await _canal.invokeMethod('terminarFlujo', {'texto': texto});
+    } on PlatformException {
+      // sin-op
+    }
+  }
+
+  /// Kill switch desde la app (voz «para»/«detente», botón Cancelar).
+  Future<void> abortar() async {
+    try {
+      await _canal.invokeMethod('abortar');
+    } on PlatformException {
+      // sin-op
+    }
+  }
+
+  /// ¿El bucle fue abortado (kill switch)?
+  Future<bool> estaAbortado() async {
+    try {
+      return await _canal.invokeMethod<bool>('estaAbortado') ?? true;
+    } on PlatformException {
+      return true; // ante la duda, abortar
+    }
+  }
+
+  /// Muestra el gate de confirmación como overlay sobre WhatsApp. Devuelve
+  /// 'enviar' | 'cancelar' | 'sin_overlay'.
+  Future<String> confirmarEnvio(String resumen) async {
+    try {
+      return await _canal.invokeMethod<String>('confirmarEnvio', {'resumen': resumen}) ??
+          'cancelar';
+    } on PlatformException {
+      return 'cancelar';
+    }
+  }
 }

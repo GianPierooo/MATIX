@@ -328,9 +328,13 @@ class AccionDispositivo(BaseModel):
                     flujo de visión/finanzas que ya existe.
     - `pantalla`  → proposito — la app LEE (solo lectura) la pantalla activa y
                     manda el texto como dato en un turno nuevo (Tier C.0).
+    - `whatsapp`  → contacto, mensaje — la app abre el chat, verifica el contacto,
+                    escribe y, tras confirmar, envía (Tier C.1, acción blindada).
     """
 
-    tipo: Literal["mensaje", "llamada", "evento", "abrir", "galeria", "pantalla"]
+    tipo: Literal[
+        "mensaje", "llamada", "evento", "abrir", "galeria", "pantalla", "whatsapp"
+    ]
     datos: dict = Field(default_factory=dict)
     # Texto corto para la hoja de confirmación de la app («Abrir WhatsApp para
     # María con este texto…»).

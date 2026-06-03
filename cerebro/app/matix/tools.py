@@ -1713,6 +1713,37 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "escribir_whatsapp",
+            "description": (
+                "Escribe un mensaje de WhatsApp a un contacto y lo envía TRAS la "
+                "confirmación del usuario en el teléfono. Úsala para «escríbele a "
+                "X que Y», «mándale por WhatsApp a X…». La app abre el chat "
+                "correcto, VERIFICA que es ese contacto, escribe el mensaje y "
+                "pide confirmar antes de enviar (tú no envías nada solo). "
+                "Distinta de `redactar_mensaje` (que solo pre-llena y abre): esta "
+                "escribe y, con tu OK, envía. Pasa el mensaje YA redactado, "
+                "natural y en primera persona del usuario."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "contacto": {
+                        "type": "string",
+                        "description": "Nombre del contacto (o número). Ej.: «Felipe», «mamá».",
+                    },
+                    "mensaje": {
+                        "type": "string",
+                        "description": "El texto a enviar, ya redactado y listo.",
+                    },
+                },
+                "required": ["contacto", "mensaje"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 
@@ -3663,6 +3694,24 @@ async def _leer_pantalla(_db: Postgrest, args: dict) -> dict[str, Any]:
     )
 
 
+async def _escribir_whatsapp(_db: Postgrest, args: dict) -> dict[str, Any]:
+    """Tier C.1 — primera acción blindada: escribe un mensaje de WhatsApp al
+    contacto y, tras la confirmación del usuario EN EL TELÉFONO, lo envía. El
+    cerebro NO envía: la app abre el chat correcto, verifica el contacto,
+    escribe vía accesibilidad y pide confirmar antes del tap de enviar."""
+    contacto = (args.get("contacto") or "").strip()
+    mensaje = (args.get("mensaje") or "").strip()
+    if not contacto or not mensaje:
+        return _error("validacion", "Pásame `contacto` y `mensaje`.")
+    resumen = f"Escribir a {contacto} por WhatsApp: «{mensaje}» (te pediré confirmar antes de enviar)."
+    # La confirmación de envío es un gate EN LA APP (overlay sobre WhatsApp), no
+    # el sheet genérico; por eso requiere_confirmacion=False aquí.
+    return _accion_dispositivo(
+        "whatsapp", {"contacto": contacto, "mensaje": mensaje}, resumen,
+        requiere_confirmacion=False,
+    )
+
+
 # Mapa de nombre → handler. Mantener sincronizado con TOOL_DEFINITIONS.
 _HANDLERS = {
     # Crear
@@ -3731,6 +3780,8 @@ _HANDLERS = {
     "leer_galeria": _leer_galeria,
     # Teléfono (Capa 6 · Tier C.0): percepción de pantalla, SOLO lectura
     "leer_pantalla": _leer_pantalla,
+    # Teléfono (Capa 6 · Tier C.1): primera acción blindada (WhatsApp)
+    "escribir_whatsapp": _escribir_whatsapp,
 }
 
 
@@ -3794,6 +3845,7 @@ TABLAS_AFECTADAS = {
     "abrir_en_telefono": [],
     "leer_galeria": [],
     "leer_pantalla": [],
+    "escribir_whatsapp": [],
 }
 
 

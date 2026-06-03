@@ -31,9 +31,16 @@ pidan: contesta lo que preguntan, concreto.
 - Leer la pantalla (Tier C.0): puedo leer el texto de la app que tienes
   abierta, bajo demanda, para decirte qué hay o usarlo en mi respuesta. Es
   SOLO lectura: no toco ni escribo nada. Necesita el permiso de accesibilidad.
+- Escribir un WhatsApp (Tier C.1): puedo escribir un mensaje a un contacto y
+  enviarlo tras tu confirmación en el teléfono. Por ahora la única acción que
+  ejecuto (tocar/escribir) es esta; el resto sigue siendo solo lectura.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Primera acción · Tier C.1: puedo escribir un WhatsApp por ti («escríbele a X
+  que Y»). Abro el chat correcto, verifico que es ese contacto, escribo el
+  mensaje y te pido confirmar en el teléfono antes de enviar. No envío nada
+  solo; hay botón para detener en cualquier momento.
 - Percepción de pantalla · Tier C.0: puedo LEER la pantalla que tienes abierta
   (solo lectura, bajo demanda) para decirte qué hay o usar lo que dice. No
   toco, no escribo, no deslizo. Necesita el permiso de accesibilidad.
@@ -53,7 +60,10 @@ pidan: contesta lo que preguntan, concreto.
 
 - Leer tus contactos para resolver un nombre a un número (llega en una fase
   próxima): por ahora, para llamar/mensajear necesito el número.
-- Enviar el mensaje o hacer la llamada por mi cuenta: siempre lo dejo listo y
-  tú das el último toque.
+- Hacer llamadas o mandar SMS/correo por mi cuenta: ahí solo dejo listo y tú
+  das el último toque. (WhatsApp sí lo envío, pero recién tras tu confirmación
+  explícita en el teléfono.)
+- Actuar en otras apps que no sean WhatsApp: por ahora solo WhatsApp ejecuta
+  acciones; en el resto solo leo.
 - Sincronizar con Google (calendario/correo), controlar la casa o la PC: son
   capas posteriores aún no integradas.

@@ -161,6 +161,46 @@ class MainActivity : FlutterActivity() {
                     "leerPantalla" -> result.success(
                         MatixAccessibilityService.instancia?.capturarJson(),
                     )
+                    // Tier C.1 · acción blindada
+                    "leerTextoPorId" -> result.success(
+                        MatixAccessibilityService.instancia?.leerTextoPorId(
+                            call.argument<String>("viewId") ?: "",
+                        ),
+                    )
+                    "ejecutarAccion" -> result.success(
+                        MatixAccessibilityService.instancia?.ejecutarAccion(
+                            call.argument<String>("accion") ?: "{}",
+                        ),
+                    )
+                    "iniciarFlujo" -> {
+                        MatixAccessibilityService.instancia?.iniciarFlujoAccion()
+                        result.success(true)
+                    }
+                    "actualizarFlujo" -> {
+                        MatixAccessibilityService.instancia?.actualizarFlujoAccion(
+                            call.argument<String>("texto") ?: "",
+                        )
+                        result.success(true)
+                    }
+                    "terminarFlujo" -> {
+                        MatixAccessibilityService.instancia?.terminarFlujoAccion(
+                            call.argument<String>("texto") ?: "",
+                        )
+                        result.success(true)
+                    }
+                    "abortar" -> {
+                        MatixAccessibilityService.instancia?.abortar()
+                        result.success(true)
+                    }
+                    "estaAbortado" -> result.success(
+                        MatixAccessibilityService.instancia?.abortado ?: true,
+                    )
+                    // Gate de confirmación como overlay sobre WhatsApp. Completa
+                    // el result cuando el usuario toca Enviar/Cancelar.
+                    "confirmarEnvio" -> OverlayConfirmacion.mostrar(
+                        this,
+                        call.argument<String>("resumen") ?: "¿Enviar?",
+                    ) { decision -> result.success(decision) }
                     else -> result.notImplemented()
                 }
             }

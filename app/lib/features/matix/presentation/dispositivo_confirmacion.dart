@@ -36,6 +36,11 @@ Future<void> manejarAccionDispositivo(
     return;
   }
 
+  if (accion.tipo == 'whatsapp') {
+    await _manejarWhatsapp(context, ref, accion);
+    return;
+  }
+
   if (accion.requiereConfirmacion) {
     final confirmado = await _mostrarHoja(context, accion);
     if (confirmado != true) return;
@@ -124,6 +129,46 @@ Future<void> _manejarPantalla(
             ? '(La pantalla no tenía texto legible.)'
             : lectura.texto,
       );
+}
+
+/// Tier C.1 · PRIMERA ACCIÓN: escribe (y, tras tu confirmación, envía) un
+/// WhatsApp vía el bucle de acción blindado. El gate de envío es un overlay
+/// sobre WhatsApp; el kill switch vive en la notificación.
+Future<void> _manejarWhatsapp(
+  BuildContext context,
+  WidgetRef ref,
+  AccionDispositivo accion,
+) async {
+  final contacto = (accion.datos['contacto'] as String?)?.trim() ?? '';
+  final mensaje = (accion.datos['mensaje'] as String?)?.trim() ?? '';
+  if (contacto.isEmpty || mensaje.isEmpty) {
+    _aviso(context, 'Me falta el contacto o el mensaje para escribir el WhatsApp.');
+    return;
+  }
+
+  final acc = ref.read(accesibilidadServiceProvider);
+  if (!await acc.activa()) {
+    if (!context.mounted) return;
+    _aviso(context, 'Para escribir por WhatsApp necesito el permiso de accesibilidad.');
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(builder: (_) => const AccesibilidadScreen()),
+    );
+    return;
+  }
+
+  if (!context.mounted) return;
+  _aviso(context, 'Escribiéndole a $contacto…');
+  final flujo = ref.read(whatsappAccionFlujoProvider);
+  final resultado = await flujo.ejecutar(
+    contacto: contacto,
+    mensaje: mensaje,
+    onLog: (_) {}, // el log visible va por la notificación (acc.actualizarFlujo)
+    confirmar: (resumen) => acc.confirmarEnvio(resumen),
+  );
+
+  // Aviso final visible (notificación) + en la app si está al frente.
+  await acc.terminarFlujo(resultado.mensaje);
+  if (context.mounted) _aviso(context, resultado.mensaje);
 }
 
 /// Nombre amable a partir del paquete (último segmento), para el indicador.
