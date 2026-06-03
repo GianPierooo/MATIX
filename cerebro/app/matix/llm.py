@@ -21,6 +21,7 @@ Las API keys se leen SOLO de variables de entorno (`OPENAI_API_KEY`,
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 from typing import Any
 
@@ -30,9 +31,41 @@ from ..config import settings
 from . import modelos_llm
 from .uso import medidor
 
+logger = logging.getLogger("matix.llm")
+
 # Tope de tokens de salida para Anthropic (OpenAI no lo exige). Holgado
 # para una respuesta de chat o un lote de tool calls.
 _MAX_TOKENS_ANTHROPIC = 4096
+
+
+def _es_error_de_proveedor(e: Exception) -> bool:
+    """¿El fallo es del PROVEEDOR (transitorio/operativo) y amerita failover?
+
+    SÍ: timeout, caída de conexión, rate limit (429), saturación (529) y
+    errores 5xx del servidor del proveedor.
+    NO: bad request (400), content filter, auth (401/403), not found (404),
+    validación (422) — esos son legítimos y se devuelven tal cual.
+
+    Funciona para ambos SDKs (OpenAI y Anthropic comparten la jerarquía
+    httpx/APIError): primero miramos `status_code`; si no hay (timeout/
+    conexión), caemos al nombre de la clase.
+    """
+    code = getattr(e, "status_code", None)
+    if isinstance(code, int):
+        return code in (408, 409, 425, 429) or code >= 500
+    nombre = type(e).__name__
+    return nombre in {
+        "APITimeoutError",
+        "APIConnectionError",
+        "APIConnectionTimeoutError",
+        "RateLimitError",
+        "InternalServerError",
+        "ServiceUnavailableError",
+        "OverloadedError",
+        "Timeout",
+        "ConnectError",
+        "ReadTimeout",
+    }
 
 _openai_client: AsyncOpenAI | None = None
 _anthropic_client: Any = None
@@ -280,10 +313,54 @@ async def responder_con_tools(
 
     `raw` es el mensaje del asistente en el formato NATIVO del proveedor
     activo; `chat.py` lo re-inyecta tal cual en el siguiente turno (opaco
-    para él). Como el proveedor no cambia dentro de un mismo request, el
-    `raw` siempre encaja.
+    para él). Como `chat.py` fija el modelo del turno y lo pasa en cada vuelta,
+    si el primario cae TODAS las vueltas caen al MISMO fallback → el `raw`
+    siempre es del mismo proveedor dentro del turno.
+
+    FAILOVER (patrón barato y legítimo): si el proveedor del modelo primario
+    falla por un error de PROVEEDOR (timeout/rate limit/5xx/caída), reintenta
+    UNA sola vez con el modelo comparable del OTRO proveedor. En errores
+    legítimos (bad request, content filter, auth) NO reintenta: los relanza.
+    Si hubo failover, el dict trae `modelo_efectivo` y `failover=True` para que
+    `chat.py` lo surfacee con transparencia.
     """
     model = _modelo_chat(model)
+    try:
+        return await _con_tools_en(
+            model, messages, tools, temperature=temperature, tool_choice=tool_choice
+        )
+    except Exception as e:  # noqa: BLE001
+        if not _es_error_de_proveedor(e):
+            raise  # error legítimo → tal cual, SIN failover
+        fallback = modelos_llm.modelo_fallback(model)
+        if not fallback or fallback == model:
+            raise  # sin equivalente claro → propagamos el error original
+        logger.warning(
+            "failover LLM: «%s» (%s) falló por %s → reintento con «%s» (%s)",
+            model,
+            modelos_llm.proveedor_de_id(model),
+            type(e).__name__,
+            fallback,
+            modelos_llm.proveedor_de_id(fallback),
+        )
+        # UN solo intento de fallback. Si también falla, propaga (sin loops).
+        resultado = await _con_tools_en(
+            fallback, messages, tools, temperature=temperature, tool_choice=tool_choice
+        )
+        resultado["failover"] = True
+        resultado["modelo_efectivo"] = fallback
+        return resultado
+
+
+async def _con_tools_en(
+    model: str,
+    messages: list[dict],
+    tools: list[dict],
+    *,
+    temperature: float,
+    tool_choice: Any,
+) -> dict[str, Any]:
+    """Un intento contra UN modelo concreto (rutea por proveedor)."""
     if _es_anthropic(model):
         return await _anthropic_con_tools(
             messages, tools, model=model, temperature=temperature, tool_choice=tool_choice

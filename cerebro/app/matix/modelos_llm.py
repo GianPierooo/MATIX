@@ -103,6 +103,43 @@ def listar() -> list[dict]:
     ]
 
 
+# ── Failover entre proveedores ──────────────────────────────────────
+#
+# Si el proveedor del modelo primario cae (timeout/rate limit/5xx), el cerebro
+# reintenta UNA vez con un modelo COMPARABLE del OTRO proveedor. El mapa empareja
+# por tier: rápido↔rápido (barato) y a fondo↔a fondo (caro). Para un id
+# desconocido se cae al modelo barato del otro proveedor (seguro y barato).
+_FALLBACK_CRUZADO: dict[str, str] = {
+    # OpenAI → Anthropic
+    "gpt-5.5": "claude-sonnet-4-6",        # a fondo ↔ a fondo
+    "gpt-5.4-mini": "claude-haiku-4-5",    # rápido ↔ rápido
+    "gpt-5.4-nano": "claude-haiku-4-5",
+    "gpt-4o-mini": "claude-haiku-4-5",
+    # Anthropic → OpenAI
+    "claude-opus-4-8": "gpt-5.5",
+    "claude-opus-4-7": "gpt-5.5",
+    "claude-sonnet-4-6": "gpt-5.5",
+    "claude-haiku-4-5": "gpt-4o-mini",
+}
+
+
+def modelo_fallback(modelo_id: str | None) -> str | None:
+    """Modelo COMPARABLE en el OTRO proveedor para failover, o None si no hay
+    un equivalente distinto al primario. Nunca devuelve un modelo del MISMO
+    proveedor (el sentido del failover es cambiar de proveedor)."""
+    mid = (modelo_id or "").strip()
+    directo = _FALLBACK_CRUZADO.get(mid)
+    if directo:
+        return directo
+    # Id desconocido: el barato del OTRO proveedor.
+    prov = proveedor_de_id(mid)
+    alterno = DEFAULT_FUERTE if prov == "openai" else DEFAULT_BARATO
+    # Aseguramos que el alterno NO sea del mismo proveedor que el primario.
+    if proveedor_de_id(alterno) == prov:
+        alterno = "claude-haiku-4-5" if prov == "openai" else "gpt-4o-mini"
+    return alterno if alterno != mid else None
+
+
 # ── Selección (persistida en config_matix.modelo_chat) ──────────────
 
 

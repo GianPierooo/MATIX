@@ -251,11 +251,16 @@ async def conversar(
     opciones_bloque: dict[str, Any] | None = None
 
     ultima_respuesta = ""
+    # Modelo que de verdad respondió. Si el LLM hizo failover al otro proveedor,
+    # `responder_con_tools` lo marca y lo surfaceamos con transparencia.
+    modelo_efectivo = modelo
 
     for _ in range(_MAX_VUELTAS):
         salida = await llm.responder_con_tools(
             mensajes, TOOL_DEFINITIONS, model=modelo
         )
+        if salida.get("failover"):
+            modelo_efectivo = salida.get("modelo_efectivo", modelo)
 
         if salida["tipo"] == "texto":
             ultima_respuesta = salida["contenido"]
@@ -326,8 +331,9 @@ async def conversar(
         "opciones": opciones_bloque,
         # Transparencia: qué modelo respondió este turno y si lo eligió el
         # modo Automático. La app lo muestra (sobre todo en auto) para que
-        # el usuario vea qué se usó y pueda ajustar el par.
-        "modelo_usado": modelo,
+        # el usuario vea qué se usó y pueda ajustar el par. Si hubo failover,
+        # es el modelo del OTRO proveedor con el que se reintentó.
+        "modelo_usado": modelo_efectivo,
         "auto": auto,
     }
 
