@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:matix/features/matix/data/tts_service.dart';
 import 'package:matix/features/matix/providers/manos_libres_providers.dart';
+import 'package:matix/features/wakeword/providers/wakeword_providers.dart';
 
 /// TTS fake que solo registra si se llamó `detener` (el corte del audio).
 class _FakeTts implements TtsBase {
@@ -77,5 +78,22 @@ void main() {
     notifier.debugFijarReproduccion(FaseManosLibres.escuchando);
     await notifier.interrumpirHabla();
     expect(fake.detenerCount, 0);
+  });
+
+  test('salir() SUELTA el relevo de micro (modoVozActivo=false)', () async {
+    // Regresión del bug "se queda en una conversación": el reset del flag debe
+    // vivir en salir() (vía que siempre corre), no en el dispose() del widget.
+    final fake = _FakeTts();
+    final c = hacerContainer(fake);
+    final notifier = c.read(manosLibresProvider.notifier);
+
+    // Simulamos modo voz activo (como tras entrar()).
+    c.read(modoVozActivoProvider.notifier).state = true;
+    expect(c.read(modoVozActivoProvider), isTrue);
+
+    await notifier.salir();
+
+    // El wake word puede reanudar: el flag quedó liberado.
+    expect(c.read(modoVozActivoProvider), isFalse);
   });
 }

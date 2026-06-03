@@ -64,14 +64,16 @@ class WakeWordEstado {
 
 final wakeWordPrefsProvider = Provider<WakeWordPrefs>((ref) => WakeWordPrefs());
 
-/// FUENTE ÚNICA DE VERDAD del relevo de micrófono: ¿hay un modo voz (manos
-/// libres) activo ahora mismo?
+/// FUENTE ÚNICA DE VERDAD del relevo de micrófono: ¿el modo voz (manos libres)
+/// está usando el micrófono ahora mismo?
 ///
-/// La fija `ManosLibresScreen`: `true` al abrirse, `false` al cerrarse por
-/// CUALQUIER vía (completar, cancelar, botón atrás, navegar a otra pantalla,
-/// salir). El listener del wake word la observa: activo → pausa; inactivo →
-/// reanuda. Así el escuchador nunca queda pegado en pausa, sin importar cómo
-/// se salga del modo voz.
+/// Lo posee el NOTIFIER de manos libres (el componente que abre el micro), no
+/// el widget: `entrar()` lo pone `true`, `salir()` lo pone `false`. `salir()`
+/// se invoca por TODAS las vías de cierre desde `deactivate()` de la pantalla
+/// (back, completar, cancelar, navegar fuera) — una vía que SIEMPRE corre. El
+/// listener del wake word la observa: activo → pausa; inactivo → reanuda. Antes
+/// el reset vivía en el `dispose()` del widget (`ref.read` en dispose es
+/// frágil) y, si no corría, el wake word quedaba pausado para siempre.
 final modoVozActivoProvider = StateProvider<bool>((ref) => false);
 
 /// Migajas de activación (diagnóstico de crash nativo sin USB). Compartidas

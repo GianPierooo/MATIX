@@ -8,7 +8,6 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../theme/matix_colors.dart';
 import '../../../theme/matix_spacing.dart';
 import '../../../theme/matix_typography.dart';
-import '../../wakeword/providers/wakeword_providers.dart';
 import '../domain/mensaje.dart';
 import '../providers/manos_libres_providers.dart';
 import '../providers/matix_chat_providers.dart';
@@ -47,11 +46,10 @@ class _ManosLibresScreenState extends ConsumerState<ManosLibresScreen> {
   @override
   void initState() {
     super.initState();
-    // Fuente ÚNICA de verdad del relevo de micro: marcamos "modo voz activo".
-    // El listener del wake word reacciona (suelta el micro). Mientras esta
-    // pantalla exista, el modo voz está activo; cuando se destruya (por la vía
-    // que sea), se apaga en dispose() y el wake word reanuda solo.
-    ref.read(modoVozActivoProvider.notifier).state = true;
+    // El relevo de micro lo posee el notifier de manos libres (el que usa el
+    // micrófono): `entrar()` enciende `modoVozActivoProvider` y `salir()` lo
+    // suelta. `salir()` se llama desde deactivate() (abajo), que SIEMPRE corre
+    // al cerrar — así el wake word reanuda con seguridad y nunca queda pegado.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref
           .read(manosLibresProvider.notifier)
@@ -67,10 +65,8 @@ class _ManosLibresScreenState extends ConsumerState<ManosLibresScreen> {
 
   @override
   void dispose() {
-    // El modo voz terminó pase lo que pase (back, completar, cancelar, navegar
-    // a otra pantalla): apagamos la fuente de verdad y el wake word reanuda.
-    // dispose() SIEMPRE corre al quitar la ruta, así que nunca queda pegado.
-    ref.read(modoVozActivoProvider.notifier).state = false;
+    // El reset del relevo de micro ya lo hizo `salir()` (desde deactivate()).
+    // Aquí solo liberamos recursos de la pantalla.
     _scrollCtrl.dispose();
     super.dispose();
   }

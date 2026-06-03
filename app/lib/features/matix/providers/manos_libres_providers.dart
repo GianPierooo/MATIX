@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../api/matix_client.dart';
+import '../../wakeword/providers/wakeword_providers.dart';
 import '../data/grabacion_voz_service.dart';
 import '../data/matix_transcribir_repository.dart';
 import '../data/tts_service.dart';
@@ -161,6 +162,14 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
   Future<void> entrar({String? seedMensaje}) async {
     if (state.fase != FaseManosLibres.inactivo) return;
     _saliendo = false;
+    // FUENTE ÚNICA de verdad del relevo de micro: el modo voz (que usa el
+    // micrófono) lo posee este notifier. Lo encendemos al entrar y lo SOLTAMOS
+    // en salir() — que la pantalla llama desde deactivate(), una vía que SIEMPRE
+    // corre. Antes el reset vivía en el dispose() del widget (ref.read durante
+    // dispose es frágil): si no corría, el wake word quedaba pausado para
+    // siempre ("en una conversación"). Ahora el dueño del micro garantiza la
+    // liberación.
+    ref.read(modoVozActivoProvider.notifier).state = true;
     _seed = seedMensaje?.trim().isEmpty ?? true ? null : seedMensaje!.trim();
     state = state.copyWith(
       fase: FaseManosLibres.iniciando,
@@ -175,12 +184,19 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
   }
 
   Future<void> salir() async {
+    // SOLTAR el micro para el wake word: lo primero y síncrono (antes de awaits),
+    // así el escuchador reanuda al instante. Se ejecuta por TODAS las vías de
+    // salida (deactivate de la pantalla, PopScope, botones), garantizando que el
+    // wake word nunca quede pegado.
+    ref.read(modoVozActivoProvider.notifier).state = false;
     _saliendo = true;
     if (_esperaReanudar != null && !_esperaReanudar!.isCompleted) {
       _esperaReanudar!.complete();
     }
-    await _grab.cancelar();
-    await _tts.detener();
+    // Solo tocamos los servicios si llegaron a crearse (mic/TTS son lazy): así
+    // un salir() temprano no instancia plugins nativos sin necesidad.
+    if (_grabCache != null) await _grabCache!.cancelar();
+    if (_ttsCache != null) await _ttsCache!.detener();
     state = const EstadoManosLibres();
   }
 
