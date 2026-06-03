@@ -71,6 +71,7 @@ from . import (
     memoria_conversacional,
     modos,
     perfil_proyecto,
+    planificador_diario,
 )
 from .biblioteca import buscar_material as _buscar_material_rag
 from .indexador import buscar_apuntes as _buscar_apuntes_rag
@@ -1766,6 +1767,93 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         },
     },
+    # ── Planificador diario: set del día + nudges (Paso 3) ──────────
+    {
+        "type": "function",
+        "function": {
+            "name": "proponer_set_dia",
+            "description": (
+                "Arma el SET del día: un grupo CHICO y finible de subtareas "
+                "tomadas de los árboles de tus proyectos activos (las próximas "
+                "desbloqueadas), no «todo lo que existe». Úsala cuando el usuario "
+                "diga «ármame el día», «qué hago hoy», «dame mi set», o para "
+                "forzarlo sin esperar la propuesta automática de la mañana. Es "
+                "PROPUESTA: muéstrala y deja que acepte/edite/salte. Las "
+                "aceptadas se vuelven Tareas del día (con aceptar_set_dia)."
+            ),
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ver_set_dia",
+            "description": "Muestra el set de hoy con su estado (propuesto/aceptado/saltado/hecho) e ids.",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "aceptar_set_dia",
+            "description": (
+                "Acepta subtareas del set: las promueve a Tareas reales del día "
+                "(y a partir de ahí Matix insiste sobre ese set). Sin `item_ids` "
+                "acepta TODAS las propuestas; con `item_ids` solo esas. El "
+                "usuario aprueba el set; no lo aceptes por tu cuenta sin que lo "
+                "diga."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Ids de los items a aceptar (del set). Vacío/omitido = todos.",
+                    },
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "saltar_item_set",
+            "description": "Salta (descarta de hoy) un item del set por su id. La insistencia NUNCA va sobre lo saltado.",
+            "parameters": {
+                "type": "object",
+                "properties": {"item_id": {"type": "string"}},
+                "required": ["item_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configurar_planificacion",
+            "description": (
+                "Ajusta los parámetros del planificador: `tamano_set` (cuántas "
+                "propone, 1-8), `intensidad` (alta/media/baja), `hora_propuesta` "
+                "(0-23), `hora_nudge_dormir` (0-23), `activo`. Para «proponme "
+                "menos», «insiste más/menos», «mándame el set más temprano»."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tamano_set": {"type": "integer"},
+                    "intensidad": {"type": "string", "enum": ["alta", "media", "baja"]},
+                    "hora_propuesta": {"type": "integer"},
+                    "hora_nudge_dormir": {"type": "integer"},
+                    "activo": {"type": "boolean"},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
     # ── Automatizaciones (proactividad: el usuario las define) ───────
     {
         "type": "function",
@@ -2355,10 +2443,11 @@ async def _completar_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
     if actual.get("repeticion") and actual.get("vence_en"):
         await _crear_siguiente_instancia(db, actual, actual["repeticion"])
 
-    # Árbol vivo (Paso 2): si un nodo del plan estaba enlazado a esta tarea
-    # (lo hará el Paso 3 al promover), márcalo hecho. Best-effort.
+    # Árbol vivo (Paso 2) + set del día (Paso 3): si la tarea estaba enlazada,
+    # marca el nodo y el item del set como hechos. Best-effort.
     try:
         await arbol_proyecto.marcar_por_tarea(db, tarea_id=tarea_id, estado="hecho")
+        await planificador_diario.marcar_item_por_tarea(db, tarea_id=tarea_id, estado="hecho")
     except Exception:  # noqa: BLE001
         pass
 
@@ -2416,9 +2505,10 @@ async def _reabrir_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
             "No se pudo reabrir la tarea (la BD no la devolvió).",
         )
 
-    # Árbol vivo: si la tarea estaba enlazada a un nodo, vuelve a pendiente.
+    # Árbol vivo + set del día: si la tarea estaba enlazada, vuelve a pendiente.
     try:
         await arbol_proyecto.marcar_por_tarea(db, tarea_id=tarea_id, estado="pendiente")
+        await planificador_diario.marcar_item_por_tarea(db, tarea_id=tarea_id, estado="aceptado")
     except Exception:  # noqa: BLE001
         pass
 
@@ -4138,6 +4228,108 @@ async def _refinar_fase(db: Postgrest, args: dict) -> dict[str, Any]:
     return _ok({"nodo_id": nodo_id, "refinada": True, "pasos": len(subnodos)})
 
 
+# ── Planificador diario: set del día + nudges (Paso 3) ──────────────────────
+
+def _formatear_set(items: list[dict]) -> str:
+    if not items:
+        return "Hoy no hay set armado todavía."
+    etq = {"propuesto": "", "aceptado": "[aceptada] ", "saltado": "[saltada] ", "hecho": "[hecha] "}
+    lineas = []
+    for i in items:
+        marca = etq.get(i.get("estado"), "")
+        proy = f"  ({i.get('proyecto') or ''})" if i.get("proyecto") else ""
+        lineas.append(f"- {marca}{i.get('titulo', '')}{proy}  id={i.get('id')}")
+    return "\n".join(lineas)
+
+
+async def _set_con_proyecto(db: Postgrest, items: list[dict]) -> list[dict]:
+    """Adjunta el nombre del proyecto a cada item (para mostrar)."""
+    nombres: dict[str, str] = {}
+    for i in items:
+        pid = i.get("proyecto_id")
+        if pid and pid not in nombres:
+            p = await db.get("proyectos", str(pid))
+            nombres[pid] = (p or {}).get("nombre", "")
+    return [{**i, "proyecto": nombres.get(i.get("proyecto_id"), "")} for i in items]
+
+
+async def _proponer_set_dia(db: Postgrest, args: dict) -> dict[str, Any]:
+    items = await planificador_diario.construir_set(db)
+    items = await _set_con_proyecto(db, items)
+    return _ok({
+        "set": _formatear_set(items),
+        "items": items,
+        "nota": (
+            "Es el set PROPUESTO del día. Muéstraselo y deja que el usuario "
+            "acepte (aceptar_set_dia), salte alguno (saltar_item_set) o lo "
+            "edite. Es propuesta, no imposición."
+        ),
+    })
+
+
+async def _ver_set_dia(db: Postgrest, args: dict) -> dict[str, Any]:
+    from datetime import datetime, timezone
+    hoy = datetime.now(timezone.utc).astimezone(planificador_diario.LIMA).date().isoformat()
+    items = await db.list("set_diario_items", filters={"fecha": hoy}, order="orden.asc")
+    if not items:
+        return _ok({"set": "Hoy no hay set armado. Puedo proponerlo (proponer_set_dia).", "items": []})
+    items = await _set_con_proyecto(db, items)
+    return _ok({"set": _formatear_set(items), "items": items})
+
+
+async def _aceptar_set_dia(db: Postgrest, args: dict) -> dict[str, Any]:
+    ids = args.get("item_ids")
+    item_ids = [str(x) for x in ids] if isinstance(ids, list) and ids else None
+    promovidos = await planificador_diario.aceptar_items(db, item_ids=item_ids)
+    if not promovidos:
+        return _ok({"aceptadas": 0, "nota": "No había items por aceptar (¿ya estaban aceptados?)."})
+    return _ok({
+        "aceptadas": len(promovidos),
+        "nota": (
+            "Promoví esas subtareas a tu lista de Tareas para hoy. A partir de "
+            "ahora te insisto sobre ESE set hasta cerrarlo. Confírmalo corto."
+        ),
+    })
+
+
+async def _saltar_item_set(db: Postgrest, args: dict) -> dict[str, Any]:
+    item_id = (args.get("item_id") or "").strip()
+    if not item_id:
+        return _error("validacion", "Pásame el `item_id` a saltar (lo ves en el set).")
+    fila = await db.update("set_diario_items", item_id, {"estado": "saltado"})
+    if fila is None:
+        return _error("no_encontrado", "No encontré ese item del set.")
+    return _ok({"item_id": item_id, "saltada": True})
+
+
+async def _configurar_planificacion(db: Postgrest, args: dict) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if args.get("tamano_set") is not None:
+        try:
+            payload["tamano_set"] = max(1, min(int(args["tamano_set"]), 8))
+        except (TypeError, ValueError):
+            return _error("validacion", "`tamano_set` debe ser un número.")
+    if args.get("intensidad") is not None:
+        if args["intensidad"] not in ("alta", "media", "baja"):
+            return _error("validacion", "`intensidad` debe ser alta, media o baja.")
+        payload["intensidad"] = args["intensidad"]
+    for campo in ("hora_propuesta", "hora_nudge_dormir"):
+        if args.get(campo) is not None:
+            try:
+                payload[campo] = max(0, min(int(args[campo]), 23))
+            except (TypeError, ValueError):
+                return _error("validacion", f"`{campo}` debe ser una hora 0-23.")
+    if args.get("activo") is not None:
+        payload["activo"] = bool(args["activo"])
+    if not payload:
+        return _error("validacion", "Dime qué ajustar (tamaño, intensidad, horas, activo).")
+    filas = await db.list("config_planificacion", limit=1)
+    if not filas:
+        return _error("interno", "No hay config de planificación.")
+    await db.update("config_planificacion", filas[0]["id"], payload)
+    return _ok({"ajustado": list(payload.keys())})
+
+
 async def _crear_automatizacion(db: Postgrest, args: dict) -> dict[str, Any]:
     descripcion = (args.get("descripcion") or "").strip()
     recurrencia = (args.get("recurrencia") or "").strip()
@@ -4441,6 +4633,12 @@ _HANDLERS = {
     "actualizar_nodo": _actualizar_nodo,
     "eliminar_nodo": _eliminar_nodo,
     "refinar_fase": _refinar_fase,
+    # Planificador diario: set del día + nudges (Paso 3)
+    "proponer_set_dia": _proponer_set_dia,
+    "ver_set_dia": _ver_set_dia,
+    "aceptar_set_dia": _aceptar_set_dia,
+    "saltar_item_set": _saltar_item_set,
+    "configurar_planificacion": _configurar_planificacion,
     # Automatizaciones (proactividad)
     "crear_automatizacion": _crear_automatizacion,
     "listar_automatizaciones": _listar_automatizaciones,
@@ -4525,6 +4723,12 @@ TABLAS_AFECTADAS = {
     "actualizar_nodo": [],
     "eliminar_nodo": [],
     "refinar_fase": [],
+    # Planificador diario: aceptar promueve a Tareas reales (refresca la lista)
+    "proponer_set_dia": [],
+    "ver_set_dia": [],
+    "aceptar_set_dia": ["tareas"],
+    "saltar_item_set": [],
+    "configurar_planificacion": [],
     # Automatizaciones (tabla propia; la app no tiene pantalla en v1)
     "crear_automatizacion": [],
     "listar_automatizaciones": [],

@@ -27,6 +27,9 @@ pidan: contesta lo que preguntan, concreto.
 - Perfil de proyectos: guardo de cada proyecto su objetivo, estado, fase,
   componentes, próximos pasos y blockers; te entrevisto para llenarlo y lo voy
   enriqueciendo según hablamos.
+- Set del día: te propongo cada mañana un grupo chico de subtareas de tus
+  proyectos, insisto sana pero firme sobre lo que aceptas, y te ayudo a cerrar
+  el día y dormir a horario.
 - Automatizaciones: recordatorios y acciones recurrentes que el usuario define
   («cada mañana a las 7…»).
 - Teléfono (Capa 6 · Fase 1): abrir apps/mapas/enlaces, marcar llamadas,
@@ -42,6 +45,11 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Set del día + insistencia sana (perfil profundo · Paso 3): cada mañana te
+  propongo un set chico y finible de subtareas sacadas de los árboles de tus
+  proyectos; tú lo apruebas. Insisto sobre lo que aceptaste hasta cerrarlo
+  (con anti-fatiga), celebro lo logrado, ruedo lo pendiente a mañana sin culpa,
+  y te empujo a dormir antes de las 12. Ajustable (tamaño, intensidad, horas).
 - Plan por proyecto · árbol de descomposición (perfil profundo · Paso 2): cada
   proyecto activo puede tener un plan en árbol (fases → pasos) que armo desde
   su perfil, detallando fino solo la fase actual y dejando gruesas las lejanas.

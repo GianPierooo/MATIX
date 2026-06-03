@@ -301,6 +301,16 @@ async def _contenido_ritual(
     db: Postgrest, ritual: str, ahora: datetime
 ) -> tuple[str, str]:
     if ritual == "cierre":
+        # Enriquecemos el cierre con el resumen del SET del día (Paso 3):
+        # celebra lo hecho y rueda lo pendiente sin culpa. Best-effort.
+        try:
+            from . import planificador_diario
+
+            hechos, total = await planificador_diario.resumen_cierre_db(db, ahora=ahora)
+            if total > 0:
+                return planificador_diario.resumen_cierre(hechos, total)
+        except Exception:  # noqa: BLE001
+            logger.exception("cierre: no pude leer el set del día")
         return (
             "🌙 Cierre del día",
             "¿Qué aprendiste hoy? Anota 3 cosas que sí hiciste y haz tu "
@@ -621,6 +631,16 @@ def iniciar(db: Postgrest) -> None:
             await automatizaciones.revisar_automatizaciones(db)
         except Exception:  # noqa: BLE001
             logger.exception("scheduler: el tick de automatizaciones falló")
+        # Planificador diario (Paso 3): propuesta del set, escalación sobre lo
+        # aceptado, y nudge de dormir. Cada uno best-effort.
+        try:
+            from . import planificador_diario
+
+            await planificador_diario.revisar_propuesta(db)
+            await planificador_diario.revisar_escalacion(db)
+            await planificador_diario.revisar_dormir(db)
+        except Exception:  # noqa: BLE001
+            logger.exception("scheduler: el tick del planificador falló")
 
     sch = AsyncIOScheduler(timezone=LIMA)
     sch.add_job(
