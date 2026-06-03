@@ -51,11 +51,20 @@
          ota_update crasheaba de forma nativa en el Huawei sin GPS. -->
 
     <!-- Capa 7 Paso 1: apunte desde foto. CAMERA habilita
-         `ImageSource.camera` de image_picker. Para galería NO
+         `ImageSource.camera` de image_picker. Para ELEGIR de la galería NO
          hace falta declarar `READ_MEDIA_IMAGES` — image_picker
          usa el Photo Picker del sistema (Android 13+) que opera
          sin permisos. -->
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- Capa 6 Fase 1 (acceso al teléfono · Tier B): leer la foto MÁS
+         RECIENTE de la galería automáticamente (MediaStore) — el caso
+         "accede a mi última foto y anota los gastos". A diferencia del Photo
+         Picker, una consulta a MediaStore SÍ requiere permiso de lectura.
+         Android 13+ usa READ_MEDIA_IMAGES; Android 14+ añade el acceso
+         parcial (READ_MEDIA_VISUAL_USER_SELECTED). Si el usuario los niega,
+         el flujo degrada al Photo Picker (modo "elegir", sin permisos). -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED"/>
 
     <application
         android:label="matix"
@@ -128,6 +137,43 @@
              y queda en silencio. -->
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE"/>
+        </intent>
+        <!-- Capa 6 Fase 1 (acceso al teléfono): Android 11+ exige declarar las
+             intenciones que la app va a LANZAR para poder resolverlas
+             (package visibility). Sin esto, `resolveActivity`/`startActivity`
+             de estos intents falla aunque la app destino exista. -->
+        <!-- Llamada (ACTION_DIAL, sin permiso CALL_PHONE). -->
+        <intent>
+            <action android:name="android.intent.action.DIAL"/>
+            <data android:scheme="tel"/>
+        </intent>
+        <!-- SMS y correo prellenados (ACTION_SENDTO). -->
+        <intent>
+            <action android:name="android.intent.action.SENDTO"/>
+            <data android:scheme="smsto"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO"/>
+            <data android:scheme="mailto"/>
+        </intent>
+        <!-- Abrir URL / WhatsApp web (ACTION_VIEW https). -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="http"/>
+        </intent>
+        <!-- Abrir mapa (ACTION_VIEW geo). -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="geo"/>
+        </intent>
+        <!-- Crear evento en el calendario del teléfono (ACTION_INSERT). -->
+        <intent>
+            <action android:name="android.intent.action.INSERT"/>
+            <data android:mimeType="vnd.android.cursor.dir/event"/>
         </intent>
     </queries>
 </manifest>

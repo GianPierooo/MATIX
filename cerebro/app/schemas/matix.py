@@ -314,6 +314,29 @@ class BloqueOpciones(BaseModel):
     tipo: Literal["seleccion_unica", "seleccion_multiple", "texto"]
 
 
+class AccionDispositivo(BaseModel):
+    """Acción que la APP ejecuta en el teléfono vía un Intent nativo (Capa 6 ·
+    Fase 1). El cerebro NO la ejecuta: la PROPONE y la app la dispara tras la
+    confirmación del usuario (las que envían/crean siempre se confirman).
+
+    `tipo` discrimina y define qué campos vienen:
+    - `mensaje`   → canal (whatsapp|sms|correo), destinatario?, texto, asunto?
+    - `llamada`   → numero, nombre?
+    - `evento`    → titulo, inicia_en, termina_en?, ubicacion?, descripcion?
+    - `abrir`     → objetivo (url|mapa|app), valor
+    - `galeria`   → modo (ultima|elegir) — la app toma la foto y la manda al
+                    flujo de visión/finanzas que ya existe.
+    """
+
+    tipo: Literal["mensaje", "llamada", "evento", "abrir", "galeria"]
+    datos: dict = Field(default_factory=dict)
+    # Texto corto para la hoja de confirmación de la app («Abrir WhatsApp para
+    # María con este texto…»).
+    resumen: str = ""
+    # Si la app debe pedir confirmación explícita antes de ejecutar (enviar/crear).
+    requiere_confirmacion: bool = True
+
+
 class ChatResponse(BaseModel):
     """Respuesta del endpoint `/matix/chat`.
 
@@ -344,6 +367,9 @@ class ChatResponse(BaseModel):
     # pequeña — sobre todo cuando `auto` — para ver qué se usó.
     modelo_usado: str | None = None
     auto: bool = False
+    # Acción a ejecutar en el teléfono (Intent nativo), o `null`. La app la
+    # confirma con el usuario y la dispara. Gana la última del turno.
+    accion_dispositivo: AccionDispositivo | None = None
 
 
 class ConteoMuestrasResponse(BaseModel):

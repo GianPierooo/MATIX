@@ -5,6 +5,7 @@
 
 import '../../../api/matix_client.dart';
 import '../domain/mensaje.dart';
+import 'accion_dispositivo.dart';
 
 /// Resultado de un turno de chat con Matix.
 ///
@@ -46,6 +47,7 @@ class ChatTurno {
     required this.toolsUsadas,
     required this.tablasCambiadas,
     this.navegacion,
+    this.accionDispositivo,
     this.modoActivo,
     this.opciones,
     this.modeloUsado,
@@ -59,6 +61,10 @@ class ChatTurno {
   /// Sección a la que Matix pidió navegar este turno (o `null`). El
   /// string viene del cerebro (`inicio`, `universidad`, `finanzas`…).
   final String? navegacion;
+
+  /// Acción de teléfono que Matix propuso este turno (Capa 6 · Fase 1), o
+  /// `null`. La app la confirma (si hace falta) y lanza el Intent nativo.
+  final AccionDispositivo? accionDispositivo;
 
   /// Modo de Matix activo DESPUÉS del turno (el modelo pudo cambiarlo con
   /// `activar_modo`/`desactivar_modo`). `null` = modo normal.
@@ -138,6 +144,7 @@ class MatixChatRepository {
           .map((e) => e.toString())
           .toList(growable: false),
       navegacion: j['navegacion'] as String?,
+      accionDispositivo: AccionDispositivo.fromJson(j['accion_dispositivo']),
       modoActivo: j['modo_activo'] as String?,
       opciones: j['opciones'] is Map<String, dynamic>
           ? BloqueOpciones.fromJson(j['opciones'] as Map<String, dynamic>)

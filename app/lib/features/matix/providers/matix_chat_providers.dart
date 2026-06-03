@@ -16,6 +16,7 @@ import '../../proyectos/providers/proyectos_providers.dart';
 import '../../tareas/providers/tareas_providers.dart';
 import '../data/matix_chat_repository.dart';
 import '../domain/mensaje.dart';
+import 'dispositivo_providers.dart';
 import 'navegacion_matix_provider.dart';
 import 'uso_providers.dart';
 
@@ -242,6 +243,11 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
       final destino = seccionMatixDeString(turno.navegacion);
       if (destino != null) {
         ref.read(objetivoNavegacionProvider.notifier).state = destino;
+      }
+      // Acción de teléfono propuesta este turno (Capa 6 · Fase 1): la UI la
+      // confirma (si hace falta) y lanza el Intent nativo. One-shot.
+      if (turno.accionDispositivo != null) {
+        ref.read(accionDispositivoProvider.notifier).state = turno.accionDispositivo;
       }
       ref.read(modosProvider.notifier).sincronizar(turno.modoActivo);
       ref.invalidate(usoSnapshotProvider);

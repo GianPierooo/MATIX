@@ -32,8 +32,10 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val canalShare = "dev.matix.matix/share"
     private val canalWake = "dev.matix.matix/wakeword_bg"
+    private val canalDispositivo = "dev.matix.matix/dispositivo"
     private var channelShare: MethodChannel? = null
     private var channelWake: MethodChannel? = null
+    private var channelDispositivo: MethodChannel? = null
     private var textoInicialCompartido: String? = null
     private var aperturaWakePendiente = false
 
@@ -93,6 +95,53 @@ class MainActivity : FlutterActivity() {
                         result.success(aperturaWakePendiente)
                         aperturaWakePendiente = false
                     }
+                    else -> result.notImplemented()
+                }
+            }
+        }
+
+        // Acciones de teléfono (Capa 6 · Fase 1): la app EJECUTA el Intent que
+        // el cerebro propuso, tras la confirmación del usuario. El cerebro
+        // nunca actúa solo. Cada método devuelve true/false (false = ninguna
+        // app resolvió el intent → Dart degrada con un aviso).
+        channelDispositivo = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, canalDispositivo).also {
+            it.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "redactarMensaje" -> result.success(
+                        DispositivoIntents.redactarMensaje(
+                            this,
+                            call.argument<String>("canal") ?: "",
+                            call.argument<String>("destinatario"),
+                            call.argument<String>("texto") ?: "",
+                            call.argument<String>("asunto"),
+                        ),
+                    )
+                    "iniciarLlamada" -> result.success(
+                        DispositivoIntents.iniciarLlamada(
+                            this,
+                            call.argument<String>("numero") ?: "",
+                        ),
+                    )
+                    "crearEvento" -> result.success(
+                        DispositivoIntents.crearEvento(
+                            this,
+                            call.argument<String>("titulo") ?: "",
+                            call.argument<Number>("iniciaEnMillis")?.toLong() ?: 0L,
+                            call.argument<Number>("terminaEnMillis")?.toLong(),
+                            call.argument<String>("ubicacion"),
+                            call.argument<String>("descripcion"),
+                        ),
+                    )
+                    "abrir" -> result.success(
+                        DispositivoIntents.abrir(
+                            this,
+                            call.argument<String>("objetivo") ?: "",
+                            call.argument<String>("valor") ?: "",
+                        ),
+                    )
+                    "leerUltimaFoto" -> result.success(
+                        DispositivoIntents.leerUltimaFoto(this),
+                    )
                     else -> result.notImplemented()
                 }
             }

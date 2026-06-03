@@ -248,6 +248,9 @@ async def conversar(
     # Sección a la que llevar al usuario si pidió navegar ("llévame a
     # Universidad"). Gana la última llamada a `navegar` del turno.
     navegacion: str | None = None
+    # Acción de teléfono propuesta (Intent nativo: mensaje/llamada/evento/abrir/
+    # galería). La app la confirma y la ejecuta. Gana la última del turno.
+    accion_dispositivo: dict[str, Any] | None = None
     # Bloque interactivo (opciones tocables) si Matix usó
     # `preguntar_con_opciones`. Cuando lo pide, el turno TERMINA con la
     # pregunta + las opciones; el usuario responde tocando (la app manda la
@@ -290,6 +293,10 @@ async def conversar(
                 # `navegar` no cambia datos: solo emite la sección a abrir.
                 if nombre == "navegar":
                     navegacion = resultado.get("datos", {}).get("seccion")
+                # Acciones de teléfono: emiten un bloque que la app ejecuta.
+                accion = resultado.get("datos", {}).get("accion_dispositivo")
+                if accion:
+                    accion_dispositivo = accion
                 # `preguntar_con_opciones`: emite el bloque interactivo y
                 # cierra el turno (no se vuelve a llamar al modelo).
                 if nombre == "preguntar_con_opciones":
@@ -339,6 +346,8 @@ async def conversar(
         # es el modelo del OTRO proveedor con el que se reintentó.
         "modelo_usado": modelo_efectivo,
         "auto": auto,
+        # Acción de teléfono (Intent nativo) o None. La app la confirma y ejecuta.
+        "accion_dispositivo": accion_dispositivo,
     }
 
 

@@ -17,14 +17,17 @@ import '../../../theme/matix_typography.dart';
 import '../../apuntes/providers/apuntes_providers.dart';
 import '../../modelos/providers/modelos_providers.dart';
 import '../../modos/providers/modos_providers.dart';
+import '../data/accion_dispositivo.dart';
 import '../data/contacto_memoria.dart';
 import '../data/documento_repository.dart';
 import '../data/matix_transcribir_repository.dart';
 import '../data/uso_repository.dart';
 import '../domain/mensaje.dart';
+import '../providers/dispositivo_providers.dart';
 import '../providers/matix_chat_providers.dart';
 import '../providers/uso_providers.dart';
 import '../providers/voz_providers.dart';
+import 'dispositivo_confirmacion.dart';
 import 'manos_libres_screen.dart';
 import 'widgets/menu_adjuntar.dart';
 import 'widgets/opciones_interactivas.dart';
@@ -589,6 +592,17 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen>
         final permanente = next.error!.contains('ajustes del sistema');
         _mostrarErrorVoz(next.error!, permisoPermanente: permanente);
       }
+    });
+
+    // Acción de teléfono propuesta por Matix (Capa 6 · Fase 1): confirmamos
+    // (si envía/crea) y lanzamos el Intent nativo. One-shot: consumimos el
+    // valor y lo procesamos tras el frame.
+    ref.listen<AccionDispositivo?>(accionDispositivoProvider, (_, next) {
+      if (next == null) return;
+      ref.read(accionDispositivoProvider.notifier).state = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) manejarAccionDispositivo(context, ref, next);
+      });
     });
 
     final vacio = estado.mensajes.isEmpty && !estado.enviando;
