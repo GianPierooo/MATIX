@@ -62,7 +62,7 @@ from ..schemas.eventos import EventoCreate, EventoUpdate
 from ..schemas.movimientos import MovimientoCreate, MovimientoUpdate
 from ..schemas.proyectos import ProyectoCreate, ProyectoUpdate
 from ..schemas.tareas import TareaCreate, TareaUpdate
-from . import finanzas, memoria, modos
+from . import busqueda_web, finanzas, memoria, modos
 from .biblioteca import buscar_material as _buscar_material_rag
 from .indexador import buscar_apuntes as _buscar_apuntes_rag
 from .indexador import indexar_apunte
@@ -1352,6 +1352,47 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "consulta": {
                         "type": "string",
                         "description": "Qué buscar, en lenguaje natural.",
+                    },
+                },
+                "required": ["consulta"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ── Búsqueda web (info actual / externa) ─────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "buscar_web",
+            "description": (
+                "Busca en INTERNET información ACTUAL o EXTERNA que NO está en el "
+                "hub ni en tu conocimiento: noticias, precios o cotizaciones de "
+                "hoy, datos recientes, estrenos, resultados, cualquier cosa "
+                "posterior a tu corte, o cuando el usuario diga «busca», "
+                "«googlea», «qué dicen de…», «búscame en internet». Devuelve "
+                "FUENTES (título, url, extracto) para que TÚ sintetices la "
+                "respuesta.\n"
+                "REGLAS DE USO:\n"
+                "- Úsala SOLO cuando de verdad hace falta info fresca o externa. "
+                "NO la uses para lo que ya sabes, ni para los DATOS PERSONALES "
+                "del usuario (sus tareas, apuntes, finanzas, memoria viven en el "
+                "hub — usa esas tools, no la web).\n"
+                "- No sobre-busques: cada búsqueda suma latencia y tokens. Una "
+                "consulta enfocada basta; no encadenes varias salvo necesidad.\n"
+                "- Con los resultados: responde CONCISO, en español y de «tú», "
+                "PARAFRASEA (no copies texto literal) y MUESTRA los enlaces (url) "
+                "de las fuentes para que el usuario pueda verificar."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "consulta": {
+                        "type": "string",
+                        "description": (
+                            "Qué buscar, en lenguaje natural y enfocado (puedes "
+                            "afinar la pregunta del usuario para una mejor "
+                            "búsqueda)."
+                        ),
                     },
                 },
                 "required": ["consulta"],
@@ -3060,6 +3101,51 @@ async def _buscar_memoria(db: Postgrest, args: dict) -> dict[str, Any]:
     )
 
 
+async def _buscar_web(db: Postgrest, args: dict) -> dict[str, Any]:
+    """Busca en internet vía Tavily y devuelve fuentes limpias para que el
+    modelo sintetice. No toca la BD (`db` no se usa). Si Tavily falla, devuelve
+    un error amable para que Matix lo diga sin crashear."""
+    consulta = (args.get("consulta") or "").strip()
+    if not consulta:
+        return _error(
+            "validacion", "Pásame `consulta`: qué quieres buscar en internet."
+        )
+    try:
+        fuentes = await busqueda_web.buscar(consulta)
+    except busqueda_web.BusquedaWebError:
+        # No filtramos el detalle técnico al usuario.
+        return _error(
+            "busqueda_web",
+            "No pude buscar en internet ahora mismo.",
+            sugerencia=(
+                "Dile al usuario, en tu voz y amable, que la búsqueda no está "
+                "disponible en este momento y que reintente en un rato."
+            ),
+        )
+    if not fuentes:
+        return _ok(
+            {
+                "consulta": consulta,
+                "fuentes": [],
+                "nota": (
+                    "La búsqueda no devolvió resultados. Dilo con naturalidad; "
+                    "no inventes datos."
+                ),
+            }
+        )
+    return _ok(
+        {
+            "consulta": consulta,
+            "fuentes": fuentes,
+            "instruccion": (
+                "Sintetiza en TU voz (español, «tú»), conciso. PARAFRASEA, no "
+                "copies texto literal. MUESTRA los enlaces (url) de las fuentes "
+                "para que el usuario verifique."
+            ),
+        }
+    )
+
+
 # Mapa de nombre → handler. Mantener sincronizado con TOOL_DEFINITIONS.
 _HANDLERS = {
     # Crear
@@ -3114,6 +3200,8 @@ _HANDLERS = {
     "consultar_tareas": _consultar_tareas,
     "consultar_eventos": _consultar_eventos,
     "consultar_proyectos": _consultar_proyectos,
+    # Búsqueda web (info actual / externa)
+    "buscar_web": _buscar_web,
 }
 
 
@@ -3165,6 +3253,7 @@ TABLAS_AFECTADAS = {
     "consultar_tareas": [],  # solo lectura
     "consultar_eventos": [],  # solo lectura
     "consultar_proyectos": [],  # solo lectura
+    "buscar_web": [],  # no toca el hub
 }
 
 

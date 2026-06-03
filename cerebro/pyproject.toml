@@ -37,6 +37,9 @@ dependencies = [
     # material; ahora también en el server para `/matix/extraer-documento`.
     "pypdf>=5.0",
     "python-docx>=1.1",
+    # Búsqueda web para Matix (tool `buscar_web`). SDK oficial de Tavily; la
+    # API key se lee SOLO de TAVILY_API_KEY (env), nunca del repo.
+    "tavily-python>=0.5",
 ]
 
 [dependency-groups]
