@@ -11,6 +11,7 @@ import '../../../theme/matix_typography.dart';
 import '../domain/mensaje.dart';
 import '../providers/manos_libres_providers.dart';
 import '../providers/matix_chat_providers.dart';
+import 'widgets/texto_con_enlaces.dart';
 
 /// Modo manos libres (Capa 2 Paso 5.1, rehecho).
 ///
@@ -252,7 +253,7 @@ class _MensajeBurbuja extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: MatixSpacing.s),
-                SelectableText(
+                TextoConEnlaces(
                   mensaje.contenido,
                   style: MatixText.body.copyWith(color: colorTexto),
                 ),

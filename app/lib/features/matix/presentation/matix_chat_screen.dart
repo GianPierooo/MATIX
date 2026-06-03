@@ -28,6 +28,7 @@ import '../providers/voz_providers.dart';
 import 'manos_libres_screen.dart';
 import 'widgets/menu_adjuntar.dart';
 import 'widgets/opciones_interactivas.dart';
+import 'widgets/texto_con_enlaces.dart';
 
 /// Pantalla principal de Matix (Capa 2 Paso 1): chat solo texto.
 ///
@@ -861,7 +862,7 @@ class _Burbuja extends StatelessWidget {
                       const SizedBox(height: MatixSpacing.s),
                   ],
                   if (mensaje.contenido.isNotEmpty)
-                    SelectableText(
+                    TextoConEnlaces(
                       mensaje.contenido,
                       style: MatixText.body.copyWith(color: colorTexto),
                     ),
