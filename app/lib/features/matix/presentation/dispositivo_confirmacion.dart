@@ -75,6 +75,9 @@ Future<bool?> _mostrarHoja(BuildContext context, AccionDispositivo accion) {
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
+    // Root navigator: la hoja sale por encima de manos libres (voz) cuando la
+    // acción llega estando esa pantalla abierta.
+    useRootNavigator: true,
     builder: (ctx) => SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),

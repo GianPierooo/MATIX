@@ -175,5 +175,14 @@
             <action android:name="android.intent.action.INSERT"/>
             <data android:mimeType="vnd.android.cursor.dir/event"/>
         </intent>
+        <!-- Compartir texto a WhatsApp (mensaje por NOMBRE: el usuario elige el
+             contacto) y selector genérico de compartir como degradación. -->
+        <intent>
+            <action android:name="android.intent.action.SEND"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- WhatsApp por paquete: necesario para resolver el ACTION_SEND
+             dirigido a com.whatsapp en Android 11+. -->
+        <package android:name="com.whatsapp"/>
     </queries>
 </manifest>

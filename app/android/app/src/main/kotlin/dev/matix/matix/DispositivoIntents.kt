@@ -34,21 +34,26 @@ object DispositivoIntents {
         texto: String,
         asunto: String?,
     ): Boolean {
-        val intent = when (canal) {
-            "whatsapp" -> intentWhatsApp(destinatario, texto)
-            "sms" -> Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:${destinatario ?: ""}")).apply {
-                putExtra("sms_body", texto)
-            }
-            "correo" -> Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")).apply {
-                if (!destinatario.isNullOrBlank()) {
-                    putExtra(Intent.EXTRA_EMAIL, arrayOf(destinatario))
-                }
-                if (!asunto.isNullOrBlank()) putExtra(Intent.EXTRA_SUBJECT, asunto)
-                putExtra(Intent.EXTRA_TEXT, texto)
-            }
-            else -> return false
+        return when (canal) {
+            "whatsapp" -> lanzarWhatsApp(activity, destinatario, texto)
+            "sms" -> lanzar(
+                activity,
+                Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:${destinatario ?: ""}")).apply {
+                    putExtra("sms_body", texto)
+                },
+            )
+            "correo" -> lanzar(
+                activity,
+                Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")).apply {
+                    if (!destinatario.isNullOrBlank()) {
+                        putExtra(Intent.EXTRA_EMAIL, arrayOf(destinatario))
+                    }
+                    if (!asunto.isNullOrBlank()) putExtra(Intent.EXTRA_SUBJECT, asunto)
+                    putExtra(Intent.EXTRA_TEXT, texto)
+                },
+            )
+            else -> false
         }
-        return lanzar(activity, intent)
     }
 
     /** Marca un número en el teléfono (ACTION_DIAL: no llama solo, el usuario
@@ -135,21 +140,35 @@ object DispositivoIntents {
 
     // ── helpers ────────────────────────────────────────────────────────────
 
-    private fun intentWhatsApp(destinatario: String?, texto: String): Intent {
+    private fun lanzarWhatsApp(activity: Activity, destinatario: String?, texto: String): Boolean {
         val soloDigitos = destinatario?.filter { it.isDigit() } ?: ""
-        return if (soloDigitos.length >= 7) {
+        if (soloDigitos.length >= 7) {
             // Número: wa.me abre el chat con ESE contacto y el texto cargado.
-            Intent(
+            // Resuelve por https (declarado en <queries>); cae a chooser si no.
+            val porNumero = Intent(
                 Intent.ACTION_VIEW,
                 Uri.parse("https://wa.me/$soloDigitos?text=${Uri.encode(texto)}"),
             )
-        } else {
-            // Sin número: compartir a WhatsApp (el usuario elige el contacto).
-            Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, texto)
-                setPackage("com.whatsapp")
-            }
+            if (lanzar(activity, porNumero)) return true
+        }
+        // Sin número (o falló): compartir el texto. Probamos WhatsApp directo y,
+        // si no está instalado/visible, abrimos el selector de "compartir" para
+        // que el usuario elija dónde mandarlo (degradación limpia).
+        val aWhatsApp = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, texto)
+            setPackage("com.whatsapp")
+        }
+        if (lanzar(activity, aWhatsApp)) return true
+        val compartir = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, texto)
+        }
+        return try {
+            activity.startActivity(Intent.createChooser(compartir, "Compartir por…"))
+            true
+        } catch (_: Exception) {
+            false
         }
     }
 

@@ -39,6 +39,38 @@ MODOS_PESADOS: frozenset[str] = frozenset({"tesis", "estudio"})
 # largos casi nunca son comandos cortos.
 _UMBRAL_LARGO = 320
 
+# Acciones del teléfono (Capa 6 · Fase 1): abrir app/url/mapa, llamar, mandar
+# WhatsApp/SMS/correo, leer la galería. El modelo BARATO es inconsistente
+# llamando estas tools (a veces narra o rehúsa: "no puedo abrir apps"), así que
+# estos pedidos van al modelo FUERTE, que sí dispara la tool de forma fiable.
+# Se evalúa sobre el texto normalizado (minúsculas, sin acentos).
+_ACCION_DISPOSITIVO = re.compile(
+    r"\b("
+    # abrir app / url / mapa
+    r"abre|abreme|abrir|abrime|lanza|lanzame|"
+    # mensajería
+    r"whatsapp|wasap|wasapea|wasapeale|wsp|sms|"
+    r"mandale|mandame|mensajea|mensajeale|escribele|"
+    # llamada ("marca" se trata aparte para no chocar con «marca la tarea»)
+    r"llama|llamale|llamar|llamame|telefonea|"
+    # galería / foto del teléfono
+    r"galeria"
+    r")\b"
+    r"|ultima foto|mi ultima foto"
+    r"|manda(le|me)? un (whatsapp|mensaje|sms|correo)"
+    r"|envia(le|me)? un (whatsapp|mensaje|sms|correo)"
+    r"|marca (a|al|el numero)\b"
+)
+
+# Fraseo de recordatorio / agenda: «recuérdame llamar al banco» es un
+# recordatorio, NO una llamada. Estos verbos VETAN la ruta de acción de
+# dispositivo (el «llamar/mandar» embebido es el contenido del recordatorio,
+# no la acción a ejecutar ahora).
+_RECORDATORIO = re.compile(
+    r"\b(recuerda|recuerdame|recordar|recordatorio|"
+    r"agenda|agendame|programa|programame)\b"
+)
+
 # Señales de escritura / razonamiento / análisis a fondo → modelo fuerte.
 # Se evalúa sobre el texto normalizado (minúsculas, sin acentos).
 _PESADO = re.compile(
@@ -81,7 +113,8 @@ class Decision:
     """El modelo elegido y por qué (para la traza/transparencia)."""
 
     modelo: str
-    # "modo_pesado" | "razonamiento" | "comando_corto" | "default"
+    # "modo_pesado" | "accion_dispositivo" | "razonamiento" |
+    # "comando_corto" | "default"
     motivo: str
 
 
@@ -108,6 +141,13 @@ def elegir(
         return Decision(fuerte, "modo_pesado")
 
     texto = _norm(mensaje)
+
+    # Acción del teléfono (abrir/llamar/mandar/galería): al modelo FUERTE, que
+    # llama estas tools de forma fiable. El barato a veces narra o rehúsa.
+    # Excepción: si es un recordatorio/agenda, el «llamar/mandar» es el
+    # CONTENIDO del recordatorio, no una acción a ejecutar ahora.
+    if _ACCION_DISPOSITIVO.search(texto) and not _RECORDATORIO.search(texto):
+        return Decision(fuerte, "accion_dispositivo")
 
     # Verbo/señal de razonamiento, o simplemente un mensaje largo: los
     # mensajes largos casi nunca son comandos cortos, así que se asumen

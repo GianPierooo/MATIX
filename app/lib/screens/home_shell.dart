@@ -9,7 +9,10 @@ import '../features/autoupdate/providers/update_providers.dart';
 import '../features/apuntes/presentation/apuntes_list_screen.dart';
 import '../features/eventos/presentation/calendario_screen.dart';
 import '../features/finanzas/presentation/finanzas_screen.dart';
+import '../features/matix/data/accion_dispositivo.dart';
+import '../features/matix/presentation/dispositivo_confirmacion.dart';
 import '../features/matix/presentation/matix_chat_screen.dart';
+import '../features/matix/providers/dispositivo_providers.dart';
 import '../features/matix/providers/navegacion_matix_provider.dart';
 import '../features/proyectos/presentation/proyectos_list_screen.dart';
 import '../features/tareas/presentation/tareas_list_screen.dart';
@@ -148,6 +151,19 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       ref.read(objetivoNavegacionProvider.notifier).state = null;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _navegarMatix(next);
+      });
+    });
+
+    // Acción de teléfono propuesta por Matix (Capa 6 · Fase 1). Se atiende
+    // aquí, en la cáscara, para que funcione venga del chat de texto O de
+    // manos libres (voz): ambos usan el mismo `chatMatixProvider`, y HomeShell
+    // sigue montado debajo de la pantalla de voz. Un solo listener evita el
+    // doble disparo que habría con uno por pantalla. One-shot.
+    ref.listen<AccionDispositivo?>(accionDispositivoProvider, (_, next) {
+      if (next == null) return;
+      ref.read(accionDispositivoProvider.notifier).state = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) manejarAccionDispositivo(context, ref, next);
       });
     });
 

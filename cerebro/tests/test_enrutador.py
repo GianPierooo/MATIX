@@ -86,3 +86,28 @@ def test_pesado_gana_a_comando_corto():
     # Si hay señal pesada y de comando, el pesado tiene prioridad.
     d = _elegir("analiza esto y luego crea una tarea")
     assert d.modelo == FUERTE and d.motivo == "razonamiento"
+
+
+def test_accion_de_dispositivo_va_al_fuerte():
+    # Capa 6 · Fase 1: abrir/llamar/mandar/galería al modelo fuerte, que
+    # llama estas tools de forma fiable (el barato a veces narra o rehúsa).
+    casos = [
+        "abre la calculadora",
+        "ábreme spotify",
+        "mándale un whatsapp a María diciéndole que llego tarde",
+        "envíale un mensaje a Felipe",
+        "llama a papá",
+        "marca al 999888777",
+        "abre el mapa a la universidad",
+        "accede a mi última foto y anota los gastos",
+    ]
+    for m in casos:
+        d = _elegir(m)
+        assert d.modelo == FUERTE, m
+        assert d.motivo == "accion_dispositivo", m
+
+
+def test_accion_de_dispositivo_no_pisa_lo_pesado():
+    # Un modo pesado activo sigue mandando aunque el mensaje pida abrir algo.
+    d = _elegir("abre la calculadora", modo="tesis")
+    assert d.modelo == FUERTE and d.motivo == "modo_pesado"

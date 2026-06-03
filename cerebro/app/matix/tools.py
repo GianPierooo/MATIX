@@ -3531,7 +3531,12 @@ def _accion_dispositivo(
                 "resumen": resumen,
                 "requiere_confirmacion": requiere_confirmacion,
             },
-            "nota": "Acción propuesta para el teléfono; la app la confirma y la ejecuta.",
+            "nota": (
+                "Acción PROPUESTA, todavía no ejecutada. La app la abre en el "
+                "teléfono y (si envía/crea) le pide confirmación al usuario. "
+                "Al narrar: NO digas que ya enviaste/llamaste/abriste; di que "
+                "lo dejaste LISTO y que la app lo va a abrir / pedir confirmar."
+            ),
         }
     )
 
