@@ -235,3 +235,27 @@ construido de forma profesional y sostenible en el tiempo.
 - Esta norma rige aunque el paso haya pedido "detente para validación":
   primero se entrega y valida el trabajo, y el cierre del paso incluye
   dejarlo commiteado y pusheado, no en el working tree.
+
+### Migraciones de Supabase: las aplica Claude (norma estable)
+
+- **Claude aplica las migraciones él mismo**, sin pasárselas al usuario
+  para que las corra a mano. (Reemplaza la regla vieja de "el usuario
+  aplica las migraciones en el SQL Editor".)
+- Mecanismo: el helper `tools/aplicar-migracion.sh <archivo.sql>`, que
+  usa la **Management API de Supabase** con el `SUPABASE_ACCESS_TOKEN`
+  guardado en `tools/.env.prod.local` (GITIGNORED). El token va SOLO en
+  ese archivo de entorno — NUNCA en el código, el repo, los logs ni los
+  resúmenes. (Se usa la Management API y no `supabase db push` porque
+  `db push` exige además la contraseña de la BD; la Management API
+  aplica SQL con solo el access token.) `project ref` en
+  `SUPABASE_PROJECT_REF`.
+- Flujo por cada migración: (1) escribir el `.sql` en
+  `supabase/migrations/00NN_xxx.sql`; (2) aplicarlo con el helper; (3)
+  **dejar el `.sql` commiteado** (versionado y revisable); (4) verificar
+  el esquema resultante (consultar `information_schema` para confirmar
+  tablas/columnas esperadas).
+- Migraciones NORMALES (crear tablas/columnas, índices; `… if not
+  exists`) se aplican SIN preguntar.
+- **Operaciones DESTRUCTIVAS o que pierden datos** (`DROP`, `DELETE`,
+  `TRUNCATE`, `ALTER` que borra/trunca columnas) se CONFIRMAN con el
+  usuario ANTES de aplicarlas.
