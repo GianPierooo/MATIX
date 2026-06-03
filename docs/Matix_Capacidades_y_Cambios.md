@@ -24,6 +24,9 @@ pidan: contesta lo que preguntan, concreto.
 - Tutor/estudio: resumir, explicar, tomar examen por voz sobre los apuntes.
 - Memoria de conversaciones: recuerdo lo que hablamos en sesiones pasadas y lo
   busco por significado, diciéndote cuándo fue.
+- Perfil de proyectos: guardo de cada proyecto su objetivo, estado, fase,
+  componentes, próximos pasos y blockers; te entrevisto para llenarlo y lo voy
+  enriqueciendo según hablamos.
 - Automatizaciones: recordatorios y acciones recurrentes que el usuario define
   («cada mañana a las 7…»).
 - Teléfono (Capa 6 · Fase 1): abrir apps/mapas/enlaces, marcar llamadas,
@@ -39,6 +42,11 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Perfil profundo de proyectos (Paso 1): acumulo conocimiento estructurado de
+  cada proyecto (objetivo, estado, fase, componentes, próximos pasos,
+  blockers, notas). Puedo entrevistarte para llenarlo, anotar lo que surge en
+  la charla, y mostrártelo/corregirlo. Es la base para, más adelante,
+  proponerte subtareas diarias (eso aún no).
 - Memoria conversacional: ahora recuerdo lo que hablamos en sesiones pasadas y
   lo busco por significado («¿qué te dije sobre…?», «lo que hablamos la otra
   vez»), citando cuándo fue. Antes solo veía el chat actual.

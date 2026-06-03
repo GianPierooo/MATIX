@@ -69,6 +69,7 @@ from . import (
     memoria,
     memoria_conversacional,
     modos,
+    perfil_proyecto,
 )
 from .biblioteca import buscar_material as _buscar_material_rag
 from .indexador import buscar_apuntes as _buscar_apuntes_rag
@@ -1462,6 +1463,167 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["consulta"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ── Perfil profundo de proyectos (capa de conocimiento) ─────────
+    {
+        "type": "function",
+        "function": {
+            "name": "ver_perfil_proyecto",
+            "description": (
+                "Muestra lo que sabes de un proyecto: objetivo, estado, fase, "
+                "horizonte, componentes, próximos pasos, blockers, notas y "
+                "decisiones (con su fecha e id). Úsala cuando el usuario diga "
+                "«¿qué sabes de [proyecto]?», «muéstrame el perfil de…». Pásale "
+                "`proyecto_id` (del contexto) o `proyecto` (nombre)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": {"type": "string", "description": "id del proyecto (preferido)."},
+                    "proyecto": {"type": "string", "description": "nombre del proyecto (si no tienes el id)."},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "actualizar_perfil_proyecto",
+            "description": (
+                "Actualiza los campos de ENCABEZADO del perfil de un proyecto: "
+                "objetivo (el por qué), estado_actual, fase_actual, horizonte. "
+                "Manda solo los que cambian. Para listas (componentes, próximos "
+                "pasos, blockers) usa anotar_detalle_proyecto, no esta."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": {"type": "string"},
+                    "proyecto": {"type": "string"},
+                    "objetivo": {"type": "string"},
+                    "estado_actual": {"type": "string"},
+                    "fase_actual": {"type": "string"},
+                    "horizonte": {"type": "string"},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "anotar_detalle_proyecto",
+            "description": (
+                "Agrega un ítem al perfil de un proyecto, con fecha. Úsala en la "
+                "entrevista y también en CAPTURA CONTINUA: cuando en la charla "
+                "surja algo relevante de un proyecto (un componente, el próximo "
+                "paso, un blocker, una decisión, una nota), anótalo y CONFÍRMALE "
+                "al usuario qué guardaste. `tipo`: componente | proximo_paso | "
+                "blocker | nota | decision. `estado` opcional (abierto/hecho/"
+                "resuelto). OJO: un dato del usuario que NO sea de un proyecto va "
+                "a memoria personal (recordar), no acá."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": {"type": "string"},
+                    "proyecto": {"type": "string"},
+                    "tipo": {
+                        "type": "string",
+                        "enum": ["componente", "proximo_paso", "blocker", "nota", "decision"],
+                    },
+                    "contenido": {"type": "string"},
+                    "estado": {"type": "string", "enum": ["abierto", "hecho", "resuelto", "archivado"]},
+                },
+                "required": ["tipo", "contenido"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "corregir_detalle_proyecto",
+            "description": (
+                "Corrige un detalle del perfil (su texto o su estado) por su id "
+                "(lo ves en ver_perfil_proyecto). Para «eso ya lo hice» pon "
+                "estado='hecho'; para un blocker resuelto, 'resuelto'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "detalle_id": {"type": "string"},
+                    "contenido": {"type": "string"},
+                    "estado": {"type": "string", "enum": ["abierto", "hecho", "resuelto", "archivado"]},
+                },
+                "required": ["detalle_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "borrar_detalle_proyecto",
+            "description": (
+                "Borra un detalle del perfil por su id (cuando el usuario dice "
+                "que algo está mal o ya no aplica). Permanente para ese ítem."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"detalle_id": {"type": "string"}},
+                "required": ["detalle_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "iniciar_entrevista_proyecto",
+            "description": (
+                "Arranca la ENTREVISTA de perfil de un proyecto: Matix pregunta, "
+                "una cosa a la vez, para llenar objetivo, estado, fase, "
+                "componentes, próximos pasos, blockers y horizonte. Úsala cuando "
+                "el usuario diga «entrevístame sobre [proyecto]», «llenemos el "
+                "perfil de…», «ayúdame a estructurar…». Devuelve la PRIMERA "
+                "pregunta; sigue el campo `guia`. Un proyecto a la vez."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": {"type": "string"},
+                    "proyecto": {"type": "string"},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "continuar_entrevista_proyecto",
+            "description": (
+                "Devuelve la SIGUIENTE pregunta de la entrevista (tras guardar la "
+                "respuesta anterior con actualizar_perfil/anotar_detalle). Si no "
+                "pasas proyecto, sigue la entrevista en curso (para retomar «sigamos "
+                "con la entrevista»). Si `estado`='completada', felicita corto y "
+                "para."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": {"type": "string"},
+                    "proyecto": {"type": "string"},
+                },
+                "required": [],
                 "additionalProperties": False,
             },
         },
@@ -3582,6 +3744,150 @@ async def _buscar_en_historial(db: Postgrest, args: dict) -> dict[str, Any]:
     )
 
 
+# ── Perfil profundo de proyectos (capa de conocimiento) ─────────────────────
+
+async def _resolver_proyecto_arg(db: Postgrest, args: dict) -> dict[str, Any]:
+    """Resuelve el proyecto desde `proyecto_id` o `proyecto` (nombre). Devuelve
+    `{ok, proyecto}` o `{ok: False, error}` listo para retornar."""
+    r = await perfil_proyecto.resolver_proyecto(
+        db,
+        proyecto_id=(args.get("proyecto_id") or "").strip() or None,
+        nombre=(args.get("proyecto") or "").strip() or None,
+    )
+    if r["estado"] == "ok":
+        return {"ok": True, "proyecto": r["proyecto"]}
+    if r["estado"] == "varios":
+        return {"ok": False, "error": _error(
+            "ambiguo",
+            "Hay varios proyectos con ese nombre: " + ", ".join(r["ambiguos"]),
+            sugerencia="Pídele al usuario cuál, o usa el proyecto_id del contexto.",
+        )}
+    return {"ok": False, "error": _error(
+        "no_encontrado",
+        "No encontré ese proyecto.",
+        sugerencia="Revisa el nombre o usa un proyecto_id del contexto vivo.",
+    )}
+
+
+async def _ver_perfil_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    r = await _resolver_proyecto_arg(db, args)
+    if not r["ok"]:
+        return r["error"]
+    perfil = await perfil_proyecto.ver_perfil(db, r["proyecto"])
+    return _ok(
+        {
+            "perfil": perfil,
+            "resumen": perfil_proyecto.armar_perfil_texto(perfil),
+            "nota": (
+                "Muéstrale el resumen al usuario en tu voz. Para corregir o "
+                "borrar un detalle usa su id con corregir/borrar_detalle_proyecto."
+            ),
+        }
+    )
+
+
+async def _actualizar_perfil_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    r = await _resolver_proyecto_arg(db, args)
+    if not r["ok"]:
+        return r["error"]
+    campos = {
+        k: (args.get(k) or "").strip()
+        for k in ("objetivo", "estado_actual", "fase_actual", "horizonte")
+        if args.get(k) is not None
+    }
+    if not campos:
+        return _error("validacion", "Pásame al menos un campo del perfil a actualizar.")
+    await perfil_proyecto.actualizar_perfil(db, proyecto_id=r["proyecto"]["id"], campos=campos)
+    return _ok({"actualizado": list(campos.keys()), "proyecto": r["proyecto"]["nombre"]})
+
+
+async def _anotar_detalle_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    tipo = (args.get("tipo") or "").strip()
+    contenido = (args.get("contenido") or "").strip()
+    if tipo not in perfil_proyecto.TIPOS_DETALLE:
+        return _error("validacion", "`tipo` debe ser componente, proximo_paso, blocker, nota o decision.")
+    if not contenido:
+        return _error("validacion", "Pásame el `contenido` del detalle.")
+    r = await _resolver_proyecto_arg(db, args)
+    if not r["ok"]:
+        return r["error"]
+    estado = (args.get("estado") or "abierto").strip()
+    fila = await perfil_proyecto.anotar_detalle(
+        db, proyecto_id=r["proyecto"]["id"], tipo=tipo, contenido=contenido, estado=estado,
+    )
+    return _ok(
+        {
+            "detalle_id": fila["id"],
+            "tipo": tipo,
+            "proyecto": r["proyecto"]["nombre"],
+            "nota": (
+                "Confírmale al usuario en una línea QUÉ anotaste y en qué "
+                "proyecto, para que confíe en lo que registras."
+            ),
+        }
+    )
+
+
+async def _corregir_detalle_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    detalle_id = (args.get("detalle_id") or "").strip()
+    if not detalle_id:
+        return _error("validacion", "Pásame el `detalle_id` (lo ves en el perfil).")
+    contenido = args.get("contenido")
+    estado = args.get("estado")
+    if contenido is None and estado is None:
+        return _error("validacion", "Pásame `contenido` y/o `estado` a corregir.")
+    fila = await perfil_proyecto.actualizar_detalle(
+        db,
+        detalle_id=detalle_id,
+        contenido=(contenido.strip() if isinstance(contenido, str) else None),
+        estado=(estado.strip() if isinstance(estado, str) else None),
+    )
+    if fila is None:
+        return _error("no_encontrado", "No encontré ese detalle.")
+    return _ok({"detalle_id": detalle_id, "corregido": True})
+
+
+async def _borrar_detalle_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    detalle_id = (args.get("detalle_id") or "").strip()
+    if not detalle_id:
+        return _error("validacion", "Pásame el `detalle_id` a borrar (lo ves en el perfil).")
+    ok = await perfil_proyecto.borrar_detalle(db, detalle_id=detalle_id)
+    if not ok:
+        return _error("no_encontrado", "No encontré ese detalle.")
+    return _ok({"detalle_id": detalle_id, "borrado": True})
+
+
+async def _iniciar_entrevista_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    r = await _resolver_proyecto_arg(db, args)
+    if not r["ok"]:
+        return r["error"]
+    paso = await perfil_proyecto.iniciar_entrevista(db, proyecto=r["proyecto"])
+    return _ok({**paso, "guia": _GUIA_ENTREVISTA})
+
+
+async def _continuar_entrevista_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    proyecto = None
+    if (args.get("proyecto_id") or args.get("proyecto")):
+        r = await _resolver_proyecto_arg(db, args)
+        if not r["ok"]:
+            return r["error"]
+        proyecto = r["proyecto"]
+    paso = await perfil_proyecto.continuar_entrevista(db, proyecto=proyecto)
+    return _ok({**paso, "guia": _GUIA_ENTREVISTA})
+
+
+_GUIA_ENTREVISTA = (
+    "Entrevista de perfil: hazle al usuario LA pregunta de `pregunta`, UNA sola "
+    "a la vez, en tu voz. Cuando responda, GUÁRDALO antes de seguir: si "
+    "`clase`='scalar' usa actualizar_perfil_proyecto con ese campo; si "
+    "'detalle' usa anotar_detalle_proyecto con tipo=`campo`. Luego llama "
+    "continuar_entrevista_proyecto para la siguiente. Si el usuario dice «paro» "
+    "o «sigamos después», corta sin perder lo avanzado (se retoma con "
+    "continuar_entrevista_proyecto). Si `estado`='completada', felicítalo corto "
+    "y para. Un proyecto a la vez; nunca un muro de preguntas."
+)
+
+
 async def _crear_automatizacion(db: Postgrest, args: dict) -> dict[str, Any]:
     descripcion = (args.get("descripcion") or "").strip()
     recurrencia = (args.get("recurrencia") or "").strip()
@@ -3855,6 +4161,14 @@ _HANDLERS = {
     "buscar_web": _buscar_web,
     # Recall sobre el historial de conversaciones (memoria conversacional)
     "buscar_en_historial": _buscar_en_historial,
+    # Perfil profundo de proyectos (capa de conocimiento)
+    "ver_perfil_proyecto": _ver_perfil_proyecto,
+    "actualizar_perfil_proyecto": _actualizar_perfil_proyecto,
+    "anotar_detalle_proyecto": _anotar_detalle_proyecto,
+    "corregir_detalle_proyecto": _corregir_detalle_proyecto,
+    "borrar_detalle_proyecto": _borrar_detalle_proyecto,
+    "iniciar_entrevista_proyecto": _iniciar_entrevista_proyecto,
+    "continuar_entrevista_proyecto": _continuar_entrevista_proyecto,
     # Automatizaciones (proactividad)
     "crear_automatizacion": _crear_automatizacion,
     "listar_automatizaciones": _listar_automatizaciones,
@@ -3922,6 +4236,15 @@ TABLAS_AFECTADAS = {
     "consultar_proyectos": [],  # solo lectura
     "buscar_web": [],  # no toca el hub
     "buscar_en_historial": [],  # solo lectura (historial de chat)
+    # Perfil de proyectos: el perfil aún no tiene pantalla en la app; las que
+    # tocan `proyectos` la marcan para refrescar la lista por si acaso.
+    "ver_perfil_proyecto": [],
+    "actualizar_perfil_proyecto": ["proyectos"],
+    "anotar_detalle_proyecto": ["proyectos"],
+    "corregir_detalle_proyecto": [],
+    "borrar_detalle_proyecto": [],
+    "iniciar_entrevista_proyecto": [],
+    "continuar_entrevista_proyecto": [],
     # Automatizaciones (tabla propia; la app no tiene pantalla en v1)
     "crear_automatizacion": [],
     "listar_automatizaciones": [],
