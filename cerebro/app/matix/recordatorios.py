@@ -615,6 +615,12 @@ def iniciar(db: Postgrest) -> None:
             await revisar_nudges(db)
         except Exception:  # noqa: BLE001
             logger.exception("scheduler: el tick de nudges falló")
+        try:
+            from . import automatizaciones
+
+            await automatizaciones.revisar_automatizaciones(db)
+        except Exception:  # noqa: BLE001
+            logger.exception("scheduler: el tick de automatizaciones falló")
 
     sch = AsyncIOScheduler(timezone=LIMA)
     sch.add_job(

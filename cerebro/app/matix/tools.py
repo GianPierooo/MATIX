@@ -62,7 +62,7 @@ from ..schemas.eventos import EventoCreate, EventoUpdate
 from ..schemas.movimientos import MovimientoCreate, MovimientoUpdate
 from ..schemas.proyectos import ProyectoCreate, ProyectoUpdate
 from ..schemas.tareas import TareaCreate, TareaUpdate
-from . import busqueda_web, finanzas, memoria, modos
+from . import automatizaciones, busqueda_web, finanzas, memoria, modos
 from .biblioteca import buscar_material as _buscar_material_rag
 from .indexador import buscar_apuntes as _buscar_apuntes_rag
 from .indexador import indexar_apunte
@@ -1422,6 +1422,104 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["consulta"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ── Automatizaciones (proactividad: el usuario las define) ───────
+    {
+        "type": "function",
+        "function": {
+            "name": "crear_automatizacion",
+            "description": (
+                "Programa una AUTOMATIZACIÓN recurrente que el usuario te pide: "
+                "«cada mañana a las 7 recuérdame revisar mis tareas», «los lunes "
+                "hazme un resumen de la semana», «cada día a las 8 búscame las "
+                "noticias de IA y dame un resumen». El cerebro la dispara a su "
+                "hora (America/Lima) y te empuja una notificación.\n"
+                "Dos tipos:\n"
+                "- `recordatorio`: empuja un TEXTO fijo (pon ese texto en "
+                "`accion`).\n"
+                "- `accion_ia`: corre un PROMPT (en `accion`) y empuja el "
+                "resultado (puede usar buscar_web u otras tools). Úsalo cuando el "
+                "usuario quiere que HAGAS algo recurrente, no solo recordar.\n"
+                "Recurrencias simples: `diaria` (a una hora) o `semanal` (un día "
+                "+ hora). Confírmasela al usuario en una frase. Bien dosificadas: "
+                "no propongas spam."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "descripcion": {
+                        "type": "string",
+                        "description": "Resumen corto de qué hace (para listarla).",
+                    },
+                    "recurrencia": {
+                        "type": "string",
+                        "enum": ["diaria", "semanal"],
+                    },
+                    "hora": {
+                        "type": "integer",
+                        "description": "Hora 0-23 (America/Lima).",
+                    },
+                    "minuto": {
+                        "type": "integer",
+                        "description": "Minuto 0-59. Por defecto 0.",
+                    },
+                    "dia_semana": {
+                        "type": "integer",
+                        "description": (
+                            "Solo si `recurrencia=semanal`: día ISO (1=lunes … "
+                            "7=domingo)."
+                        ),
+                    },
+                    "tipo": {
+                        "type": "string",
+                        "enum": ["recordatorio", "accion_ia"],
+                    },
+                    "accion": {
+                        "type": "string",
+                        "description": (
+                            "Si `recordatorio`: el texto a empujar. Si "
+                            "`accion_ia`: el prompt a ejecutar (p. ej. 'busca las "
+                            "noticias de IA de hoy y resúmelas en 3 puntos')."
+                        ),
+                    },
+                },
+                "required": ["descripcion", "recurrencia", "hora", "tipo", "accion"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "listar_automatizaciones",
+            "description": (
+                "Lista las automatizaciones que el usuario tiene programadas (su "
+                "horario, tipo y si están activas). Úsala cuando pregunte «¿qué "
+                "automatizaciones tengo?» o antes de eliminar una (para su id)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "eliminar_automatizacion",
+            "description": (
+                "Elimina una automatización por su `automatizacion_id` (de "
+                "`listar_automatizaciones`). Úsala cuando el usuario diga «quita "
+                "la automatización de X» o «ya no me recuerdes…»."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"automatizacion_id": _UUID},
+                "required": ["automatizacion_id"],
                 "additionalProperties": False,
             },
         },
@@ -3179,6 +3277,86 @@ async def _buscar_web(db: Postgrest, args: dict) -> dict[str, Any]:
     )
 
 
+async def _crear_automatizacion(db: Postgrest, args: dict) -> dict[str, Any]:
+    descripcion = (args.get("descripcion") or "").strip()
+    recurrencia = (args.get("recurrencia") or "").strip()
+    tipo = (args.get("tipo") or "").strip()
+    accion = (args.get("accion") or "").strip()
+    if not descripcion or not accion:
+        return _error("validacion", "Pásame `descripcion` y `accion`.")
+    if recurrencia not in automatizaciones.RECURRENCIAS:
+        return _error("validacion", "`recurrencia` debe ser 'diaria' o 'semanal'.")
+    if tipo not in automatizaciones.TIPOS:
+        return _error("validacion", "`tipo` debe ser 'recordatorio' o 'accion_ia'.")
+    try:
+        hora = int(args.get("hora"))
+        minuto = int(args.get("minuto", 0) or 0)
+    except (TypeError, ValueError):
+        return _error("validacion", "`hora`/`minuto` deben ser números.")
+    if not (0 <= hora <= 23) or not (0 <= minuto <= 59):
+        return _error("validacion", "`hora` 0-23 y `minuto` 0-59.")
+    dia_semana = args.get("dia_semana")
+    if recurrencia == "semanal":
+        try:
+            dia_semana = int(dia_semana)
+        except (TypeError, ValueError):
+            return _error(
+                "validacion",
+                "Para 'semanal' pásame `dia_semana` (1=lunes … 7=domingo).",
+            )
+        if not (1 <= dia_semana <= 7):
+            return _error("validacion", "`dia_semana` debe ser 1-7 (ISO).")
+    else:
+        dia_semana = None
+
+    fila = await automatizaciones.crear(
+        db,
+        {
+            "descripcion": descripcion,
+            "recurrencia": recurrencia,
+            "hora": hora,
+            "minuto": minuto,
+            "dia_semana": dia_semana,
+            "tipo": tipo,
+            "accion": accion,
+        },
+    )
+    return _ok(
+        {
+            "id": fila["id"],
+            "descripcion": descripcion,
+            "horario": automatizaciones.describir_horario(fila),
+            "tipo": tipo,
+            "proxima_legible": _resumen_fecha(fila.get("proxima_ejecucion")),
+        }
+    )
+
+
+async def _listar_automatizaciones(db: Postgrest, args: dict) -> dict[str, Any]:
+    filas = await automatizaciones.listar(db)
+    items = [
+        {
+            "id": f["id"],
+            "descripcion": f.get("descripcion"),
+            "horario": automatizaciones.describir_horario(f),
+            "tipo": f.get("tipo"),
+            "activa": f.get("activa", True),
+        }
+        for f in filas
+    ]
+    return _ok({"total": len(items), "automatizaciones": items})
+
+
+async def _eliminar_automatizacion(db: Postgrest, args: dict) -> dict[str, Any]:
+    aid, err = _validar_uuid(args.get("automatizacion_id"), "automatizacion_id")
+    if err:
+        return err
+    ok = await automatizaciones.eliminar(db, aid)
+    if not ok:
+        return _error("no_existe", "Esa automatización ya no existe.")
+    return _ok({"id": aid, "eliminada": True})
+
+
 # Mapa de nombre → handler. Mantener sincronizado con TOOL_DEFINITIONS.
 _HANDLERS = {
     # Crear
@@ -3235,6 +3413,10 @@ _HANDLERS = {
     "consultar_proyectos": _consultar_proyectos,
     # Búsqueda web (info actual / externa)
     "buscar_web": _buscar_web,
+    # Automatizaciones (proactividad)
+    "crear_automatizacion": _crear_automatizacion,
+    "listar_automatizaciones": _listar_automatizaciones,
+    "eliminar_automatizacion": _eliminar_automatizacion,
 }
 
 
@@ -3287,6 +3469,10 @@ TABLAS_AFECTADAS = {
     "consultar_eventos": [],  # solo lectura
     "consultar_proyectos": [],  # solo lectura
     "buscar_web": [],  # no toca el hub
+    # Automatizaciones (tabla propia; la app no tiene pantalla en v1)
+    "crear_automatizacion": [],
+    "listar_automatizaciones": [],
+    "eliminar_automatizacion": [],
 }
 
 
