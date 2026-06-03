@@ -59,6 +59,11 @@ void main() {
       expect(contactoCoincide(nombre: 'María', encabezado: 'Pedro Ruiz'), isFalse);
     });
 
+    test('typo NO calza (Ratalia vs Natalia) → el flujo aborta, no adivina', () {
+      expect(contactoCoincide(nombre: 'Ratalia', encabezado: 'Natalia'), isFalse);
+      expect(contactoCoincide(nombre: 'Natalia', encabezado: 'Ratalia'), isFalse);
+    });
+
     test('encabezado vacío nunca calza (no se puede confirmar)', () {
       expect(contactoCoincide(nombre: 'María', encabezado: ''), isFalse);
     });

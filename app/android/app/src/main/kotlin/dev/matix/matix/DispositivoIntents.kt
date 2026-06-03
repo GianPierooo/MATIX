@@ -141,35 +141,19 @@ object DispositivoIntents {
     // ── helpers ────────────────────────────────────────────────────────────
 
     private fun lanzarWhatsApp(activity: Activity, destinatario: String?, texto: String): Boolean {
+        // SEGURIDAD: SOLO abrimos el chat directo de un NÚMERO concreto (wa.me).
+        // NUNCA caemos al intent de compartir / selector "Enviar a..." de
+        // WhatsApp: ese selector es multi-destinatario y deja mandar a cualquiera
+        // (causó el bug de enviar al contacto equivocado / a varios). Un envío a
+        // un contacto por NOMBRE va por el flujo de accesibilidad (Tier C.1), no
+        // por acá. Sin número válido → false (no abrimos nada).
         val soloDigitos = destinatario?.filter { it.isDigit() } ?: ""
-        if (soloDigitos.length >= 7) {
-            // Número: wa.me abre el chat con ESE contacto y el texto cargado.
-            // Resuelve por https (declarado en <queries>); cae a chooser si no.
-            val porNumero = Intent(
-                Intent.ACTION_VIEW,
-                Uri.parse("https://wa.me/$soloDigitos?text=${Uri.encode(texto)}"),
-            )
-            if (lanzar(activity, porNumero)) return true
-        }
-        // Sin número (o falló): compartir el texto. Probamos WhatsApp directo y,
-        // si no está instalado/visible, abrimos el selector de "compartir" para
-        // que el usuario elija dónde mandarlo (degradación limpia).
-        val aWhatsApp = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, texto)
-            setPackage("com.whatsapp")
-        }
-        if (lanzar(activity, aWhatsApp)) return true
-        val compartir = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, texto)
-        }
-        return try {
-            activity.startActivity(Intent.createChooser(compartir, "Compartir por…"))
-            true
-        } catch (_: Exception) {
-            false
-        }
+        if (soloDigitos.length < 7) return false
+        val porNumero = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("https://wa.me/$soloDigitos?text=${Uri.encode(texto)}"),
+        )
+        return lanzar(activity, porNumero)
     }
 
     private fun abrirApp(activity: Activity, valor: String): Boolean {

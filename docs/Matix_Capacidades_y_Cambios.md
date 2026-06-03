@@ -42,6 +42,10 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Arreglo de seguridad (WhatsApp): mandar un WhatsApp a un contacto ya nunca
+  abre el selector «Enviar a…» (que dejaba mandar a cualquiera o a varios).
+  Siempre abro el chat de ESE contacto, verifico la cabecera, y confirmo
+  nombrando al destinatario antes de enviar.
 - Perfil profundo de proyectos (Paso 1): acumulo conocimiento estructurado de
   cada proyecto (objetivo, estado, fase, componentes, próximos pasos,
   blockers, notas). Puedo entrevistarte para llenarlo, anotar lo que surge en
@@ -71,11 +75,10 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Lo que todavía NO puedo (para no prometer de más)
 
-- Leer tus contactos para resolver un nombre a un número (llega en una fase
-  próxima): por ahora, para llamar/mensajear necesito el número.
-- Hacer llamadas o mandar SMS/correo por mi cuenta: ahí solo dejo listo y tú
-  das el último toque. (WhatsApp sí lo envío, pero recién tras tu confirmación
-  explícita en el teléfono.)
+- Hacer llamadas o mandar SMS/correo por mi cuenta: ahí solo dejo el borrador
+  listo y tú lo envías. (WhatsApp sí lo mando, pero abriendo el chat del
+  contacto, verificando que es esa persona, y solo tras tu confirmación
+  nombrándola. Nunca por el selector «Enviar a…».)
 - Actuar en otras apps que no sean WhatsApp: por ahora solo WhatsApp ejecuta
   acciones; en el resto solo leo.
 - Sincronizar con Google (calendario/correo), controlar la casa o la PC: son

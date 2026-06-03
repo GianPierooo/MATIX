@@ -12,15 +12,17 @@ async def _llamar(nombre, args):
 
 
 @pytest.mark.asyncio
-async def test_redactar_mensaje_propone_y_pide_confirmacion():
+async def test_redactar_mensaje_sms_propone_prefill():
+    # SMS/correo siguen siendo prefill (tipo "mensaje"). WhatsApp NO (se prueba
+    # aparte: se re-rutea al flujo seguro).
     r = await _llamar(
         "redactar_mensaje",
-        {"canal": "whatsapp", "destinatario": "María", "texto": "¿nos vemos?"},
+        {"canal": "sms", "destinatario": "999888777", "texto": "¿nos vemos?"},
     )
     assert r["ok"], r
     acc = r["datos"]["accion_dispositivo"]
     assert acc["tipo"] == "mensaje"
-    assert acc["datos"]["canal"] == "whatsapp"
+    assert acc["datos"]["canal"] == "sms"
     assert acc["datos"]["texto"] == "¿nos vemos?"
     assert acc["requiere_confirmacion"] is True  # ENVÍA → confirma
 
@@ -31,6 +33,26 @@ async def test_redactar_mensaje_valida():
     assert r["ok"] is False and r["tipo"] == "validacion"
     r2 = await _llamar("redactar_mensaje", {"canal": "sms", "texto": "  "})
     assert r2["ok"] is False and r2["tipo"] == "validacion"
+
+
+@pytest.mark.asyncio
+async def test_redactar_mensaje_whatsapp_se_rerutea_al_flujo_seguro():
+    # SEGURIDAD: WhatsApp a un contacto NUNCA es tipo "mensaje" (selector);
+    # se re-rutea al flujo blindado (tipo "whatsapp").
+    r = await _llamar(
+        "redactar_mensaje",
+        {"canal": "whatsapp", "destinatario": "Natalia", "texto": "ya voy"},
+    )
+    assert r["ok"], r
+    acc = r["datos"]["accion_dispositivo"]
+    assert acc["tipo"] == "whatsapp"  # NO "mensaje"
+    assert acc["datos"]["contacto"] == "Natalia" and acc["datos"]["mensaje"] == "ya voy"
+
+
+@pytest.mark.asyncio
+async def test_redactar_mensaje_whatsapp_sin_destinatario_aborta_sin_selector():
+    r = await _llamar("redactar_mensaje", {"canal": "whatsapp", "texto": "hola"})
+    assert r["ok"] is False and r["tipo"] == "validacion"
 
 
 @pytest.mark.asyncio

@@ -471,9 +471,11 @@ te lo pide, LLAMA la tool en vez de excusarte.
   lugar a buscar), 'app' (valor = el nombre de la app, ej. 'Spotify',
   'Calculadora', 'WhatsApp'). Bajo riesgo, no envía nada. «abre la
   calculadora» → `abrir_en_telefono(objetivo='app', valor='Calculadora')`.
-- `redactar_mensaje(canal, destinatario?, texto, asunto?)` — PRE-LLENA un
-  WhatsApp / SMS / correo. `canal`: whatsapp | sms | correo. Tú NO envías:
-  abres la app con el texto listo para que el usuario lo revise y mande él.
+- `redactar_mensaje(canal, destinatario, texto, asunto?)` — PRE-LLENA un SMS o
+  un correo para que el usuario lo revise y envíe. Para WHATSAPP NO uses esta:
+  usa `escribir_whatsapp` (abre el chat del contacto, verifica y pide confirmar
+  antes de enviar). Mandar un WhatsApp a un contacto NUNCA pasa por el selector
+  «Enviar a…» de WhatsApp.
 - `iniciar_llamada(numero, nombre?)` — abre el marcador con el número (el
   usuario toca para llamar). Necesitas el NÚMERO; si solo tienes el nombre y
   no lo conoces, pídelo (los contactos llegan en una fase próxima).

@@ -64,6 +64,9 @@ class WhatsappAccionFlujo {
       });
 
       var estado = const EstadoFlujo();
+      // Nombre EXACTO de la cabecera del chat abierto (lo que el gate muestra).
+      // Hasta verificar, usamos el pedido; el gate real nombra al verificado.
+      var nombreVerificado = nombre;
       final inicio = DateTime.now();
 
       while (true) {
@@ -84,6 +87,7 @@ class WhatsappAccionFlujo {
             if (!contactoCoincide(nombre: nombre, numero: numero, encabezado: header)) {
               return ResultadoFlujo(false, 'El chat abierto ("$header") no es $nombre. No escribí nada.', FaseWhatsapp.abortado);
             }
+            nombreVerificado = header; // el gate nombra al destinatario REAL
             _log(onLog, 'Confirmé que es el chat de $header.');
             estado = estado.copyWith(contactoVerificado: true, pasos: estado.pasos + 1);
 
@@ -98,7 +102,7 @@ class WhatsappAccionFlujo {
             estado = estado.copyWith(textoEscrito: true, pasos: estado.pasos + 1);
 
           case 'confirmar':
-            final dec = await confirmar('¿Le envío a $nombre: "$mensaje"?');
+            final dec = await confirmar('¿Le envío a $nombreVerificado: "$mensaje"?');
             if (dec == 'enviar') {
               estado = estado.copyWith(confirmado: true, pasos: estado.pasos + 1);
             } else if (dec == 'sin_overlay') {
@@ -118,7 +122,7 @@ class WhatsappAccionFlujo {
             }
 
           case 'completar':
-            return ResultadoFlujo(true, 'Listo, le envié a $nombre.', FaseWhatsapp.completado);
+            return ResultadoFlujo(true, 'Listo, le envié a $nombreVerificado.', FaseWhatsapp.completado);
 
           case 'abortar':
             return ResultadoFlujo(false, 'Me detuve: ${d.motivo}.', FaseWhatsapp.abortado);
