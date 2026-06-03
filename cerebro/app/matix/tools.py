@@ -1468,9 +1468,12 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     },
                     "dia_semana": {
                         "type": "integer",
+                        "enum": [1, 2, 3, 4, 5, 6, 7],
                         "description": (
-                            "Solo si `recurrencia=semanal`: día ISO (1=lunes … "
-                            "7=domingo)."
+                            "Solo si `recurrencia=semanal`. Día ISO EXACTO: "
+                            "lunes=1, martes=2, miércoles=3, jueves=4, viernes=5, "
+                            "sábado=6, domingo=7. Mapea con cuidado el día que "
+                            "dijo el usuario."
                         ),
                     },
                     "tipo": {
