@@ -1682,6 +1682,37 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "leer_pantalla",
+            "description": (
+                "Lee la PANTALLA que el usuario tiene abierta en el teléfono "
+                "(solo lectura, nada de tocar ni escribir). Úsala cuando pida "
+                "«léeme la pantalla», «¿qué dice acá?», «léeme el último "
+                "mensaje», «¿qué hay en pantalla?». La app captura el texto "
+                "visible de la app que el usuario estaba viendo (no la propia "
+                "pantalla de Matix) y te lo manda como DATO en un turno nuevo; "
+                "tú respondes según eso. Requiere que el permiso de "
+                "accesibilidad esté activado (la app guía al usuario si no)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proposito": {
+                        "type": "string",
+                        "description": (
+                            "Qué quiere el usuario de la pantalla (p. ej. «léeme "
+                            "el último mensaje», «resume lo que se ve», «qué "
+                            "dice el botón»). Si no lo dice, léela y resume."
+                        ),
+                    },
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 
@@ -3616,6 +3647,22 @@ async def _leer_galeria(_db: Postgrest, args: dict) -> dict[str, Any]:
     )
 
 
+async def _leer_pantalla(_db: Postgrest, args: dict) -> dict[str, Any]:
+    """Tier C.0 — percepción: lee la pantalla activa del teléfono (solo
+    lectura). La app captura el texto visible vía el servicio de accesibilidad
+    y lo reenvía como DATO (no como instrucción). El cerebro nunca «toca» la
+    pantalla; solo recibe lo que la app leyó."""
+    proposito = (args.get("proposito") or "").strip() or (
+        "Léeme lo que hay en la pantalla y dime de qué se trata."
+    )
+    resumen = "Leer la pantalla que tienes abierta (solo lectura)."
+    # Solo lectura; el gate es el permiso de accesibilidad concedido en Ajustes.
+    return _accion_dispositivo(
+        "pantalla", {"proposito": proposito}, resumen,
+        requiere_confirmacion=False,
+    )
+
+
 # Mapa de nombre → handler. Mantener sincronizado con TOOL_DEFINITIONS.
 _HANDLERS = {
     # Crear
@@ -3682,6 +3729,8 @@ _HANDLERS = {
     "crear_evento_telefono": _crear_evento_telefono,
     "abrir_en_telefono": _abrir_en_telefono,
     "leer_galeria": _leer_galeria,
+    # Teléfono (Capa 6 · Tier C.0): percepción de pantalla, SOLO lectura
+    "leer_pantalla": _leer_pantalla,
 }
 
 
@@ -3744,6 +3793,7 @@ TABLAS_AFECTADAS = {
     "crear_evento_telefono": [],
     "abrir_en_telefono": [],
     "leer_galeria": [],
+    "leer_pantalla": [],
 }
 
 

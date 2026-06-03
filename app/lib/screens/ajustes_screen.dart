@@ -18,6 +18,7 @@ import '../features/cierre/presentation/cierre_dia_screen.dart';
 import '../features/cierre/presentation/cierre_screen.dart';
 import '../features/cierre/providers/cierre_providers.dart';
 import '../features/google/presentation/conexion_google_tile.dart';
+import '../features/matix/presentation/accesibilidad_screen.dart';
 import '../features/memoria/presentation/sobre_mi_screen.dart';
 import '../features/modelos/presentation/modelo_screen.dart';
 import '../features/nudges/providers/nudges_providers.dart';
@@ -230,6 +231,15 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
             ),
           ),
           const _WakeWordTile(),
+          _Accion(
+            label: 'Leer la pantalla',
+            icon: Icons.screen_search_desktop_outlined,
+            subtitle: 'Permite que Matix lea la pantalla activa cuando se lo '
+                'pides (solo lectura, bajo demanda).',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AccesibilidadScreen()),
+            ),
+          ),
 
           const _Seccion('Conexión'),
           _Fila(

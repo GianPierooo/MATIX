@@ -326,9 +326,11 @@ class AccionDispositivo(BaseModel):
     - `abrir`     → objetivo (url|mapa|app), valor
     - `galeria`   → modo (ultima|elegir) — la app toma la foto y la manda al
                     flujo de visión/finanzas que ya existe.
+    - `pantalla`  → proposito — la app LEE (solo lectura) la pantalla activa y
+                    manda el texto como dato en un turno nuevo (Tier C.0).
     """
 
-    tipo: Literal["mensaje", "llamada", "evento", "abrir", "galeria"]
+    tipo: Literal["mensaje", "llamada", "evento", "abrir", "galeria", "pantalla"]
     datos: dict = Field(default_factory=dict)
     # Texto corto para la hoja de confirmación de la app («Abrir WhatsApp para
     # María con este texto…»).

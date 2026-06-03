@@ -78,11 +78,26 @@ async def test_leer_galeria_modo():
     assert r2["ok"] is False
 
 
+@pytest.mark.asyncio
+async def test_leer_pantalla_solo_lectura():
+    # Tier C.0: percepción. Propone leer la pantalla, sin confirmación (solo
+    # lectura) y con un propósito por defecto si no se pasa.
+    r = await _llamar("leer_pantalla", {"proposito": "léeme el último mensaje"})
+    assert r["ok"], r
+    acc = r["datos"]["accion_dispositivo"]
+    assert acc["tipo"] == "pantalla"
+    assert acc["datos"]["proposito"] == "léeme el último mensaje"
+    assert acc["requiere_confirmacion"] is False
+    # Sin propósito: usa uno por defecto, no falla.
+    r2 = await _llamar("leer_pantalla", {})
+    assert r2["ok"] and r2["datos"]["accion_dispositivo"]["datos"]["proposito"]
+
+
 def test_tools_de_dispositivo_sincronizadas():
     defs = {t["function"]["name"] for t in tools.TOOL_DEFINITIONS}
     esperadas = {
         "redactar_mensaje", "iniciar_llamada", "crear_evento_telefono",
-        "abrir_en_telefono", "leer_galeria",
+        "abrir_en_telefono", "leer_galeria", "leer_pantalla",
     }
     assert esperadas <= defs
     assert esperadas <= set(tools._HANDLERS)

@@ -115,6 +115,24 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <!-- Tier C.0 · PERCEPCIÓN (solo lectura): lee la pantalla activa bajo
+             demanda. BIND_ACCESSIBILITY_SERVICE garantiza que solo el sistema
+             puede enlazarlo. La config (canRetrieveWindowContent, etc.) y la
+             ausencia total de performAction/dispatchGesture lo dejan read-only.
+             El usuario lo activa a mano en Ajustes > Accesibilidad. -->
+        <service
+            android:name=".MatixAccessibilityService"
+            android:exported="false"
+            android:label="Matix · leer pantalla"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config"/>
+        </service>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

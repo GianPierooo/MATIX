@@ -33,9 +33,11 @@ class MainActivity : FlutterActivity() {
     private val canalShare = "dev.matix.matix/share"
     private val canalWake = "dev.matix.matix/wakeword_bg"
     private val canalDispositivo = "dev.matix.matix/dispositivo"
+    private val canalAccesibilidad = "dev.matix.matix/accesibilidad"
     private var channelShare: MethodChannel? = null
     private var channelWake: MethodChannel? = null
     private var channelDispositivo: MethodChannel? = null
+    private var channelAccesibilidad: MethodChannel? = null
     private var textoInicialCompartido: String? = null
     private var aperturaWakePendiente = false
 
@@ -145,6 +147,45 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        }
+
+        // Tier C.0 · PERCEPCIÓN (solo lectura): estado del servicio de
+        // accesibilidad, deep-link a Ajustes, y captura bajo demanda de la
+        // pantalla activa. La captura la hace el servicio (instancia viva); si
+        // está apagado, devolvemos null y la app guía al usuario.
+        channelAccesibilidad = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, canalAccesibilidad).also {
+            it.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "estaActivo" -> result.success(accesibilidadActiva())
+                    "abrirAjustes" -> result.success(abrirAjustesAccesibilidad())
+                    "leerPantalla" -> result.success(
+                        MatixAccessibilityService.instancia?.capturarJson(),
+                    )
+                    else -> result.notImplemented()
+                }
+            }
+        }
+    }
+
+    /** ¿Está nuestro servicio de accesibilidad habilitado por el usuario? Lo
+     *  lee del registro canónico del sistema (no depende de la instancia). */
+    private fun accesibilidadActiva(): Boolean {
+        val activos = Settings.Secure.getString(
+            contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+        ) ?: return false
+        val componente = "$packageName/$packageName.MatixAccessibilityService"
+        val componenteCorto = "$packageName/.MatixAccessibilityService"
+        return activos.split(':').any { it.equals(componente, true) || it.equals(componenteCorto, true) }
+    }
+
+    /** Abre Ajustes > Accesibilidad para que el usuario active el servicio. */
+    private fun abrirAjustesAccesibilidad(): Boolean {
+        return try {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            true
+        } catch (_: Exception) {
+            false
         }
     }
 

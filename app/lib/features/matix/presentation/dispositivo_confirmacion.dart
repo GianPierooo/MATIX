@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/accion_dispositivo.dart';
 import '../providers/dispositivo_providers.dart';
 import '../providers/matix_chat_providers.dart';
+import 'accesibilidad_screen.dart';
 
 /// Atiende una [AccionDispositivo] propuesta por Matix (Capa 6 · Fase 1).
 ///
@@ -27,6 +28,11 @@ Future<void> manejarAccionDispositivo(
 ) async {
   if (accion.tipo == 'galeria') {
     await _manejarGaleria(context, ref, accion);
+    return;
+  }
+
+  if (accion.tipo == 'pantalla') {
+    await _manejarPantalla(context, ref, accion);
     return;
   }
 
@@ -67,6 +73,70 @@ Future<void> _manejarGaleria(
         imagenesDataUrl: [dataUrl],
         imagenPaths: [ruta],
       );
+}
+
+/// Tier C.0 · PERCEPCIÓN: lee la pantalla activa (solo lectura) y la manda al
+/// modelo como DATO. Indicador visible siempre: nunca lectura silenciosa.
+Future<void> _manejarPantalla(
+  BuildContext context,
+  WidgetRef ref,
+  AccionDispositivo accion,
+) async {
+  final lectura = await ref.read(accesibilidadServiceProvider).leer();
+  if (!context.mounted) return;
+
+  // Servicio apagado: explicar y llevar a la pantalla de activación.
+  if (!lectura.activo) {
+    _aviso(context, 'Necesito el permiso de accesibilidad para leer la pantalla.');
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(builder: (_) => const AccesibilidadScreen()),
+    );
+    return;
+  }
+
+  // Activo pero sin ventana legible: casi siempre solo se veía Matix.
+  if (!lectura.ok) {
+    _aviso(
+      context,
+      lectura.motivo == 'sin_ventana'
+          ? 'Abre la app que quieres que lea y vuelve a pedírmelo.'
+          : 'No pude leer la pantalla esta vez.',
+    );
+    return;
+  }
+
+  // Allowlist (permisiva en C.0): qué apps puede leer Matix.
+  final permitido = await ref.read(pantallaAllowlistProvider).permitido(lectura.app);
+  if (!context.mounted) return;
+  if (!permitido) {
+    _aviso(context, 'Por ahora no tengo permiso para leer esa app.');
+    return;
+  }
+
+  // Indicador VISIBLE: que el usuario sepa siempre que Matix leyó la pantalla.
+  _aviso(context, 'Leí la pantalla de ${_nombreApp(lectura.app)}.');
+
+  final proposito = (accion.datos['proposito'] as String?)?.trim();
+  await ref.read(chatMatixProvider.notifier).enviar(
+        (proposito == null || proposito.isEmpty) ? 'Léeme la pantalla.' : proposito,
+        documentoNombre: 'Pantalla activa — ${_nombreApp(lectura.app)}',
+        documentoTexto: lectura.texto.isEmpty
+            ? '(La pantalla no tenía texto legible.)'
+            : lectura.texto,
+      );
+}
+
+/// Nombre amable a partir del paquete (último segmento), para el indicador.
+String _nombreApp(String paquete) {
+  if (paquete.isEmpty) return 'la app';
+  const conocidas = {
+    'com.whatsapp': 'WhatsApp',
+    'org.telegram.messenger': 'Telegram',
+    'com.instagram.android': 'Instagram',
+    'com.google.android.gm': 'Gmail',
+    'com.android.chrome': 'Chrome',
+  };
+  return conocidas[paquete] ?? paquete.split('.').last;
 }
 
 Future<bool?> _mostrarHoja(BuildContext context, AccionDispositivo accion) {

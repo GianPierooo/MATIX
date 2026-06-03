@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Configuración del servicio de accesibilidad de Matix (Tier C.0 · percepción).
+  SOLO LECTURA por diseño:
+   - canRetrieveWindowContent: leer el árbol de la ventana activa.
+  Escuchamos SOLO typeWindowStateChanged: lo justo para rastrear cuál es la app
+  en primer plano (el gotcha del foreground). No hay performGlobalAction,
+  performAction ni dispatchGesture en el servicio: no puede ejecutar acciones.
+
+  Los flags flagRetrieveInteractiveWindows | flagReportViewIds se aplican en
+  código (MatixAccessibilityService.onServiceConnected): así evitamos un
+  problema de AAPT con android:flags en este compileSdk y queda explícito.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/accesibilidad_descripcion"
+    android:notificationTimeout="100" />

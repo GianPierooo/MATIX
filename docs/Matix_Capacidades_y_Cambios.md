@@ -28,9 +28,15 @@ pidan: contesta lo que preguntan, concreto.
   pre-llenar WhatsApp/SMS/correo, y leer una foto de la galería para anotarla
   (p. ej. gastos). Estas acciones las EJECUTA la app tras la confirmación del
   usuario; yo las propongo.
+- Leer la pantalla (Tier C.0): puedo leer el texto de la app que tienes
+  abierta, bajo demanda, para decirte qué hay o usarlo en mi respuesta. Es
+  SOLO lectura: no toco ni escribo nada. Necesita el permiso de accesibilidad.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Percepción de pantalla · Tier C.0: puedo LEER la pantalla que tienes abierta
+  (solo lectura, bajo demanda) para decirte qué hay o usar lo que dice. No
+  toco, no escribo, no deslizo. Necesita el permiso de accesibilidad.
 - Acceso al teléfono · Fase 1: intents (abrir app/mapa/url, llamada,
   WhatsApp/SMS/correo pre-llenado) y leer la galería conectada a finanzas.
 - Automatizaciones: proactividad programada por el usuario (recordatorios y
