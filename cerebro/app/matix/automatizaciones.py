@@ -173,7 +173,9 @@ async def _contenido(db: Postgrest, a: dict) -> tuple[str, str]:
         try:
             from . import chat  # perezoso: rompe el ciclo tools→automatizaciones→chat
 
-            res = await chat.conversar(db, historial=[], mensaje=prompt)
+            # persistir=False: una automatización no es una conversación del
+            # usuario; no debe entrar a la memoria conversacional.
+            res = await chat.conversar(db, historial=[], mensaje=prompt, persistir=False)
             cuerpo = (res.get("respuesta") or "").strip() or "No obtuve resultado."
         except Exception:  # noqa: BLE001
             logger.exception("automatización IA falló al generar")

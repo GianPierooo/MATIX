@@ -27,7 +27,15 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..db import Postgrest
-from . import enrutador, estado, llm, memoria, modelos_llm, modos
+from . import (
+    enrutador,
+    estado,
+    llm,
+    memoria,
+    memoria_conversacional,
+    modelos_llm,
+    modos,
+)
 from .contexto import contexto_vivo
 from .system_prompt import system_prompt_fijo
 from .tools import TABLAS_AFECTADAS, TOOL_DEFINITIONS, ejecutar_tool
@@ -74,6 +82,7 @@ async def conversar(
     imagen: str | None = None,
     imagenes: list[str] | None = None,
     documento: dict[str, str] | None = None,
+    persistir: bool = True,
 ) -> dict[str, Any]:
     """Genera la respuesta de Matix a `mensaje`, considerando
     `historial` (lista de `{rol, contenido}` con `rol` en
@@ -92,6 +101,16 @@ async def conversar(
     """
     fijo = system_prompt_fijo()
     contexto = await contexto_vivo(db)
+
+    # Conversación actual (sesión por inactividad). Se resuelve al ARRANCAR para
+    # que `buscar_en_historial` pueda EXCLUIRLA del recall durante el loop. Solo
+    # para chats reales; las automatizaciones no abren conversación.
+    conversacion_id: str | None = None
+    if persistir:
+        try:
+            conversacion_id = await memoria_conversacional.conversacion_actual(db)
+        except Exception:  # noqa: BLE001
+            conversacion_id = None  # el recall/persistencia es best-effort
 
     mensajes: list[dict] = [
         {"role": "system", "content": fijo},
@@ -284,7 +303,9 @@ async def conversar(
             args = call["args"]
             tools_usadas.append(nombre)
 
-            resultado = await ejecutar_tool(db, nombre, args)
+            resultado = await ejecutar_tool(
+                db, nombre, args, conversacion_id=conversacion_id
+            )
 
             if resultado.get("ok"):
                 for tabla in TABLAS_AFECTADAS.get(nombre, []):
@@ -330,6 +351,27 @@ async def conversar(
     # Modo activo DESPUÉS del turno (el modelo pudo cambiarlo con
     # activar_modo/desactivar_modo). La app lo usa para el indicador.
     modo_final = await modos.modo_activo(db)
+
+    # Memoria conversacional: guarda el intercambio (inline, rápido) y dispara
+    # el embedding en segundo plano (no bloquea la respuesta). Best-effort: si
+    # falla, el chat responde igual. Solo para chats reales (persistir=True) y
+    # si pudimos resolver la conversación.
+    if persistir and conversacion_id:
+        try:
+            await memoria_conversacional.persistir_turno(
+                db,
+                conversacion_id=conversacion_id,
+                mensaje_usuario=mensaje,
+                respuesta=ultima_respuesta,
+            )
+            memoria_conversacional.indexar_turno_async(
+                db,
+                conversacion_id=conversacion_id,
+                mensaje_usuario=mensaje,
+                respuesta=ultima_respuesta,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     return {
         "respuesta": ultima_respuesta,

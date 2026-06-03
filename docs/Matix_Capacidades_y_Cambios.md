@@ -22,6 +22,8 @@ pidan: contesta lo que preguntan, concreto.
 - Búsqueda en internet (`buscar_web`): noticias, datos actuales, info pública
   de personas, con enlaces a las fuentes.
 - Tutor/estudio: resumir, explicar, tomar examen por voz sobre los apuntes.
+- Memoria de conversaciones: recuerdo lo que hablamos en sesiones pasadas y lo
+  busco por significado, diciéndote cuándo fue.
 - Automatizaciones: recordatorios y acciones recurrentes que el usuario define
   («cada mañana a las 7…»).
 - Teléfono (Capa 6 · Fase 1): abrir apps/mapas/enlaces, marcar llamadas,
@@ -37,6 +39,9 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Memoria conversacional: ahora recuerdo lo que hablamos en sesiones pasadas y
+  lo busco por significado («¿qué te dije sobre…?», «lo que hablamos la otra
+  vez»), citando cuándo fue. Antes solo veía el chat actual.
 - Primera acción · Tier C.1: puedo escribir un WhatsApp por ti («escríbele a X
   que Y»). Abro el chat correcto, verifico que es ese contacto, escribo el
   mensaje y te pido confirmar en el teléfono antes de enviar. No envío nada
