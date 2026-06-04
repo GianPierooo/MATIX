@@ -45,6 +45,12 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Crear proyecto profundo + materiales + guard de capacidad: al crear un
+  proyecto te hago un intake guiado (objetivo, fases, componentes, próximos
+  pasos, materiales y qué ya está hecho), engancho material de aprendizaje si
+  hay (inglés, guitarra…) guiando por bloques, y te propongo el árbol inicial.
+  Si ya tienes el cupo de 3 activos lleno o mucha carga, te lo cuestiono en vez
+  de aceptarlo porque sí.
 - % de avance por proyecto: cada proyecto con plan muestra un % honesto
   calculado desde su árbol (ponderado por fase, sin que la fase actual muy
   detallada engañe). Lo ves como barra en la vista del proyecto, en el briefing

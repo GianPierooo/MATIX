@@ -67,6 +67,7 @@ from . import (
     automatizaciones,
     avance as avance_mod,
     busqueda_web,
+    creacion_proyecto,
     finanzas,
     memoria,
     memoria_conversacional,
@@ -1793,6 +1794,45 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "material_para_proyecto",
+            "description": (
+                "Detecta si en la biblioteca de material de aprendizaje hay algo "
+                "relacionado con un proyecto/tema (p. ej. «inglés B2» ↔ ingles, "
+                "«aprender guitarra» ↔ guitarra), para enganchar ese material al "
+                "armar el plan. Úsala al crear/estructurar un proyecto. Si hay "
+                "match, PROPÓN usarlo guiando por bloques (enfócate en el bloque "
+                "actual, no vuelques todo el currículum). Pasa `proyecto` (o "
+                "`proyecto_id`) o un `tema` libre."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": {"type": "string"},
+                    "proyecto": {"type": "string"},
+                    "tema": {"type": "string", "description": "Tema libre si no hay proyecto aún."},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "capacidad_proyectos",
+            "description": (
+                "GUARD anti-sobrecompromiso: cuántos proyectos activos hay, el "
+                "cupo (3) y la carga abierta, con una recomendación honesta. "
+                "Úsala ANTES de crear o activar un proyecto. Si no recomienda "
+                "(cupo lleno o carga alta), cuestiónalo honesto y desaconséjalo "
+                "en vez de aceptar porque sí; ofrece aparcar/terminar algo."
+            ),
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
     # ── Planificador diario: set del día + nudges (Paso 3) ──────────
     {
         "type": "function",
@@ -2882,6 +2922,16 @@ async def _crear_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
             "id": fila["id"],
             "nombre": fila["nombre"],
             "estado": fila["estado"],
+            "nota": (
+                "Proyecto creado. AHORA lanza el INTAKE para llenarlo bien: "
+                "iniciar_entrevista_proyecto con este id — objetivo, fase, "
+                "componentes, próximos pasos, blockers, MATERIALES y el ESTADO "
+                "REAL (qué YA está hecho). Revisa si hay material relacionado "
+                "con material_para_proyecto y propón usarlo (bloque a bloque). "
+                "Una pregunta a la vez, se puede pausar. Con lo suficiente, "
+                "genera el árbol (generar_arbol_proyecto) y marca como hecho lo "
+                "que ya esté hecho, para que el plan y el % partan de la realidad."
+            ),
         }
     )
 
@@ -4254,6 +4304,74 @@ async def _refinar_fase(db: Postgrest, args: dict) -> dict[str, Any]:
     return _ok({"nodo_id": nodo_id, "refinada": True, "pasos": len(subnodos)})
 
 
+async def _skills_material(db: Postgrest) -> list[str]:
+    """Skills disponibles en biblioteca_material (distinct). Best-effort."""
+    try:
+        filas = await db.list("material_chunks", select="skill", limit=5000)
+    except Exception:  # noqa: BLE001
+        return []
+    return sorted({(f.get("skill") or "").strip() for f in filas if f.get("skill")})
+
+
+async def _material_para_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    """¿Hay material de aprendizaje relacionado con este proyecto? Para
+    engancharlo al armar el plan."""
+    tema = (args.get("tema") or "").strip()
+    if not tema and (args.get("proyecto_id") or args.get("proyecto")):
+        r = await _resolver_proyecto_arg(db, args)
+        if r["ok"]:
+            p = r["proyecto"]
+            tema = f"{p.get('nombre', '')} {p.get('objetivo', '')}"
+    skills = await _skills_material(db)
+    match = creacion_proyecto.detectar_material(tema, skills)
+    if not match:
+        return _ok({
+            "match": None,
+            "disponibles": skills,
+            "nota": "No hay material que calce claro. Sigue con el plan normal; no fuerces un enganche.",
+        })
+    bloques = await db.list("material_chunks", filters={"skill": match}, select="bloque", limit=5000)
+    n_bloques = len({(b.get("bloque") or "") for b in bloques if b.get("bloque")})
+    return _ok({
+        "match": match,
+        "bloques": n_bloques,
+        "nota": (
+            f"Hay material tuyo de «{match}» ({n_bloques} bloque(s)). PROPÓN al "
+            "usuario usarlo para guiar el plan/currículum. GUARDRAIL: estructura "
+            "por bloques y enfócate en el bloque ACTUAL; NO vuelques todo el "
+            "currículum. Usa buscar_material(skill, bloque) para traer el bloque."
+        ),
+    })
+
+
+async def _capacidad_proyectos(db: Postgrest, args: dict) -> dict[str, Any]:
+    """Guard anti-sobrecompromiso: cupo de activos + carga abierta, con una
+    recomendación honesta para no ser sí-señor con proyectos nuevos."""
+    activos_filas = await db.list("proyectos", filters={"estado": "activo"})
+    activos = len(activos_filas)
+    try:
+        pend_tareas = await db.list(
+            "tareas",
+            raw_filters={"completada": "is.false", "eliminado_en": "is.null"},
+            select="id",
+            limit=500,
+        )
+        pendientes = len(pend_tareas)
+    except Exception:  # noqa: BLE001
+        pendientes = 0
+    ev = creacion_proyecto.evaluar_capacidad(activos, pendientes_abiertos=pendientes)
+    return _ok({
+        **ev,
+        "pendientes_abiertos": pendientes,
+        "nota": (
+            "GUARD DE CAPACIDAD: no seas sí-señor. Si `recomienda` es false (cupo "
+            "lleno o carga alta), CUESTIÓNALO honesto y desaconséjalo antes de "
+            "crear/activar; ofrece aparcar/terminar algo primero. Si hay espacio, "
+            "adelante. El cálculo fino de tiempo viene con el horario."
+        ),
+    })
+
+
 async def _avance_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
     """% de avance + lectura cualitativa HONESTA contra el objetivo."""
     r = await _resolver_proyecto_arg(db, args)
@@ -4691,6 +4809,9 @@ _HANDLERS = {
     "eliminar_nodo": _eliminar_nodo,
     "refinar_fase": _refinar_fase,
     "avance_proyecto": _avance_proyecto,
+    # Creación profunda: enganche de materiales + guard de capacidad
+    "material_para_proyecto": _material_para_proyecto,
+    "capacidad_proyectos": _capacidad_proyectos,
     # Planificador diario: set del día + nudges (Paso 3)
     "proponer_set_dia": _proponer_set_dia,
     "ver_set_dia": _ver_set_dia,
@@ -4782,6 +4903,8 @@ TABLAS_AFECTADAS = {
     "eliminar_nodo": [],
     "refinar_fase": [],
     "avance_proyecto": [],
+    "material_para_proyecto": [],
+    "capacidad_proyectos": [],
     # Planificador diario: aceptar promueve a Tareas reales (refresca la lista)
     "proponer_set_dia": [],
     "ver_set_dia": [],

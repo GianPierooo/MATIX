@@ -92,3 +92,6 @@ app/android/hs_err_pid*.log
 mi_voz/
 /oye_matix.onnx
 /logo_matix.png
+
+# Backups de data (export antes de limpiezas destructivas) — no se versiona
+backups/

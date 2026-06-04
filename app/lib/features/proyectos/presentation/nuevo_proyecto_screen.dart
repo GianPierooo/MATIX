@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../api/matix_client.dart';
 import '../../../theme/matix_colors.dart';
+import '../../matix/providers/matix_chat_providers.dart';
+import '../../matix/providers/navegacion_matix_provider.dart';
 import '../domain/proyecto.dart';
 import '../providers/proyectos_providers.dart';
 
@@ -41,7 +43,7 @@ class _NuevoProyectoScreenState extends ConsumerState<NuevoProyectoScreen> {
       _error = null;
     });
     try {
-      await ref.read(proyectosRepositoryProvider).crear(
+      final creado = await ref.read(proyectosRepositoryProvider).crear(
             nombre: _nombre.text.trim(),
             descripcion:
                 _desc.text.trim().isEmpty ? null : _desc.text.trim(),
@@ -51,6 +53,10 @@ class _NuevoProyectoScreenState extends ConsumerState<NuevoProyectoScreen> {
                 _linea.text.trim().isEmpty ? null : _linea.text.trim(),
           );
       ref.invalidate(proyectosListProvider);
+      if (!mounted) return;
+      final estructurar = await _ofrecerEstructurar(creado.nombre);
+      if (!mounted) return;
+      if (estructurar) _lanzarIntake(creado.nombre);
       if (mounted) Navigator.of(context).pop();
     } on MatixApiException catch (e) {
       setState(() => _error = e.message);
@@ -59,6 +65,45 @@ class _NuevoProyectoScreenState extends ConsumerState<NuevoProyectoScreen> {
     } finally {
       if (mounted) setState(() => _guardando = false);
     }
+  }
+
+  /// Tras crear, ofrece estructurarlo con Matix (intake guiado). El intake es
+  /// opcional: el proyecto ya quedó creado.
+  Future<bool> _ofrecerEstructurar(String nombre) async {
+    final r = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('¿Lo estructuramos?'),
+        content: Text(
+          'Puedo hacerte unas preguntas para armar el plan de «$nombre»: '
+          'objetivo, fases, próximos pasos, materiales y qué ya tienes hecho. '
+          'Es guiado y lo puedes pausar.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Ahora no'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Sí, con Matix'),
+          ),
+        ],
+      ),
+    );
+    return r ?? false;
+  }
+
+  /// Manda el mensaje de arranque del intake al chat y cambia a la pestaña de
+  /// Matix. El cerebro lanza la entrevista + enganche de materiales.
+  void _lanzarIntake(String nombre) {
+    ref.read(chatMatixProvider.notifier).enviar(
+          'Acabo de crear el proyecto «$nombre». Ayúdame a estructurarlo: '
+          'hazme la entrevista para llenar su perfil (objetivo, fases, '
+          'componentes, próximos pasos, materiales y qué ya está hecho) y arma '
+          'el plan. Una pregunta a la vez.',
+        );
+    ref.read(objetivoNavegacionProvider.notifier).state = SeccionMatix.matix;
   }
 
   Future<void> _aparcarUno(Proyecto p) async {
