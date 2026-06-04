@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../api/matix_client.dart';
-import '../config.dart';
 import '../core/urgencia.dart';
 import '../features/apuntes/domain/apunte.dart';
 import '../features/apuntes/presentation/apuntes_list_screen.dart';
@@ -17,8 +16,6 @@ import '../features/busqueda/presentation/busqueda_screen.dart';
 import '../features/cursos/domain/curso.dart';
 import '../features/cursos/domain/sesion_clase.dart';
 import '../features/evaluaciones/domain/evaluacion.dart';
-import '../features/eventos/domain/evento.dart';
-import '../features/eventos/presentation/calendario_screen.dart';
 import '../features/eventos/providers/eventos_providers.dart';
 import '../features/finanzas/domain/movimiento.dart';
 import '../features/finanzas/presentation/finanzas_screen.dart';
@@ -31,7 +28,6 @@ import '../features/matix/data/grabacion_voz_service.dart';
 import '../features/matix/data/matix_transcribir_repository.dart';
 import '../features/matix/presentation/manos_libres_screen.dart';
 import '../features/matix/providers/captura_apunte_providers.dart';
-import '../features/planificador/presentation/planificar_dia_screen.dart';
 import '../features/proyectos/domain/proyecto.dart';
 import '../features/proyectos/presentation/detalle_proyecto_screen.dart';
 import '../features/proyectos/providers/proyectos_providers.dart';
@@ -714,7 +710,11 @@ class _CapturaApunteState extends ConsumerState<_CapturaApunte> {
   }
 }
 
-// ─── Bloque: Hoy (eventos del día + tareas de hoy/vencidas) ─────
+// ─── Bloque: Pendientes (tareas de hoy/vencidas) ─────
+// El PLAN del día (con eventos, clases, bloques de trabajo y skills colocados
+// en el tiempo) vive en la vista «Hoy» de arriba (PlanDiaSection). Esta sección
+// es solo la lista de tareas pendientes para hoy o vencidas, para no perderlas
+// de vista. Ya no abre el viejo "planificar mi día": hay una sola vista del plan.
 class _BloqueHoy extends ConsumerWidget {
   const _BloqueHoy();
 
@@ -722,110 +722,27 @@ class _BloqueHoy extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ahora = DateTime.now();
     final tareasAsync = ref.watch(tareasProvider);
-    final eventosAsync = ref.watch(eventosDelDiaProvider(ahora));
-
-    final eventos = eventosAsync.valueOrNull ?? const <Evento>[];
     final tareas =
         tareasDeHoy(tareasAsync.valueOrNull ?? const <Tarea>[], ahora);
-    final total = eventos.length + tareas.length;
-    final cargando = !tareasAsync.hasValue || !eventosAsync.hasValue;
+    final cargando = !tareasAsync.hasValue;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _SectionLabel(
-          label: 'Hoy',
-          count: total == 0 ? null : total,
-          accionLabel: 'Planificar',
-          onAccion: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const PlanificarDiaScreen()),
-          ),
+          label: 'Pendientes',
+          count: tareas.isEmpty ? null : tareas.length,
         ),
-        if (cargando && total == 0)
+        if (cargando && tareas.isEmpty)
           const _LoaderLinea()
-        else if (total == 0)
+        else if (tareas.isEmpty)
           const _EmptyCard(
-            'Hoy no tienes nada agendado. Disfruta el día.',
+            'Sin pendientes para hoy. Disfruta el día.',
             icono: Icons.check_circle_outline,
           )
-        else ...[
-          ...eventos.map((e) => _EventoMini(e: e)),
+        else
           ...tareas.map((t) => _TareaMini(t: t)),
-        ],
       ],
-    );
-  }
-}
-
-class _EventoMini extends StatelessWidget {
-  const _EventoMini({required this.e});
-  final Evento e;
-  @override
-  Widget build(BuildContext context) {
-    final hi = e.todoElDia
-        ? 'Todo'
-        : DateFormat.Hm().format(e.iniciaEn.toLocal());
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 3, 16, 3),
-      child: Material(
-        color: MatixColors.card,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const CalendarioScreen()),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 44,
-                  child: Text(
-                    hi,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: MatixColors.text,
-                    ),
-                  ),
-                ),
-                Container(
-                  width: 4,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: MatixColors.accent,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    e.titulo,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: MatixColors.text,
-                    ),
-                  ),
-                ),
-                // Cuenta regresiva viva para los eventos con hora (los de
-                // todo el día no tienen un instante al que correr).
-                if (!e.todoElDia) ...[
-                  const SizedBox(width: 8),
-                  ContadorUrgencia(objetivo: e.iniciaEn, fondo: true),
-                ],
-                if (MatixConfig.googleVisible && e.esDeGoogle) ...[
-                  const SizedBox(width: 8),
-                  const Icon(Icons.sync, size: 14, color: MatixColors.muted),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

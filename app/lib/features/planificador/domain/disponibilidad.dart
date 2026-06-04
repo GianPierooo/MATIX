@@ -1,13 +1,23 @@
-import 'planificador.dart' show VentanaTrabajo;
+// Disponibilidad de aprendizaje/trabajo.
+//
+// Modela CUÁNDO estás libre, por día de la semana. La consume el ajuste de
+// «Disponibilidad por día» en Ajustes, que la sincroniza al cerebro (config
+// de nudges): el scheduler solo te empuja dentro de tus ventanas. La
+// colocación del plan en el tiempo la hace la capa de horario del cerebro
+// (vista «Hoy»), no este modelo.
 
-/// Disponibilidad de aprendizaje/trabajo (Fase 3).
-///
-/// Modela CUÁNDO estás libre, por día de la semana — no una sola ventana
-/// global. Es la foto que el planificador de sesiones (Fase 4) usará
-/// para encajar tu tiempo real: solo los huecos dentro de tu
-/// disponibilidad que no choquen con eventos ni caigan en las horas de
-/// silencio. Acá solo está el MODELO + el cálculo de huecos; el
-/// planificador que arma sesiones es aparte (Fase 4).
+/// Ventana de trabajo: horas locales entre las que estás disponible.
+class VentanaTrabajo {
+  const VentanaTrabajo({this.inicio = 9, this.fin = 21});
+  final int inicio;
+  final int fin;
+
+  @override
+  bool operator ==(Object other) =>
+      other is VentanaTrabajo && other.inicio == inicio && other.fin == fin;
+  @override
+  int get hashCode => Object.hash(inicio, fin);
+}
 
 /// Disponibilidad de un día: si está activo y entre qué horas (locales).
 class DisponibilidadDia {

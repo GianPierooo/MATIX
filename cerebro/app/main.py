@@ -53,7 +53,6 @@ from .routers import (
     sesiones_clase,
     subtareas,
     tareas,
-    tracks,
     version,
 )
 
@@ -192,7 +191,6 @@ for r in (
     proyectos.router,
     push.router,
     rituales.router,
-    tracks.router,
     cierres_dia.router,
     horario.router,
     matix.router,

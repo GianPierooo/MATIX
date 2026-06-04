@@ -1,25 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matix/features/eventos/domain/evento.dart';
-import 'package:matix/features/nudges/domain/nudges.dart' show HorasSilencio;
 import 'package:matix/features/planificador/domain/disponibilidad.dart';
-import 'package:matix/features/planificador/domain/planificador.dart';
 
-/// Tests de la disponibilidad por día (Fase 3): que cada día tenga su
-/// propia ventana, que un evento ocupe el hueco, y que el silencio y los
-/// días no disponibles se respeten.
-
-Evento _ev(DateTime ini, DateTime fin) => Evento(
-      id: 'e',
-      titulo: 'Evento',
-      iniciaEn: ini,
-      terminaEn: fin,
-      creadoEn: DateTime(2026, 1, 1),
-      actualizadoEn: DateTime(2026, 1, 1),
-    );
+/// Tests del modelo de disponibilidad por día: que cada día tenga su propia
+/// ventana y que los días no disponibles no la tengan. (El cálculo de huecos y
+/// la colocación del plan viven ahora en la capa de horario del cerebro.)
 
 void main() {
-  const silencio = HorasSilencio(); // 22–8
-
   group('DisponibilidadSemanal por día', () {
     test('ventana distinta por día (lun-vie 18-22, sáb-dom 9-13)', () {
       final disp = DisponibilidadSemanal({
@@ -36,63 +22,24 @@ void main() {
       expect(disp.ventanaDe(DateTime(2026, 6, 13))!.fin, 13);
     });
 
-    test('día no disponible → sin ventana ni huecos', () {
+    test('día no disponible → sin ventana', () {
       final disp = DisponibilidadSemanal({
         3: const DisponibilidadDia(activo: false),
       });
-      final dia = DateTime(2026, 6, 10); // miércoles (día 3)
-      expect(disp.ventanaDe(dia), isNull);
-      final huecos = huecosDisponibles(
-        dia: dia,
-        ventana: disp.ventanaDe(dia),
-        silencio: silencio,
-        eventos: const [],
-      );
-      expect(huecos, isEmpty);
-    });
-  });
-
-  group('huecosDisponibles', () {
-    test('un evento ocupa el hueco (lo parte en dos)', () {
-      final dia = DateTime(2026, 6, 13); // sábado
-      final huecos = huecosDisponibles(
-        dia: dia,
-        ventana: const VentanaTrabajo(inicio: 9, fin: 13),
-        silencio: silencio,
-        eventos: [
-          _ev(DateTime(2026, 6, 13, 10, 0), DateTime(2026, 6, 13, 11, 0)),
-        ],
-      );
-      // 9–13 menos 10–11 → [9–10] y [11–13].
-      expect(huecos.length, 2);
-      expect(huecos[0].inicio, DateTime(2026, 6, 13, 9, 0));
-      expect(huecos[0].fin, DateTime(2026, 6, 13, 10, 0));
-      expect(huecos[1].inicio, DateTime(2026, 6, 13, 11, 0));
-      expect(huecos[1].fin, DateTime(2026, 6, 13, 13, 0));
+      expect(disp.ventanaDe(DateTime(2026, 6, 10)), isNull); // miércoles
     });
 
-    test('recorta el silencio que entra en la ventana', () {
-      final dia = DateTime(2026, 6, 13);
-      // Ventana 20–24 con silencio 22–8 → solo 20–22 queda libre.
-      final huecos = huecosDisponibles(
-        dia: dia,
-        ventana: const VentanaTrabajo(inicio: 20, fin: 24),
-        silencio: silencio,
-        eventos: const [],
-      );
-      for (final h in huecos) {
-        expect(h.fin.isAfter(DateTime(2026, 6, 13, 22, 0)), isFalse);
-      }
+    test('día ausente cuenta como no disponible', () {
+      final disp = DisponibilidadSemanal(const {});
+      expect(disp.diaDe(2).activo, isFalse);
+      expect(disp.ventanaDe(DateTime(2026, 6, 9)), isNull);
     });
 
-    test('sin disponibilidad ese día (ventana null) → vacío', () {
-      final huecos = huecosDisponibles(
-        dia: DateTime(2026, 6, 13),
-        ventana: null,
-        silencio: silencio,
-        eventos: const [],
-      );
-      expect(huecos, isEmpty);
+    test('conDia copia con un día cambiado', () {
+      final base = DisponibilidadSemanal.porDefecto;
+      final cambiado = base.conDia(1, const DisponibilidadDia(inicio: 6, fin: 10));
+      expect(cambiado.diaDe(1).inicio, 6);
+      expect(cambiado.diaDe(2).inicio, 9); // los demás intactos
     });
   });
 }

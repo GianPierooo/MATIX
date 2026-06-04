@@ -807,9 +807,9 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "description": (
                 "Busca en la BIBLIOTECA de material de aprendizaje "
                 "(NO en los apuntes de ideas: es un store aparte). "
-                "Es el material de los tracks, etiquetado por `skill` "
+                "Es el material de tus skills, etiquetado por `skill` "
                 "(ej. 'calistenia', 'ingles') y `bloque` (ej. "
-                "'bloque_3'). Úsala cuando el usuario trabaje un track "
+                "'bloque_3'). Úsala cuando el usuario trabaje una skill "
                 "o pida material de estudio de un skill: «¿qué toca en "
                 "el bloque 3 de calistenia?», «explícame el material de "
                 "esta etapa». Filtra por skill y/o bloque para traer "
@@ -833,7 +833,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         "description": (
                             "Acota a un skill (la carpeta, ej. "
                             "'calistenia'). Úsalo casi siempre: el "
-                            "usuario trabaja un track a la vez."
+                            "usuario trabaja una skill a la vez."
                         ),
                     },
                     "bloque": {

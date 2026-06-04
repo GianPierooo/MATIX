@@ -68,7 +68,8 @@ Teléfono: redactar_mensaje (SMS/correo), iniciar_llamada, crear_evento_telefono
 abrir_en_telefono, leer_galeria (Fase 1) · leer_pantalla (C.0) · escribir_whatsapp
 (C.1). (conf) = pide confirmación por ser destructiva.
 
-### Cerebro — endpoints REST (131 rutas, prefijo /api/v1)
+### Cerebro — endpoints REST (~126 rutas, prefijo /api/v1)
+(Nota 2026-06-04: se retiró el router /tracks, legacy; ver «Consolidación» abajo.)
 
 CRUD del hub: profile, categorias, cursos, sesiones-clase, tareas, subtareas,
 evaluaciones, eventos (con papelera/restaurar/permanente), cuadernos, apuntes
@@ -78,7 +79,7 @@ clasificar-captura, desglosar-tarea, estimar-duraciones, extraer-documento,
 extraer-eventos, extraer-recibo, extraer-tareas, uso, wakeword/muestras. ·
 Notificaciones: push (registrar-token, probar, revisar), nudges, rituales. ·
 Briefing: hoy, cierre, repaso-semanal. · Horario: GET plan, replanificar,
-bloque/completar, bloque/saltar, calendario. · Aprendizaje: tracks,
+bloque/completar, bloque/saltar, calendario. · Aprendizaje:
 material/ingestar. · Modelos/modos: modelos (par, seleccionar), modos
 (activar/desactivar). · Google (Capa 4): oauth/url, oauth/callback, status, sync,
 disconnect. · Infra: health, version, docs.
@@ -112,7 +113,8 @@ estancamiento). Todo respeta el silencio 22:00–08:00 (America/Lima).
   progresiva sin duplicar, check-in semanal honesto, hitos, estancamiento +
   re-scope, adaptación al ritmo (no apila si vas atrasado). SOLO-BACKEND + push.
 - Set del día (0031): set chico priorizado desde los árboles, insistencia sana,
-  anti-fatiga. PARCIAL en UI (`planificar_dia_screen` + por chat).
+  anti-fatiga. Se ve dentro de la vista «Hoy» y por chat (el viejo
+  `planificar_dia` se retiró el 2026-06-04).
 - Horario (0035): config_horario (anclas/despertar/dormir/pico/buffers),
   ventanas libres, colocación del set (pico para lo importante, skills en
   ventanas ligeras), replan, empuje al calendario. COMPLETO backend + UI nueva
@@ -124,7 +126,9 @@ estancamiento). Todo respeta el silencio 22:00–08:00 (America/Lima).
   `FIREBASE_SERVICE_ACCOUNT_JSON`.
 - RAG/biblioteca_material (0015): `material_chunks` (skill+bloque+embedding);
   tool `buscar_material` + `POST /material/ingestar`. Skills con material:
-  ingles, guitarra, calistenia, trading, portugues. SOLO-BACKEND (sin UI para
+  ingles, guitarra, calistenia, trading, portugues. Skills activas como
+  proyectos: Inglés, Guitarra, Calistenia; parqueadas: Trading, Portugués.
+  SOLO-BACKEND (sin UI para
   navegar la biblioteca).
 - Teléfono: Fase 1 intents (abrir app/url/mapa, llamar, SMS/correo prellenado,
   leer galería) COMPLETO · Tier C.0 leer_pantalla (accesibilidad, solo lectura)
@@ -155,11 +159,14 @@ estancamiento). Todo respeta el silencio 22:00–08:00 (America/Lima).
   COMPLETO (foto, no cámara en vivo).
 - Memoria («Sobre mí»), Búsqueda global, Papelera, Wake word (entrenar voz),
   Selección de modelo, Conexión Google (tile), Auto-update: presentes.
-- Planificador del día (`planificar_dia_screen`): PARCIAL (convive con la nueva
-  vista «Hoy»). Hay un `_stub_screen` placeholder residual.
+- La vista «Hoy» (timeline) es la ÚNICA vista del plan; el viejo
+  `planificar_dia` se retiró (2026-06-04). En Inicio queda «Pendientes» (tareas
+  de hoy/vencidas) bajo la timeline. La «Disponibilidad por día» (Ajustes) se
+  conserva (alimenta los nudges).
 - SIN pantalla propia (se operan por chat / scheduler): automatizaciones,
   intake/árbol/evolución de proyectos, skills (se ven como proyectos),
-  biblioteca de material, tracks de aprendizaje.
+  biblioteca de material. (tracks legacy: código retirado; la tabla con 1 fila
+  Calistenia queda sin uso — Calistenia ahora es una skill en Proyectos.)
 
 ### Base de datos — migraciones (0001 → 0035, todas aplicadas)
 

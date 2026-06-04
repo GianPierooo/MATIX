@@ -45,6 +45,15 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Consolidación: una sola vista del plan + limpieza de legacy. Retiré el viejo
+  «planificar mi día» (planificar_dia): ahora la vista «Hoy» (la línea de tiempo)
+  es la ÚNICA vista del plan, sin dos caminos que confundan. La sección de Inicio
+  pasó a llamarse «Pendientes» (solo tus tareas de hoy/vencidas), porque el plan
+  ya vive arriba. La configuración de «Disponibilidad por día» (que alimenta los
+  nudges) se queda. Migré Calistenia (que era un «track» legacy) a una skill de
+  Proyectos con su ruta por bloques; retiré el código muerto de tracks. Verifiqué
+  el horario punta a punta (generar → marcar hecho/saltar → replanificar →
+  mandar al calendario) con tests del flujo.
 - Vista «Hoy» en la app: el plan del día como línea de tiempo. En Inicio ahora
   ves tu día colocado en el tiempo: lo fijo (clases, gym, calistenia) distinto de
   lo planificado (trabajo, skills, tareas — tentativo y ajustable), con el tiempo

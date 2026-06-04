@@ -1,7 +1,7 @@
 """Biblioteca de material de aprendizaje (Fase 1).
 
 Store SEPARADO de los apuntes (el inbox de ideas). Acá vive el material
-que los tracks consumen: documentos troceados y embebidos, etiquetados
+que las skills consumen: documentos troceados y embebidos, etiquetados
 por `skill` (carpeta, ej. 'calistenia') y `bloque` (archivo/etapa, ej.
 'bloque_3').
 
