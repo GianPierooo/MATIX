@@ -69,6 +69,7 @@ from . import (
     busqueda_web,
     creacion_proyecto,
     finanzas,
+    intake_analitico,
     memoria,
     memoria_conversacional,
     modos,
@@ -1833,6 +1834,80 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "intake_proyecto",
+            "description": (
+                "Intake ANALÍTICO por parámetros: la forma PROFUNDA de entender "
+                "un proyecto antes de planear. Detecta el TIPO (negocio, skill, "
+                "construir, físico…) y te da la SIGUIENTE pregunta afilada para "
+                "llenar el esquema de ese tipo, con una pista de análisis. Úsala "
+                "al crear un proyecto y para entender uno existente a fondo. "
+                "Flujo: llama intake_proyecto → haz la pregunta en tu voz "
+                "(analítica, cavando) → guarda con guardar_parametro_proyecto → "
+                "repite. NO planees hasta que `puede_planear.listo` sea true. "
+                "Una pregunta a la vez; resumible."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": {"type": "string"},
+                    "proyecto": {"type": "string"},
+                    "tipo": {
+                        "type": "string",
+                        "enum": list(intake_analitico.TIPOS),
+                        "description": "Forzar el tipo si la detección automática no acertó.",
+                    },
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "guardar_parametro_proyecto",
+            "description": (
+                "Guarda un parámetro del intake (la respuesta del usuario) con su "
+                "`clave` (la que te dio intake_proyecto) y su `valor`. Captura "
+                "SIEMPRE el porqué/motivación y los criterios de éxito cuando "
+                "toquen."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": {"type": "string"},
+                    "proyecto": {"type": "string"},
+                    "clave": {"type": "string"},
+                    "valor": {"type": "string"},
+                },
+                "required": ["clave", "valor"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "puede_planear_proyecto",
+            "description": (
+                "GATE de completitud: dice si ya se puede armar el plan (meta "
+                "clara, medible y con plazo + todos los parámetros requeridos del "
+                "tipo) o qué falta. Consúltalo antes de generar el árbol/plan."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": {"type": "string"},
+                    "proyecto": {"type": "string"},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
     # ── Planificador diario: set del día + nudges (Paso 3) ──────────
     {
         "type": "function",
@@ -2923,14 +2998,14 @@ async def _crear_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
             "nombre": fila["nombre"],
             "estado": fila["estado"],
             "nota": (
-                "Proyecto creado. AHORA lanza el INTAKE para llenarlo bien: "
-                "iniciar_entrevista_proyecto con este id — objetivo, fase, "
-                "componentes, próximos pasos, blockers, MATERIALES y el ESTADO "
-                "REAL (qué YA está hecho). Revisa si hay material relacionado "
-                "con material_para_proyecto y propón usarlo (bloque a bloque). "
-                "Una pregunta a la vez, se puede pausar. Con lo suficiente, "
-                "genera el árbol (generar_arbol_proyecto) y marca como hecho lo "
-                "que ya esté hecho, para que el plan y el % partan de la realidad."
+                "Proyecto creado. AHORA lanza el INTAKE ANALÍTICO con "
+                "intake_proyecto (detecta el tipo y te da preguntas afiladas por "
+                "parámetro): analiza, señala huecos/incoherencias, guarda cada "
+                "respuesta con guardar_parametro_proyecto, captura el porqué y los "
+                "criterios de éxito. NO planees hasta que el gate diga listo "
+                "(meta clara, medible, con plazo + requeridos). Recién ahí arma el "
+                "PLAN EN CAPAS (generar_arbol_proyecto) y marca como hecho lo que "
+                "ya esté hecho. Una pregunta a la vez; se puede pausar."
             ),
         }
     )
@@ -4372,6 +4447,90 @@ async def _capacidad_proyectos(db: Postgrest, args: dict) -> dict[str, Any]:
     })
 
 
+async def _intake_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    """Intake ANALÍTICO por parámetros: detecta el tipo, llena el esquema con
+    una pregunta afilada a la vez, y dice cuándo se puede planear (gate)."""
+    r = await _resolver_proyecto_arg(db, args)
+    if not r["ok"]:
+        return r["error"]
+    proyecto = r["proyecto"]
+
+    # Tipo: detecta si no está fijado (o respeta el que pase el modelo).
+    tipo = (args.get("tipo") or "").strip() or proyecto.get("tipo")
+    if not tipo or tipo not in intake_analitico.TIPOS:
+        base = f"{proyecto.get('nombre','')} {proyecto.get('objetivo','')} {proyecto.get('descripcion','')}"
+        tipo = intake_analitico.detectar_tipo(base)
+    if proyecto.get("tipo") != tipo:
+        await intake_analitico.set_tipo(db, proyecto_id=proyecto["id"], tipo=tipo)
+
+    capturados = await intake_analitico.cargar_capturados(db, proyecto)
+    est = await intake_analitico.estado_intake(db, proyecto["id"])
+    preguntados = list((est or {}).get("preguntados") or [])
+
+    pregunta = intake_analitico.siguiente_pregunta_intake(tipo, capturados, preguntados)
+    gate = intake_analitico.puede_planear(tipo, capturados)
+
+    if pregunta is None:
+        await intake_analitico.guardar_estado_intake(
+            db, proyecto_id=proyecto["id"], estado="completada", preguntados=preguntados,
+        )
+        return _ok({
+            "tipo": tipo, "estado": "completo", "puede_planear": gate,
+            "nota": (
+                "Intake completo. Si `puede_planear.listo`, PROPÓN el plan EN "
+                "CAPAS: visión (años) → hitos por fase con su criterio de éxito → "
+                "tareas finas del bloque actual + algunas de corto plazo (etiqueta "
+                "horizonte). Usa generar_arbol_proyecto y refina solo la fase "
+                "actual. Si no está listo, di qué falta y pídelo."
+            ),
+        })
+
+    preguntados.append(pregunta["clave"])
+    await intake_analitico.guardar_estado_intake(
+        db, proyecto_id=proyecto["id"], estado="en_curso", preguntados=preguntados,
+    )
+    return _ok({
+        "tipo": tipo,
+        "estado": "pregunta",
+        "clave": pregunta["clave"],
+        "pregunta": pregunta["pregunta"],
+        "analisis": pregunta.get("analisis", ""),
+        "requerido": pregunta["requerido"],
+        "puede_planear": gate,
+        "nota": (
+            "Hazle ESA pregunta en tu voz, afilada y analítica (no robótica). "
+            "Si la respuesta deja un hueco o incoherencia, señálalo y cava. "
+            "Guarda la respuesta con guardar_parametro_proyecto(clave='" + pregunta["clave"] + "') "
+            "y vuelve a llamar intake_proyecto. Una pregunta a la vez; se puede "
+            "pausar y seguir. NO generes el plan hasta que el gate diga listo."
+        ),
+    })
+
+
+async def _guardar_parametro_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    clave = (args.get("clave") or "").strip()
+    valor = (args.get("valor") or "").strip()
+    if not clave or not valor:
+        return _error("validacion", "Pásame `clave` y `valor` del parámetro.")
+    r = await _resolver_proyecto_arg(db, args)
+    if not r["ok"]:
+        return r["error"]
+    await intake_analitico.guardar_parametro(db, proyecto=r["proyecto"], clave=clave, valor=valor)
+    return _ok({"clave": clave, "guardado": True})
+
+
+async def _puede_planear_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    r = await _resolver_proyecto_arg(db, args)
+    if not r["ok"]:
+        return r["error"]
+    proyecto = r["proyecto"]
+    tipo = proyecto.get("tipo") or intake_analitico.detectar_tipo(
+        f"{proyecto.get('nombre','')} {proyecto.get('objetivo','')}"
+    )
+    capturados = await intake_analitico.cargar_capturados(db, proyecto)
+    return _ok({"tipo": tipo, **intake_analitico.puede_planear(tipo, capturados)})
+
+
 async def _avance_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
     """% de avance + lectura cualitativa HONESTA contra el objetivo."""
     r = await _resolver_proyecto_arg(db, args)
@@ -4812,6 +4971,10 @@ _HANDLERS = {
     # Creación profunda: enganche de materiales + guard de capacidad
     "material_para_proyecto": _material_para_proyecto,
     "capacidad_proyectos": _capacidad_proyectos,
+    # Intake analítico por parámetros
+    "intake_proyecto": _intake_proyecto,
+    "guardar_parametro_proyecto": _guardar_parametro_proyecto,
+    "puede_planear_proyecto": _puede_planear_proyecto,
     # Planificador diario: set del día + nudges (Paso 3)
     "proponer_set_dia": _proponer_set_dia,
     "ver_set_dia": _ver_set_dia,
@@ -4905,6 +5068,9 @@ TABLAS_AFECTADAS = {
     "avance_proyecto": [],
     "material_para_proyecto": [],
     "capacidad_proyectos": [],
+    "intake_proyecto": [],
+    "guardar_parametro_proyecto": ["proyectos"],
+    "puede_planear_proyecto": [],
     # Planificador diario: aceptar promueve a Tareas reales (refresca la lista)
     "proponer_set_dia": [],
     "ver_set_dia": [],

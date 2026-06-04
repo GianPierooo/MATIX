@@ -111,3 +111,17 @@ def test_accion_de_dispositivo_no_pisa_lo_pesado():
     # Un modo pesado activo sigue mandando aunque el mensaje pida abrir algo.
     d = _elegir("abre la calculadora", modo="tesis")
     assert d.modelo == FUERTE and d.motivo == "modo_pesado"
+
+
+def test_intake_y_plan_van_al_fuerte():
+    # El intake analítico y la generación del plan son tareas duras → fuerte.
+    for m in [
+        "crea un proyecto de mi marca",
+        "estructúralo conmigo",
+        "entrevístame para el proyecto",
+        "armemos el plan del proyecto",
+        "ayúdame a entender el proyecto a fondo",
+    ]:
+        d = _elegir(m)
+        assert d.modelo == FUERTE, m
+        assert d.motivo == "intake_plan", m

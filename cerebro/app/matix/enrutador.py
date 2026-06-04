@@ -62,6 +62,20 @@ _ACCION_DISPOSITIVO = re.compile(
     r"|marca (a|al|el numero)\b"
 )
 
+# Intake analítico + generación del plan: tareas DURAS (análisis a fondo,
+# detección de huecos, plan en capas). Van al modelo FUERTE/razonador, no al
+# mini. El chat casual sigue en rápido.
+_INTAKE_PLAN = re.compile(
+    r"\b("
+    r"estructura|estructurame|estructuralo|estructurarlo|"
+    r"entrevistame|entrevista|intake|"
+    r"planifica|planificame|planifiquemos|"
+    r"crea(me)? un proyecto|nuevo proyecto"
+    r")\b"
+    r"|arma(me)? el plan|armemos el plan|plan en capas|plan del proyecto"
+    r"|entender el proyecto|a fondo el proyecto"
+)
+
 # Fraseo de recordatorio / agenda: «recuérdame llamar al banco» es un
 # recordatorio, NO una llamada. Estos verbos VETAN la ruta de acción de
 # dispositivo (el «llamar/mandar» embebido es el contenido del recordatorio,
@@ -113,7 +127,7 @@ class Decision:
     """El modelo elegido y por qué (para la traza/transparencia)."""
 
     modelo: str
-    # "modo_pesado" | "accion_dispositivo" | "razonamiento" |
+    # "modo_pesado" | "intake_plan" | "accion_dispositivo" | "razonamiento" |
     # "comando_corto" | "default"
     motivo: str
 
@@ -141,6 +155,10 @@ def elegir(
         return Decision(fuerte, "modo_pesado")
 
     texto = _norm(mensaje)
+
+    # Intake analítico / generación de plan: al modelo FUERTE (análisis duro).
+    if _INTAKE_PLAN.search(texto):
+        return Decision(fuerte, "intake_plan")
 
     # Acción del teléfono (abrir/llamar/mandar/galería): al modelo FUERTE, que
     # llama estas tools de forma fiable. El barato a veces narra o rehúsa.

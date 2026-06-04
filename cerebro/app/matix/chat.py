@@ -222,6 +222,17 @@ async def conversar(
                 mensaje, modo_activo=modo, barato=barato, fuerte=fuerte
             )
             modelo = decision.modelo
+            # Si hay un intake analítico EN CURSO, todo el intake va al fuerte
+            # (no solo el turno que lo disparó): las respuestas del usuario son
+            # cortas pero el análisis sigue siendo duro.
+            if modelo == barato:
+                try:
+                    from . import intake_analitico
+
+                    if await intake_analitico.intake_en_curso(db):
+                        modelo = fuerte
+                except Exception:  # noqa: BLE001
+                    pass
     else:
         modelo = seleccion
 

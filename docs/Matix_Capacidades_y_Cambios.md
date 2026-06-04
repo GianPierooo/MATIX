@@ -45,6 +45,13 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Intake analítico por parámetros: al crear/entender un proyecto detecto su
+  tipo (negocio, skill, construir, físico…) y lleno un esquema de parámetros
+  con preguntas afiladas, señalando huecos e incoherencias (analizador, no
+  recolector). No planeo hasta que la meta esté clara, medible y con plazo y
+  estén los requeridos (gate). Luego armo un plan EN CAPAS: visión → hitos por
+  fase con criterio de éxito → tareas finas del bloque actual + corto plazo. El
+  intake y el plan corren en el modelo fuerte; el chat casual sigue rápido.
 - Crear proyecto profundo + materiales + guard de capacidad: al crear un
   proyecto te hago un intake guiado (objetivo, fases, componentes, próximos
   pasos, materiales y qué ya está hecho), engancho material de aprendizaje si
