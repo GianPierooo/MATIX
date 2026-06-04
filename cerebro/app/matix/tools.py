@@ -4641,6 +4641,13 @@ async def _importar_plan_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
         return _error("validacion", "El plan no tiene fases legibles. Revisa el texto pegado.")
     gate = importar_plan.huecos_plan(plan)
 
+    # Datos capturados del plan (parámetros + objetivo) para el análisis de
+    # realismo: corre en AMBOS caminos (intake e import).
+    capturados = dict(plan.get("parametros") or {})
+    if plan.get("objetivo"):
+        capturados.setdefault("objetivo", plan["objetivo"])
+    chequeos = intake_analitico.chequeos_realismo(plan["tipo"], capturados)
+
     # Proyecto destino: existente (proyecto/proyecto_id) o nuevo (nombre).
     proyecto = None
     if args.get("proyecto_id") or args.get("proyecto"):
@@ -4661,13 +4668,16 @@ async def _importar_plan_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
             "preview": importar_plan.resumen_importacion(plan),
             "puede_planear": gate,
             "claves_requeridas": claves_req,
+            "chequeos_realismo": chequeos,
             "nota": (
                 "NO crees todavía: faltan requeridos. Primero MAPEA tus datos del "
                 "plan a las `clave`s exactas de `claves_requeridas` y reintenta "
                 "(estructura.parametros corregida); solo pregúntale al usuario lo "
-                "que de verdad NO esté en el plan (no inventes). Si de verdad no "
-                "se puede completar pero igual quiere crearlo, reintenta con "
-                "confirmado=true."
+                "que de verdad NO esté en el plan (no inventes). Aprovecha y corre "
+                "el ANÁLISIS DE REALISMO (`chequeos_realismo`): si la meta no cierra "
+                "con los números/tiempo o hay incoherencia, dilo honesto y propón un "
+                "reencuadre realista. Si de verdad no se puede completar pero igual "
+                "quiere crearlo, reintenta con confirmado=true."
             ),
         })
 
@@ -4681,13 +4691,18 @@ async def _importar_plan_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
         "proyecto_estado": res["estado"],
         "nodos_creados": res["nodos_creados"],
         "resumen": importar_plan.resumen_importacion(plan),
+        "chequeos_realismo": chequeos,
         "nota": (
             "Creado DIRECTO (crear-luego-refinar). Muéstrale CÓMO QUEDÓ en CORTO "
             "(usa `resumen`: objetivo/meta + árbol) y dile que puede corregir por "
             "chat («cambia la meta a X», «el bloque 1 va así») o deshacer "
-            "(eliminar_proyecto con confirmado=true). Las tareas viven en el "
-            "ÁRBOL, no en la lista de Tareas. Si `proyecto_estado`='aparcado' es "
-            "porque ya hay 3 activos; dilo."
+            "(eliminar_proyecto con confirmado=true). Corre el ANÁLISIS DE REALISMO "
+            "(`chequeos_realismo`) sobre lo creado: si la meta no cierra con los "
+            "números/tiempo o hay una incoherencia, díselo honesto con la pregunta "
+            "concreta y ofrece un reencuadre realista (ajustar meta/precio/scope, o "
+            "parquear) — activar, no desanimar. Las tareas viven en el ÁRBOL, no en "
+            "la lista de Tareas. Si `proyecto_estado`='aparcado' es porque ya hay 3 "
+            "activos; dilo."
         ),
     })
 
@@ -4732,12 +4747,20 @@ async def _intake_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
         )
         return _ok({
             "tipo": tipo, "estado": "completo", "puede_planear": gate,
+            "gate_planificacion": intake_analitico.gate_planificacion(tipo, capturados),
+            "chequeos_realismo": intake_analitico.chequeos_realismo(tipo, capturados),
             "nota": (
-                "Intake completo. Si `puede_planear.listo`, PROPÓN el plan EN "
-                "CAPAS: visión (años) → hitos por fase con su criterio de éxito → "
-                "tareas finas del bloque actual + algunas de corto plazo (etiqueta "
-                "horizonte). Usa generar_arbol_proyecto y refina solo la fase "
-                "actual. Si no está listo, di qué falta y pídelo."
+                "Intake completo. ANTES de planear corre el ANÁLISIS DE REALISMO "
+                "(`chequeos_realismo`): interroga el plan contra sus números —¿la "
+                "meta cierra con margen/costos?, ¿el plazo entra en las horas?, "
+                "¿algo se contradice?, ¿el scope cabe en el tiempo?—. Si algo NO "
+                "cierra, PÁRATE, dilo honesto con la pregunta concreta y PROPÓN un "
+                "reencuadre realista y alcanzable (activar, no desanimar). Solo "
+                "cuando `gate_planificacion.listo` (meta medible + porqué + "
+                "requeridos) y el realismo esté ok, PROPÓN el plan EN CAPAS: visión "
+                "(años/sin fecha) → hitos por fase con su criterio de éxito → "
+                "tareas finas del bloque actual. Usa generar_arbol_proyecto y "
+                "refina solo la fase actual. Si falta algo, dilo y pídelo."
             ),
         })
 

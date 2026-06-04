@@ -49,6 +49,49 @@ def test_gate_bloquea_hasta_tener_requeridos():
     assert g1["listo"] is True and g1["faltan"] == []
 
 
+def test_tipo_contenido_existe_y_se_detecta():
+    # Un proyecto de creador/canal se detecta como 'contenido' (no 'negocio'),
+    # aunque mencione monetizar.
+    assert ia.detectar_tipo("Hacer contenido en TikTok y YouTube y monetizar") == "contenido"
+    assert ia.detectar_tipo("Mi canal de podcast") == "contenido"
+    # Esquema propio + comunes.
+    req = {p["clave"] for p in ia.esquema_de("contenido")["requeridos"]}
+    assert {"que_publicas", "audiencia", "plataformas", "formato"} <= req
+    assert {"meta_plazo", "criterio_exito", "porque"} <= req
+    # Vender ropa sigue siendo negocio (no se lo roba contenido).
+    assert ia.detectar_tipo("Quiero vender ropa con mi marca") == "negocio"
+
+
+def test_gate_planificacion_separa_meta_y_porque():
+    # Falta meta y porqué → los marca aparte.
+    g = ia.gate_planificacion("negocio", {"que_vende": "ropa"})
+    assert g["listo"] is False
+    assert g["falta_meta_medible"] is True and g["falta_porque"] is True
+    # Todo requerido → listo, sin faltantes clave.
+    cap = {p["clave"]: "x" for p in ia.esquema_de("negocio")["requeridos"]}
+    g2 = ia.gate_planificacion("negocio", cap)
+    assert g2["listo"] is True
+    assert g2["falta_meta_medible"] is False and g2["falta_porque"] is False
+
+
+def test_chequeos_realismo_interroga_segun_tipo_y_datos():
+    # Negocio con precios declarados → chequea facturación vs margen.
+    chk = ia.chequeos_realismo("negocio", {
+        "precios_margenes": "costo 30, precio 60", "tiempo_semanal": "42 h/semana",
+        "meta_plazo": "$50k a fin de año",
+    })
+    claves = {c["clave"] for c in chk}
+    assert "facturacion_vs_margen" in claves  # cruza la meta con el margen
+    assert "plazo_vs_tiempo" in claves        # deadline vs horas
+    assert "scope_vs_tiempo" in claves
+    assert "contradicciones" in claves        # siempre
+    # Skill → chequea nivel vs meta.
+    chk_sk = ia.chequeos_realismo("skill", {"nivel_actual": "A1", "tiempo_semanal": "3 h"})
+    assert "nivel_vs_meta" in {c["clave"] for c in chk_sk}
+    # Sin datos cruzables, igual entrega el chequeo lógico base.
+    assert ia.chequeos_realismo("generico", {})[0]["clave"] == "contradicciones"
+
+
 def test_horizonte_por_indice():
     assert ia.horizonte_por_indice(0, 4) == "corto"
     assert ia.horizonte_por_indice(3, 4) == "largo"

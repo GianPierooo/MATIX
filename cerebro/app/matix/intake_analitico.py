@@ -61,6 +61,24 @@ ESQUEMAS: dict[str, dict[str, list[dict[str, str]]]] = {
             _p("ya_intento", "¿Qué ya intentaste y cómo te fue?"),
         ],
     },
+    "contenido": {
+        "requeridos": [
+            _p("que_publicas", "¿Qué contenido vas a hacer EXACTAMENTE? (tema, ángulo, tono)"),
+            _p("audiencia", "¿Para quién? ¿Quién es tu público objetivo concreto? (no «todos»)"),
+            _p("plataformas", "¿En qué plataformas publicas? (TikTok, YouTube, IG…)"),
+            _p("formato", "¿Qué formato y duración? (shorts, long-form, en vivo…)"),
+            _p("etapa", "¿En qué etapa estás? (idea, primeros videos, ya con audiencia…)",
+               "Si lo tiene todo menos publicar, el cuello de botella es SUBIR, no producir más."),
+            *_COMUNES,
+        ],
+        "opcionales": [
+            _p("diferenciador", "¿Qué te hace distinto de otros creadores del nicho?"),
+            _p("frecuencia", "¿Con qué frecuencia vas a publicar?"),
+            _p("monetizacion", "¿Cómo piensas monetizar (más adelante)?"),
+            _p("pipeline", "¿Cuál es tu pipeline de producción? (grabación, edición, voz…)"),
+            _p("referencias", "¿Qué referentes o cuentas te inspiran?"),
+        ],
+    },
     "skill": {
         "requeridos": [
             _p("nivel_actual", "¿Cuál es tu nivel REAL hoy? (sé honesto, con ejemplos)"),
@@ -118,6 +136,10 @@ TIPOS = tuple(ESQUEMAS.keys())
 
 # Palabras clave para detectar el tipo desde el nombre/objetivo/descripción.
 _ALIAS_TIPO: dict[str, list[str]] = {
+    # contenido va PRIMERO: si el proyecto huele a creador/canal, gana sobre
+    # "negocio" aunque mencione monetizar (un canal monetiza, pero es contenido).
+    "contenido": ["contenido", "creador", "influencer", "tiktok", "youtube",
+                  "shorts", "reels", "vtuber", "podcast", "streamer", "canal de"],
     "negocio": ["vender", "venta", "negocio", "marca", "tienda", "emprend", "ecommerce",
                 "producto", "ropa", "drop", "clientes", "startup", "monetiz", "ingresos"],
     "skill": ["aprender", "idioma", "ingles", "english", "guitarra", "tocar", "estudiar",
@@ -193,6 +215,76 @@ def puede_planear(tipo: str, capturados: dict[str, Any]) -> dict[str, Any]:
         "faltan": faltan,
         "motivo": "Aún falta lo requerido para un plan honesto: " + ", ".join(faltan),
     }
+
+
+def gate_planificacion(tipo: str, capturados: dict[str, Any]) -> dict[str, Any]:
+    """Gate para PLANIFICAR, desglosado: no se arma el árbol hasta tener meta
+    MEDIBLE (con criterio de éxito), PORQUÉ y los requeridos del tipo. Reusa
+    `puede_planear` y separa los faltantes clave para un mensaje honesto. PURO."""
+    g = puede_planear(tipo, capturados)
+    faltan = g["faltan"]
+    return {
+        "listo": g["listo"],
+        "faltan": faltan,
+        "falta_meta_medible": ("meta_plazo" in faltan) or ("criterio_exito" in faltan),
+        "falta_porque": "porque" in faltan,
+        "motivo": g["motivo"],
+    }
+
+
+def chequeos_realismo(tipo: str, capturados: dict[str, Any]) -> list[dict[str, str]]:
+    """Análisis de REALISMO antes de planear: no solo «¿falta el campo?», sino
+    «¿esto cierra?». Devuelve los chequeos concretos que el modelo (fuerte) debe
+    interrogar contra los datos del plan — huecos lógicos, incoherencias y metas
+    irreales. Cada chequeo cruza parámetros REALES capturados; si algo no cuadra,
+    el modelo se para, lo dice honesto con la pregunta concreta y propone un
+    reencuadre realista (activar, no desanimar). PURO."""
+    cap = capturados or {}
+
+    def tiene(k: str) -> bool:
+        return _tiene(cap, k)
+
+    out: list[dict[str, str]] = [
+        {"clave": "contradicciones",
+         "chequeo": "¿Hay objetivos o parámetros que se contradigan entre sí? "
+                    "Si dos cosas no pueden ser verdad a la vez, dilo."},
+    ]
+    if tiene("tiempo_semanal"):
+        out.append({"clave": "scope_vs_tiempo",
+                    "chequeo": f"¿El alcance/meta entra de verdad en el tiempo disponible "
+                               f"({cap['tiempo_semanal']})? Si el scope es muy grande para "
+                               "tan poco tiempo, dilo y propón achicarlo a un primer paso."})
+        if tiene("meta_plazo"):
+            out.append({"clave": "plazo_vs_tiempo",
+                        "chequeo": f"¿El plazo de la meta («{cap['meta_plazo']}») es realista "
+                                   f"con {cap['tiempo_semanal']}? Si el deadline no entra en "
+                                   "las horas, dilo y propón una fecha o un recorte realista."})
+    if tipo == "negocio":
+        if tiene("precios_margenes"):
+            out.append({"clave": "facturacion_vs_margen",
+                        "chequeo": f"¿La meta de ingresos cierra con el margen y los costos "
+                                   f"declarados ({cap['precios_margenes']})? Haz el número: si "
+                                   "no cuadra, dilo y propón una meta, precio o margen realista."})
+        if tiene("presupuesto") and tiene("canales"):
+            out.append({"clave": "presupuesto_vs_canales",
+                        "chequeo": f"¿El presupuesto ({cap['presupuesto']}) alcanza para los "
+                                   f"canales/ads que planteas ({cap['canales']})?"})
+    elif tipo == "skill":
+        ctx = []
+        if tiene("nivel_actual"):
+            ctx.append(f"desde «{cap['nivel_actual']}»")
+        if tiene("tiempo_semanal"):
+            ctx.append(f"con {cap['tiempo_semanal']}")
+        cola = (" " + " ".join(ctx)) if ctx else " con el tiempo disponible"
+        out.append({"clave": "nivel_vs_meta",
+                    "chequeo": f"¿La meta de nivel es alcanzable{cola}? Si es muy ambiciosa "
+                               "para el plazo, propón un hito intermedio realista."})
+    elif tipo in ("construir", "contenido"):
+        out.append({"clave": "alcance_vs_recursos",
+                    "chequeo": "¿El alcance de la primera versión entra con los recursos y el "
+                               "tiempo disponibles? Si es mucho, recórtalo a un primer "
+                               "entregable mínimo (lanzar > perfeccionar)."})
+    return out
 
 
 def horizonte_por_indice(indice_fase: int, total_fases: int) -> str:

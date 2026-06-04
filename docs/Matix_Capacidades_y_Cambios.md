@@ -45,6 +45,17 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Intake como analista de verdad (antes de planear). Formalicé el esquema de
+  parámetros por tipo (sumé el tipo «contenido» para proyectos de creador/canal,
+  además de negocio, construir/software, skill y físico) y, lo importante, ahora
+  INTERROGO el plan, no solo reviso campos vacíos: si la meta de facturación no
+  cierra con tu margen y costos, si un deadline no entra en tus horas/semana, si
+  hay objetivos que se contradicen o el scope es muy grande para el tiempo, me
+  paro y te lo digo honesto con la pregunta concreta — y te propongo un reencuadre
+  realista y alcanzable (activar, no desanimar). No armo el árbol hasta que haya
+  meta medible con criterio de éxito, porqué y los requeridos. Corre igual al
+  crear por entrevista que al importar un plan pegado, y el juicio va en el modelo
+  fuerte.
 - Importar plan crear-luego-refinar + mejora continua más afinada. Si pegas un
   plan limpio, lo creo de una y te muestro un resumen corto para que lo corrijas
   por chat («cambia la meta a X», «el bloque 1 va así») o lo deshagas; ya no hay
