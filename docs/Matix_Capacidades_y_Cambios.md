@@ -45,6 +45,14 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Vista «Hoy» en la app: el plan del día como línea de tiempo. En Inicio ahora
+  ves tu día colocado en el tiempo: lo fijo (clases, gym, calistenia) distinto de
+  lo planificado (trabajo, skills, tareas — tentativo y ajustable), con el tiempo
+  libre marcado como libre, sin culpa. En cada bloque planificado puedes marcar
+  hecho, saltar o cambiar la hora; «replanifica» recalcula el resto del día; y un
+  botón manda los bloques al calendario como eventos tentativos (sin duplicar si
+  lo tocas dos veces). Si aún no hay plan, un botón lo genera al toque. (El plan
+  lo arma el cerebro en la capa de horario; la app solo lo pinta y opera.)
 - Plan del día con horario real (capa de horario). Ahora armo tu día colocando el
   set priorizado en las ventanas libres reales, alrededor de tus compromisos
   fijos: leo las clases de uni (de su horario), el gym y demás recurrentes (de

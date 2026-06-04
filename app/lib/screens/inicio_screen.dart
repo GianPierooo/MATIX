@@ -24,6 +24,8 @@ import '../features/finanzas/domain/movimiento.dart';
 import '../features/finanzas/presentation/finanzas_screen.dart';
 import '../features/finanzas/presentation/formato_finanzas.dart';
 import '../features/finanzas/providers/movimientos_providers.dart';
+import '../features/horario/presentation/plan_dia_section.dart';
+import '../features/horario/providers/horario_providers.dart';
 import '../features/matix/data/captura_apunte_repository.dart';
 import '../features/matix/data/grabacion_voz_service.dart';
 import '../features/matix/data/matix_transcribir_repository.dart';
@@ -259,6 +261,8 @@ class InicioScreen extends ConsumerWidget {
           ref.invalidate(sesionesClaseProvider);
           ref.invalidate(cursosListProvider);
           ref.invalidate(movimientosListProvider);
+          ref.read(replanActivoProvider.notifier).state = false;
+          ref.invalidate(planDiaProvider);
         },
         child: ListView(
           // Cubre la nav inferior + safe area + saliente del FAB.
@@ -271,6 +275,7 @@ class InicioScreen extends ConsumerWidget {
           children: const [
             _BotonesRitual(),
             _CapturaApunte(),
+            PlanDiaSection(),
             _BloqueHoy(),
             _BloqueFinanzas(),
             _BloqueApuntesRecientes(),

@@ -207,6 +207,7 @@ def colocar(
             "titulo": item["titulo"], "tipo": item["tipo"],
             "proyecto": item.get("proyecto"), "skill": item.get("skill"),
             "nodo_id": item.get("nodo_id"), "tarea_id": item.get("tarea_id"),
+            "set_item_id": item.get("set_item_id"),
             "tentativo": True,
         })
         # Buffer antes del siguiente bloque colocado en la misma ventana.
@@ -381,7 +382,7 @@ async def _items_a_colocar(
             "prioridad": prio.get(s.get("proyecto_id"), 9),
             "orden": s.get("orden", 0),
             "proyecto_id": s.get("proyecto_id"), "nodo_id": s.get("nodo_id"),
-            "tarea_id": s.get("tarea_id"),
+            "tarea_id": s.get("tarea_id"), "set_item_id": s.get("id"),
             "proyecto": next((p.get("nombre") for p in proyectos if p["id"] == s.get("proyecto_id")), None),
         })
 
@@ -455,6 +456,7 @@ async def plan_de_hoy_data(
         {"inicio": min_a_hhmm(b["ini_min"]), "fin": min_a_hhmm(b["fin_min"]),
          "titulo": b["titulo"], "tipo": b["tipo"], "proyecto": b.get("proyecto"),
          "skill": b.get("skill"), "nodo_id": b.get("nodo_id"), "tarea_id": b.get("tarea_id"),
+         "set_item_id": b.get("set_item_id"),
          "tentativo": True, "_ini": b["ini_min"]}
         for b in colocado["bloques"]
     ]
@@ -473,3 +475,90 @@ async def plan_de_hoy_data(
         "bloques": bloques,
         "fuera": fuera,
     }
+
+
+# ── Acciones del loop principal (mutan el estado real, no un plan rancio) ─────
+
+async def completar_bloque(
+    db: Postgrest, *, tarea_id: str | None = None, nodo_id: str | None = None,
+) -> dict[str, Any]:
+    """Marca un bloque planificado como HECHO en el estado real: cierra el nodo
+    del árbol (el % sube solo) y/o completa la tarea del hub, y sincroniza el set
+    del día. Al recalcular el plan, ese bloque ya no aparece."""
+    hecho = []
+    if nodo_id:
+        await db.update("arbol_nodos", nodo_id, {"estado": "hecho"})
+        hecho.append("nodo")
+    if tarea_id:
+        ahora = datetime.now(timezone.utc).isoformat()
+        await db.update("tareas", tarea_id, {"completada": True, "completada_en": ahora})
+        from . import planificador_diario
+        await planificador_diario.marcar_item_por_tarea(db, tarea_id=tarea_id, estado="hecho")
+        hecho.append("tarea")
+    return {"ok": True, "completado": hecho}
+
+
+async def saltar_bloque(db: Postgrest, *, set_item_id: str) -> dict[str, Any]:
+    """Salta un bloque del set (no hoy, sin culpa): lo marca 'saltado'. No vuelve
+    a colocarse en el plan de hoy."""
+    await db.update("set_diario_items", set_item_id, {"estado": "saltado"})
+    return {"ok": True, "saltado": set_item_id}
+
+
+def _hhmm_a_utc_iso(fecha: date, hhmm: str) -> str:
+    """Combina fecha + 'HH:MM' (hora Lima) → ISO UTC, para crear el evento."""
+    m = hhmm_a_min(hhmm) or 0
+    dt = datetime(fecha.year, fecha.month, fecha.day, m // 60, m % 60, tzinfo=LIMA)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+async def empujar_a_calendario(
+    db: Postgrest,
+    *,
+    bloques: list[dict[str, Any]] | None = None,
+    ahora: datetime | None = None,
+) -> dict[str, Any]:
+    """Crea los bloques PLANIFICADOS (tentativos) como eventos del calendario.
+
+    Si la app pasa `bloques` (con las horas que ve, incluidas ediciones), se
+    usan esos; si no, se recalcula el plan. Idempotente: si ya existe un evento
+    de hoy con el mismo título y hora de inicio, lo OMITE (no duplica si lo
+    empujas dos veces). Los fijos (clases, gym) ya viven en el calendario."""
+    ahora = ahora or datetime.now(timezone.utc)
+    fecha = ahora.astimezone(LIMA).date()
+    if bloques is None:
+        data = await plan_de_hoy_data(db, ahora=ahora)
+        bloques = [b for b in data["bloques"] if b.get("tentativo")]
+
+    # Índice de lo que ya hay hoy (para no duplicar).
+    try:
+        eventos = await db.list("eventos", raw_filters={"eliminado_en": "is.null"})
+    except Exception:  # noqa: BLE001
+        eventos = []
+    existentes = set()
+    for e in eventos:
+        dt = _parse_dt(e.get("inicia_en"))
+        if dt and dt.astimezone(LIMA).date() == fecha:
+            existentes.add((e.get("titulo"), dt.astimezone(LIMA).strftime("%H:%M")))
+
+    creados, omitidos = 0, 0
+    for b in bloques:
+        titulo = (b.get("titulo") or "").strip()
+        inicio = (b.get("inicio") or "").strip()
+        if not titulo or not inicio:
+            continue
+        clave = (titulo, inicio)
+        if clave in existentes:
+            omitidos += 1
+            continue
+        fin = (b.get("fin") or "").strip() or min_a_hhmm((hhmm_a_min(inicio) or 0) + 30)
+        await db.insert("eventos", {
+            "titulo": titulo,
+            "inicia_en": _hhmm_a_utc_iso(fecha, inicio),
+            "termina_en": _hhmm_a_utc_iso(fecha, fin),
+            "color": "#E0A33A",  # ámbar = tentativo
+            "descripcion": "Bloque del plan de hoy (tentativo).",
+        })
+        existentes.add(clave)
+        creados += 1
+    return {"creados": creados, "omitidos": omitidos, "fecha": fecha.isoformat()}
