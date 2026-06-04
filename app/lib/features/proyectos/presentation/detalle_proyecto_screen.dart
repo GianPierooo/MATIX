@@ -9,6 +9,7 @@ import '../domain/bloque_protegido.dart';
 import '../domain/proyecto.dart';
 import '../providers/proyectos_providers.dart';
 import 'selector_accion_siguiente.dart';
+import 'widgets/barra_avance.dart';
 
 class DetalleProyectoScreen extends ConsumerWidget {
   const DetalleProyectoScreen({super.key, required this.proyectoId});
@@ -156,6 +157,12 @@ class _Cuerpo extends ConsumerWidget {
         ),
 
         _BloqueAccionSiguiente(proyecto: proyecto),
+
+        if (proyecto.avance != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: BarraAvance(porcentaje: proyecto.avance!),
+          ),
 
         if (proyecto.lineaMeta != null)
           _BloqueInfo(

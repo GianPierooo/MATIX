@@ -65,6 +65,7 @@ from ..schemas.tareas import TareaCreate, TareaUpdate
 from . import (
     arbol_proyecto,
     automatizaciones,
+    avance as avance_mod,
     busqueda_web,
     finanzas,
     memoria,
@@ -1763,6 +1764,29 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["nodo_id", "subnodos"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "avance_proyecto",
+            "description": (
+                "Da el % de AVANCE de un proyecto (calculado desde su árbol, NO "
+                "lo inventes) + el desglose por fase, para que lo interpretes "
+                "contra el objetivo. Úsala para «¿cómo voy en [proyecto]?» y en "
+                "el briefing. Reporta el número y matízalo HONESTO: qué está "
+                "sólido, qué falta, el cuello de botella; si el % sobreestima lo "
+                "real, dilo. Coach honesto: alienta sin inflar."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": {"type": "string"},
+                    "proyecto": {"type": "string"},
+                },
+                "required": [],
                 "additionalProperties": False,
             },
         },
@@ -4228,6 +4252,37 @@ async def _refinar_fase(db: Postgrest, args: dict) -> dict[str, Any]:
     return _ok({"nodo_id": nodo_id, "refinada": True, "pasos": len(subnodos)})
 
 
+async def _avance_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    """% de avance + lectura cualitativa HONESTA contra el objetivo."""
+    r = await _resolver_proyecto_arg(db, args)
+    if not r["ok"]:
+        return r["error"]
+    proyecto = r["proyecto"]
+    nodos = await db.list("arbol_nodos", filters={"proyecto_id": proyecto["id"]}, order="orden.asc")
+    pct = avance_mod.porcentaje(nodos)
+    if pct is None:
+        return _ok({
+            "proyecto": proyecto["nombre"],
+            "porcentaje": None,
+            "nota": "Este proyecto no tiene plan (árbol) todavía, así que no hay % real. Ofrécele armarlo (generar_arbol_proyecto).",
+        })
+    return _ok({
+        "proyecto": proyecto["nombre"],
+        "porcentaje": pct,
+        "objetivo": proyecto.get("objetivo"),
+        "fase_actual": proyecto.get("fase_actual"),
+        "desglose": avance_mod.desglose_por_fase(nodos),
+        "nota": (
+            "El `porcentaje` es ESTRUCTURAL (sale del árbol, no lo inventes ni lo "
+            "cambies). Tu trabajo: interpretarlo HONESTO contra el objetivo. Di "
+            "el número, qué está sólido, qué falta y el cuello de botella. Si el "
+            "% sobreestima el avance real (se hizo lo fácil y falta lo difícil, o "
+            "hay fases gruesas sin desglosar), DILO y contextualízalo. Tono de "
+            "coach honesto: alienta sin inflar ni desanimar."
+        ),
+    })
+
+
 # ── Planificador diario: set del día + nudges (Paso 3) ──────────────────────
 
 def _formatear_set(items: list[dict]) -> str:
@@ -4633,6 +4688,7 @@ _HANDLERS = {
     "actualizar_nodo": _actualizar_nodo,
     "eliminar_nodo": _eliminar_nodo,
     "refinar_fase": _refinar_fase,
+    "avance_proyecto": _avance_proyecto,
     # Planificador diario: set del día + nudges (Paso 3)
     "proponer_set_dia": _proponer_set_dia,
     "ver_set_dia": _ver_set_dia,
@@ -4723,6 +4779,7 @@ TABLAS_AFECTADAS = {
     "actualizar_nodo": [],
     "eliminar_nodo": [],
     "refinar_fase": [],
+    "avance_proyecto": [],
     # Planificador diario: aceptar promueve a Tareas reales (refresca la lista)
     "proponer_set_dia": [],
     "ver_set_dia": [],

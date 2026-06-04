@@ -45,6 +45,10 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- % de avance por proyecto: cada proyecto con plan muestra un % honesto
+  calculado desde su árbol (ponderado por fase, sin que la fase actual muy
+  detallada engañe). Lo ves como barra en la vista del proyecto, en el briefing
+  y a pedido («¿cómo voy en X?»), con una lectura honesta contra el objetivo.
 - Set del día + insistencia sana (perfil profundo · Paso 3): cada mañana te
   propongo un set chico y finible de subtareas sacadas de los árboles de tus
   proyectos; tú lo apruebas. Insisto sobre lo que aceptaste hasta cerrarlo

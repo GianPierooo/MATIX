@@ -8,6 +8,7 @@ import '../domain/proyecto.dart';
 import '../providers/proyectos_providers.dart';
 import 'detalle_proyecto_screen.dart';
 import 'nuevo_proyecto_screen.dart';
+import 'widgets/barra_avance.dart';
 
 class ProyectosListScreen extends ConsumerWidget {
   const ProyectosListScreen({super.key});
@@ -238,6 +239,10 @@ class _ActivoCard extends StatelessWidget {
                     ),
                   ],
                 ),
+                if (proyecto.avance != null) ...[
+                  const SizedBox(height: 12),
+                  BarraAvance(porcentaje: proyecto.avance!),
+                ],
                 if (proyecto.lineaMeta != null) ...[
                   const SizedBox(height: 12),
                   Container(

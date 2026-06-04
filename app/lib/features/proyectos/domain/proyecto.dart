@@ -36,6 +36,7 @@ class Proyecto {
     this.inactivoDesde,
     required this.creadoEn,
     required this.actualizadoEn,
+    this.avance,
   });
 
   final String id;
@@ -51,6 +52,10 @@ class Proyecto {
   final DateTime? inactivoDesde;
   final DateTime creadoEn;
   final DateTime actualizadoEn;
+
+  /// % de avance (0..100) calculado desde el árbol del proyecto, o `null` si
+  /// el proyecto no tiene plan todavía (no se muestra barra).
+  final int? avance;
 
   bool get esActivo => estado == EstadoProyecto.activo;
 
@@ -88,5 +93,6 @@ class Proyecto {
             : DateTime.parse(json['inactivo_desde'] as String),
         creadoEn: DateTime.parse(json['creado_en'] as String),
         actualizadoEn: DateTime.parse(json['actualizado_en'] as String),
+        avance: json['avance'] as int?,
       );
 }

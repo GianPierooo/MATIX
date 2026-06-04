@@ -65,5 +65,8 @@ class ProyectoRead(BaseModel):
     inactivo_desde: datetime | None = None
     creado_en: datetime
     actualizado_en: datetime
+    # % de avance (0..100) calculado desde el árbol del proyecto, o null si no
+    # tiene plan todavía. Lo calcula el cerebro al vuelo; la app pinta la barra.
+    avance: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
