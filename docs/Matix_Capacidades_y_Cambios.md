@@ -45,6 +45,11 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Importar un proyecto desde un plan pegado: si ya tienes un plan armado
+  (objetivo, porqué, meta, criterios, fases, tareas), me lo pegas y lo meto de
+  una: lo parseo a perfil + árbol + tareas por horizonte, te muestro cómo quedó
+  para confirmar/editar, y si le falta algo requerido te lo pregunto. Sin pasar
+  por toda la entrevista.
 - Motor de evolución de proyectos: con el tiempo voy mejorando cada proyecto
   con el todo en mente (revisión holística: no duplico lo hecho ni contradigo el
   plan), elaboro la próxima fase al acercarme, hago check-in semanal, detecto

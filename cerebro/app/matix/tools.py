@@ -70,6 +70,7 @@ from . import (
     creacion_proyecto,
     evolucion_proyecto,
     finanzas,
+    importar_plan,
     intake_analitico,
     memoria,
     memoria_conversacional,
@@ -1833,6 +1834,63 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "en vez de aceptar porque sí; ofrece aparcar/terminar algo."
             ),
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "importar_plan_proyecto",
+            "description": (
+                "Crea un proyecto desde un PLAN YA ARMADO que el usuario pega "
+                "(«crea un proyecto desde este plan», «importa este plan»). TÚ "
+                "parseas el texto del plan a `estructura` (objetivo, tipo, "
+                "parametros con porqué/meta/criterio, y fases con sus nodos y "
+                "horizonte). Llámame PRIMERO con confirmado=false: te devuelvo un "
+                "PREVIEW (perfil + árbol + tareas) y los huecos; muéstraselo al "
+                "usuario y, si faltan requeridos, pregúntale (no inventes). "
+                "Cuando confirme, llámame con confirmado=true para crear. Las "
+                "tareas van al ÁRBOL (no a la lista de Tareas); las fases lejanas "
+                "quedan gruesas (elaboración progresiva)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nombre": {"type": "string", "description": "Nombre del proyecto a crear."},
+                    "proyecto_id": {"type": "string", "description": "Si importas a uno existente."},
+                    "proyecto": {"type": "string"},
+                    "confirmado": {"type": "boolean", "description": "false = preview; true = crear."},
+                    "estructura": {
+                        "type": "object",
+                        "description": "El plan parseado por ti.",
+                        "properties": {
+                            "objetivo": {"type": "string"},
+                            "tipo": {"type": "string", "enum": list(intake_analitico.TIPOS)},
+                            "parametros": {
+                                "type": "object",
+                                "description": "Parámetros del esquema: porque, meta_plazo, criterio_exito, etc.",
+                            },
+                            "fases": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "titulo": {"type": "string"},
+                                        "horizonte": {
+                                            "type": "string",
+                                            "description": "corto | medio | largo (solo corto se detalla fino).",
+                                        },
+                                        "nodos": {"type": "array", "items": {"type": "string"}},
+                                    },
+                                    "required": ["titulo"],
+                                },
+                            },
+                        },
+                        "required": ["fases"],
+                    },
+                },
+                "required": ["estructura"],
+                "additionalProperties": False,
+            },
         },
     },
     {
@@ -4478,6 +4536,55 @@ async def _capacidad_proyectos(db: Postgrest, args: dict) -> dict[str, Any]:
     })
 
 
+async def _importar_plan_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    """Crea un proyecto desde un PLAN ya armado (pegado): el modelo parsea el
+    plan a `estructura`; acá se normaliza, se detectan huecos y se PREVISUALIZA
+    (confirmado=false) o se APLICA (confirmado=true) creando perfil + árbol."""
+    estructura = args.get("estructura")
+    if not isinstance(estructura, dict):
+        return _error("validacion", "Pásame `estructura` (el plan parseado a objeto).")
+    plan = importar_plan.normalizar_plan(estructura)
+    if not plan["fases"]:
+        return _error("validacion", "El plan no tiene fases legibles. Revisa el texto pegado.")
+    gate = importar_plan.huecos_plan(plan)
+
+    # Proyecto destino: existente (proyecto/proyecto_id) o nuevo (nombre).
+    proyecto = None
+    if args.get("proyecto_id") or args.get("proyecto"):
+        r = await _resolver_proyecto_arg(db, args)
+        if r["ok"]:
+            proyecto = r["proyecto"]
+    nombre = (args.get("nombre") or "").strip() or (proyecto or {}).get("nombre") or ""
+
+    if not _confirmado(args):
+        return _ok({
+            "preview": importar_plan.resumen_importacion(plan),
+            "puede_planear": gate,
+            "nota": (
+                "MUÉSTRALE este preview (perfil + árbol + tareas) y pídele "
+                "confirmar o editar — nada en silencio. Si faltan requeridos "
+                "(`puede_planear.faltan`), díselos y pregúntale lo que falte (no "
+                "inventes). Cuando confirme, vuelve a llamarme con confirmado=true."
+            ),
+        })
+
+    if not nombre:
+        return _error("validacion", "¿Cómo se llama el proyecto? Dame el nombre para crearlo.")
+    res = await importar_plan.aplicar_importacion(db, plan=plan, nombre=nombre, proyecto=proyecto)
+    return _ok({
+        "proyecto": res["proyecto"]["nombre"],
+        "estado": res["estado"],
+        "nodos_creados": res["nodos_creados"],
+        "puede_planear": gate,
+        "nota": (
+            "Plan importado: perfil + árbol creados (las tareas viven en el árbol, "
+            "NO en tu lista de Tareas). Confírmalo en una línea. Si "
+            "`puede_planear.faltan`, sigue el intake para completarlos. Si el "
+            "estado quedó 'aparcado' es porque ya hay 3 activos; dilo."
+        ),
+    })
+
+
 async def _intake_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
     """Intake ANALÍTICO por parámetros: detecta el tipo, llena el esquema con
     una pregunta afilada a la vez, y dice cuándo se puede planear (gate)."""
@@ -5079,6 +5186,8 @@ _HANDLERS = {
     # Creación profunda: enganche de materiales + guard de capacidad
     "material_para_proyecto": _material_para_proyecto,
     "capacidad_proyectos": _capacidad_proyectos,
+    # Importar proyecto desde un plan pegado
+    "importar_plan_proyecto": _importar_plan_proyecto,
     # Intake analítico por parámetros
     "intake_proyecto": _intake_proyecto,
     "guardar_parametro_proyecto": _guardar_parametro_proyecto,
@@ -5178,6 +5287,7 @@ TABLAS_AFECTADAS = {
     "avance_proyecto": [],
     "material_para_proyecto": [],
     "capacidad_proyectos": [],
+    "importar_plan_proyecto": ["proyectos"],
     "intake_proyecto": [],
     "guardar_parametro_proyecto": ["proyectos"],
     "puede_planear_proyecto": [],

@@ -468,6 +468,15 @@ CREAR/ENTENDER UN PROYECTO — INTAKE ANALÍTICO POR PARÁMETROS:
   iniciales, metas con criterio de éxito y próximos pasos inmediatos.
 - PROACTIVO: propón parámetros y defaults sensatos, sugiere lo que un proyecto
   así suele necesitar; no esperes a que el usuario lo sepa todo.
+- IMPORTAR UN PLAN PEGADO: si el usuario PEGA un plan ya armado y pide crear el
+  proyecto desde él («crea un proyecto desde este plan», «importa este plan»),
+  NO hagas la entrevista: PARSEA el texto a la estructura (objetivo, tipo,
+  parametros con porqué/meta/criterio, y fases con sus nodos y horizonte —corto/
+  medio/largo) y usa `importar_plan_proyecto`. Llámalo primero con
+  confirmado=false: muéstrale el PREVIEW (perfil + árbol + tareas) para que
+  confirme/edite; si faltan requeridos, pregúntale (no inventes). Con su OK,
+  llámalo con confirmado=true. Las tareas quedan en el ÁRBOL (no en Tareas) y
+  las fases lejanas, gruesas.
 
 PLAN DEL PROYECTO — ÁRBOL DE DESCOMPOSICIÓN (Paso 2):
 - Cada proyecto activo puede tener un PLAN: un árbol de fases/componentes →

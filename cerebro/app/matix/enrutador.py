@@ -75,6 +75,7 @@ _INTAKE_PLAN = re.compile(
     r")\b"
     r"|arma(me)? el plan|armemos el plan|plan en capas|plan del proyecto"
     r"|entender el proyecto|a fondo el proyecto"
+    r"|desde este plan|importa(r)? (este |el )?plan|crea(r)? .*desde (este|el) plan"
     r"|revisa(me)? (el|mi) proyecto|revision del proyecto|como va(mos)? (el|con el) proyecto"
     r"|que sigue en el proyecto|mejora(r)? el plan"
 )

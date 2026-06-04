@@ -123,6 +123,11 @@ def test_revision_y_replan_van_al_fuerte():
         assert d.modelo == FUERTE and d.motivo == "intake_plan", m
 
 
+def test_importar_plan_va_al_fuerte():
+    assert _elegir("crea un proyecto desde este plan").modelo == FUERTE
+    assert _elegir("importa este plan").modelo == FUERTE
+
+
 def test_intake_y_plan_van_al_fuerte():
     # El intake analítico y la generación del plan son tareas duras → fuerte.
     for m in [
