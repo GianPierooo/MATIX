@@ -10,6 +10,181 @@ pendientes `·`.
 
 ---
 
+## INVENTARIO — qué tiene Matix HOY (leído del repo · 2026-06-04)
+
+Foto honesta del estado real, sacada del código (no de memoria). Marcas:
+COMPLETO (backend + UI usable) · PARCIAL (a medias o solo por chat) ·
+SOLO-BACKEND (existe en el cerebro, sin pantalla propia en la app).
+
+### Confirmaciones rápidas (para zanjar dudas)
+
+- Búsqueda web / internet: SÍ existe. Tool `buscar_web` vía Tavily
+  (`cerebro/app/matix/busqueda_web.py`, key en `TAVILY_API_KEY`). El modelo
+  sintetiza con su voz y cita fuentes.
+- Wake word "oye Matix": SÍ existe. Modelo `oye_matix.onnx` (~214 KB) en la
+  raíz, endpoints `/matix/wakeword/muestras*`, pantalla `entrenar_voz_screen`.
+- Cámara en vivo: NO. La visión es por FOTO puntual / galería (recibos,
+  pizarras, documentos) → OCR/extracción. No hay stream de cámara en tiempo real.
+- Teléfono Tier B: NO. Solo hay Fase 1 (intents), Tier C.0 (leer pantalla, solo
+  lectura) y Tier C.1 (enviar WhatsApp tras confirmación). No hay automatización
+  libre de tocar/escribir en apps arbitrarias.
+
+### Cerebro — proveedores
+
+- Chat LLM: OpenAI (default `gpt-4o-mini`) o Anthropic Claude, conmutable por
+  `MATIX_LLM_PROVIDER`. Auto-router por mensaje (`enrutador.py`) elige barato vs
+  fuerte sin llamada extra. Aislado en `matix/llm.py` (único que importa los SDK).
+- STT (voz→texto): Whisper (`whisper-1`, idioma fijo "es") + filtro de
+  alucinaciones.
+- TTS (texto→voz): OpenAI `tts-1`, voz `onyx`, vía `POST /matix/voz`.
+- Embeddings (RAG): OpenAI `text-embedding-3-small` (apuntes + biblioteca).
+- Búsqueda web: Tavily. Push: Firebase Cloud Messaging (FCM).
+
+### Cerebro — tools del chat (83)
+
+Hub básico: crear_tarea, crear_tareas (lote), editar_tarea, completar_tarea,
+reabrir_tarea, eliminar_tarea(conf), marcar_accion_siguiente_hecha, crear_evento,
+editar_evento, eliminar_evento(conf), crear_apunte, editar_apunte,
+eliminar_apunte(conf), registrar_cierre. · Consultas (solo lectura):
+consultar_tareas, consultar_eventos, consultar_proyectos, consultar_apuntes,
+consultar_movimientos, consultar_uso. · Proyectos: crear_proyecto, editar_proyecto,
+aparcar/terminar/reactivar_proyecto, eliminar_proyecto(conf). · Finanzas:
+crear_movimiento, editar_movimiento, eliminar_movimiento(conf),
+registrar_movimientos (lote por foto), revertir_ultimo_lote. · RAG/biblioteca:
+buscar_apuntes, leer_apunte, buscar_material. · Memoria personal: recordar,
+actualizar_memoria, olvidar(conf), buscar_memoria. · Memoria conversacional:
+buscar_en_historial. · Web: buscar_web. · UX: navegar, preguntar_con_opciones. ·
+Modos: activar_modo, desactivar_modo. · Perfil profundo de proyecto:
+ver_perfil_proyecto, actualizar_perfil_proyecto, anotar/corregir/borrar_detalle,
+iniciar/continuar_entrevista_proyecto. · Árbol (plan): generar_arbol_proyecto,
+ver_arbol_proyecto, agregar/actualizar/eliminar_nodo, refinar_fase,
+avance_proyecto. · Intake analítico: intake_proyecto, guardar_parametro_proyecto,
+puede_planear_proyecto, material_para_proyecto, capacidad_proyectos,
+importar_plan_proyecto. · Evolución: revisar_proyecto. · Set del día:
+proponer_set_dia, ver_set_dia, aceptar_set_dia, saltar_item_set,
+configurar_planificacion. · Horario: plan_de_hoy, replanificar_dia,
+configurar_horario. · Automatizaciones: crear/listar/eliminar_automatizacion. ·
+Teléfono: redactar_mensaje (SMS/correo), iniciar_llamada, crear_evento_telefono,
+abrir_en_telefono, leer_galeria (Fase 1) · leer_pantalla (C.0) · escribir_whatsapp
+(C.1). (conf) = pide confirmación por ser destructiva.
+
+### Cerebro — endpoints REST (131 rutas, prefijo /api/v1)
+
+CRUD del hub: profile, categorias, cursos, sesiones-clase, tareas, subtareas,
+evaluaciones, eventos (con papelera/restaurar/permanente), cuadernos, apuntes
+(archivar/restaurar/retomar/permanente), movimientos, proyectos, memoria,
+cierres_dia. · Matix/IA: chat, transcribir, voz, capturar-apunte,
+clasificar-captura, desglosar-tarea, estimar-duraciones, extraer-documento,
+extraer-eventos, extraer-recibo, extraer-tareas, uso, wakeword/muestras. ·
+Notificaciones: push (registrar-token, probar, revisar), nudges, rituales. ·
+Briefing: hoy, cierre, repaso-semanal. · Horario: GET plan, replanificar,
+bloque/completar, bloque/saltar, calendario. · Aprendizaje: tracks,
+material/ingestar. · Modelos/modos: modelos (par, seleccionar), modos
+(activar/desactivar). · Google (Capa 4): oauth/url, oauth/callback, status, sync,
+disconnect. · Infra: health, version, docs.
+
+### Cerebro — jobs del scheduler (APScheduler, cada minuto; solo si hay FCM)
+
+recordatorios de tareas/eventos/evaluaciones · rituales (briefing mañanero,
+cierre, repaso semanal) · nudges de tareas pendientes · automatizaciones del
+usuario · planificador diario (propuesta del set, escalación sobre lo aceptado,
+nudge de dormir, sugerencia ligera de skill) · evolución (check-in semanal por
+proyecto, celebración de hito de fase, hito de % 25/50/75/100, aviso de
+estancamiento). Todo respeta el silencio 22:00–08:00 (America/Lima).
+
+### Cerebro — sistemas de proyectos/skills/intake/evolución/horario
+
+- Perfil profundo de proyecto (0029): objetivo, estado, fase, horizonte +
+  detalles con fecha (componentes/próximos pasos/blockers/notas) + entrevista.
+  SOLO-BACKEND (se opera por chat; la app solo muestra % y acción siguiente).
+- Árbol de descomposición (0030): fases→pasos, elaboración progresiva (fase
+  actual fina, lejanas gruesas), % ponderado. SOLO-BACKEND (por chat).
+- Intake analítico (0032): tipo (negocio, contenido, construir, skill, físico,
+  genérico) con esquema de requeridos+opcionales, gate de meta medible + porqué,
+  y análisis de realismo (incoherencias/metas irreales) antes de planear.
+  COMPLETO en cerebro; se usa por chat e importación de plan.
+- Skills/hábitos (0034): flag `es_skill`; no consumen el tope de 3 (tope blando
+  de 2), dosis ligera (nudge suave opcional, sin la insistencia de una tarea).
+  Creadas: Inglés (B2) y Guitarra activas con ruta por bloques desde la
+  biblioteca; Trading y Portugués parqueadas. SOLO-BACKEND (aparecen como
+  proyectos en la app; sin pantalla dedicada).
+- Evolución/seguimiento (0033): review holístico (modelo fuerte), generación
+  progresiva sin duplicar, check-in semanal honesto, hitos, estancamiento +
+  re-scope, adaptación al ritmo (no apila si vas atrasado). SOLO-BACKEND + push.
+- Set del día (0031): set chico priorizado desde los árboles, insistencia sana,
+  anti-fatiga. PARCIAL en UI (`planificar_dia_screen` + por chat).
+- Horario (0035): config_horario (anclas/despertar/dormir/pico/buffers),
+  ventanas libres, colocación del set (pico para lo importante, skills en
+  ventanas ligeras), replan, empuje al calendario. COMPLETO backend + UI nueva
+  (vista «Hoy» en Inicio); falta validación en device.
+
+### Cerebro — integraciones
+
+- FCM (push): notificaciones locales/push; el scheduler solo corre con
+  `FIREBASE_SERVICE_ACCOUNT_JSON`.
+- RAG/biblioteca_material (0015): `material_chunks` (skill+bloque+embedding);
+  tool `buscar_material` + `POST /material/ingestar`. Skills con material:
+  ingles, guitarra, calistenia, trading, portugues. SOLO-BACKEND (sin UI para
+  navegar la biblioteca).
+- Teléfono: Fase 1 intents (abrir app/url/mapa, llamar, SMS/correo prellenado,
+  leer galería) COMPLETO · Tier C.0 leer_pantalla (accesibilidad, solo lectura)
+  · Tier C.1 escribir_whatsapp (envía tras confirmación). Tier B NO existe.
+- Google (Capa 4): OAuth + sync de calendario. PARCIAL/temprano (tile en
+  Ajustes + endpoints; no es el foco actual).
+
+### App (Flutter) — pantallas y secciones
+
+- Navegación: `home_shell` — 5 pestañas (Inicio · Tareas · Matix(FAB) ·
+  Calendario · Proyectos) + Universidad/Finanzas/Apuntes/Ajustes fuera de barra.
+- Inicio (`inicio_screen`): panel del día — rituales, captura rápida, vista
+  «Hoy» (línea de tiempo del plan, NUEVA), finanzas del mes, apuntes recientes,
+  reflote de ideas, 3 proyectos activos, universidad. COMPLETO.
+- Tareas: lista con vistas/filtros + crear/editar. COMPLETO.
+- Calendario/Eventos: grid mensual + lista del día + crear evento + clases
+  recurrentes + detección de choques. COMPLETO.
+- Universidad: cursos + detalle (promedio) + evaluaciones + horario de clases.
+  COMPLETO.
+- Apuntes: lista + editor con etiquetas. COMPLETO.
+- Proyectos: lista + detalle (acción siguiente + barra de %) + nuevo (con tope).
+  COMPLETO el CRUD; el árbol/perfil/intake se ven por chat (PARCIAL en UI).
+- Matix: chat (`matix_chat_screen`), manos libres con voz (`manos_libres`),
+  accesibilidad (C.0), confirmación de acciones de dispositivo. COMPLETO.
+- Finanzas: dashboard + lista + editor + captura por foto. COMPLETO.
+- Cierre del día + Briefing + Repaso semanal: rituales. COMPLETO.
+- Captura cámara (visión): captura + revisión de tareas/eventos/recibos + OCR.
+  COMPLETO (foto, no cámara en vivo).
+- Memoria («Sobre mí»), Búsqueda global, Papelera, Wake word (entrenar voz),
+  Selección de modelo, Conexión Google (tile), Auto-update: presentes.
+- Planificador del día (`planificar_dia_screen`): PARCIAL (convive con la nueva
+  vista «Hoy»). Hay un `_stub_screen` placeholder residual.
+- SIN pantalla propia (se operan por chat / scheduler): automatizaciones,
+  intake/árbol/evolución de proyectos, skills (se ven como proyectos),
+  biblioteca de material, tracks de aprendizaje.
+
+### Base de datos — migraciones (0001 → 0035, todas aplicadas)
+
+0001 esquema base (profile, categorias, cursos, sesiones_clase, tareas,
+subtareas, evaluaciones, eventos, cuadernos, apuntes) · 0002 proyectos · 0003
+cierres_dia · 0004 papelera (eliminado_en) · 0005 apuntes RAG (embeddings) · 0006
+app_versions · 0007 google_oauth · 0008-0010 eventos (sync bidireccional,
+offset de recordatorio, recurrencia) · 0011 apuntes reflote · 0012 tareas bloque
+(Urgency-3) · 0013 tracks de aprendizaje · 0014 movimientos · 0015
+biblioteca_material (material_chunks) · 0016 device_tokens · 0017
+recordatorios_enviados · 0018 rituales · 0019 nudges (config_nudges) · 0020
+repaso_semanal · 0021 modos (config_matix) · 0022 memoria · 0023 modelo_chat ·
+0024 par_auto_modelo · 0025 movimientos_lote · 0026 chat_operaciones · 0027
+automatizaciones · 0028 memoria_conversacional · 0029 perfil_proyecto
+(+proyecto_detalles, entrevistas_perfil) · 0030 arbol_proyecto (arbol_nodos) ·
+0031 planificador_diario (set_diario_items, config_planificacion,
+planificacion_enviados) · 0032 intake_analitico (proyectos.tipo, parametros) ·
+0033 evolucion_proyecto (arbol_nodos.celebrado_en) · 0034 es_skill_proyectos ·
+0035 config_horario.
+
+Últimas tres: 0033 evolución de proyectos, 0034 skills (es_skill), 0035 config
+de horario (anclas del día).
+
+---
+
 ## Capa actual
 
 **Capa 2 — Matix conversacional + voz + capacidad total** ·
