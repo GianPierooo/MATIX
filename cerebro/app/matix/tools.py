@@ -1773,12 +1773,14 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "avance_proyecto",
             "description": (
-                "Da el % de AVANCE de un proyecto (calculado desde su árbol, NO "
-                "lo inventes) + el desglose por fase, para que lo interpretes "
-                "contra el objetivo. Úsala para «¿cómo voy en [proyecto]?» y en "
-                "el briefing. Reporta el número y matízalo HONESTO: qué está "
-                "sólido, qué falta, el cuello de botella; si el % sobreestima lo "
-                "real, dilo. Coach honesto: alienta sin inflar."
+                "% de AVANCE de un proyecto (calculado desde su árbol, NO lo "
+                "inventes) + desglose por fase. ÚSALA SIEMPRE para preguntas de "
+                "progreso: «¿cómo voy en [proyecto]?», «¿cuánto llevo de…?», "
+                "«¿qué tan avanzado está…?», «¿cómo va la tesis?», y en el "
+                "briefing. (Es distinta de ver_perfil_proyecto, que muestra el "
+                "contenido del perfil, no el progreso.) Reporta el número y "
+                "matízalo HONESTO: qué está sólido, qué falta, el cuello de "
+                "botella; si el % sobreestima lo real, dilo. Coach honesto."
             ),
             "parameters": {
                 "type": "object",
