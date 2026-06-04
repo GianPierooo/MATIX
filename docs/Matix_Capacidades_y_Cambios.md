@@ -45,6 +45,17 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Skills / hábitos aparte de los proyectos: ahora distingo una SKILL (inglés,
+  guitarra, trading, portugués…) de un proyecto de trabajo. Las skills NO
+  consumen el tope de 3 activos (tienen su propio tope BLANDO de 2: te aviso, no
+  te bloqueo) y se dosifican LIGERO: nudges suaves y opcionales, celebro las
+  victorias pequeñas, y nunca la insistencia de una tarea comprometida (un hobby
+  fastidiado deja de ser un gusto). No entran al set del día ni al aviso de
+  estancamiento; respetan tus horas de silencio. Cuando trabajamos una skill con
+  material, voy un bloque a la vez (solo el siguiente trozo digerible, no el
+  currículo entero). Ya tienes Inglés (meta B2) y Guitarra (hobby) activas con su
+  ruta por bloques leída de tu biblioteca, y Trading y Portugués registradas
+  listas para activar. En Guitarra te pregunto tu nivel antes de arrancar.
 - Importar plan: crear DIRECTO + mejora continua conversacional. Si pegas un
   plan completo, creo el proyecto de una y te muestro cómo quedó (con opción de
   editar o deshacer fácil); solo te pregunto si falta algo requerido. Y cuando

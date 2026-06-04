@@ -12,9 +12,18 @@ El archivo de estructuras es una lista de
 MISMO shape que produce el modelo al parsear un plan en el chat. NO se versiona
 (lleelo de un archivo local/gitignored): puede contener data personal.
 
+Claves opcionales por item (para skills/hábitos):
+- `"es_skill": true`  → la crea como skill (no consume el tope de 3, dosis ligera).
+- `"estado": "activo"|"aparcado"`  → fuerza el estado inicial (p. ej. una skill
+  que solo se registra como disponible entra `aparcado`).
+- `"sin_arbol": true`  → solo registra el proyecto (perfil + parámetros), SIN
+  construir el árbol. Para skills parqueadas cuyo árbol se arma al activarlas.
+- `"forzar": true`  → crea aunque falten requeridos (para hobbies que no necesitan
+  el gate de negocio). Sin esto, si faltan requeridos se PAUSA y se reporta.
+
 Reglas (idénticas al import del chat):
-- Si al plan le faltan parámetros REQUERIDOS, NO se inventa: se PAUSA ese plan y
-  se reporta qué falta; los demás siguen.
+- Si al plan le faltan parámetros REQUERIDOS y no se fuerza, NO se inventa: se
+  PAUSA ese plan y se reporta qué falta; los demás siguen.
 - Etiquetado por horizonte + elaboración progresiva (fase actual fina, lejanas
   gruesas) los aplica plan_a_nodos.
 - Idempotente: si ya existe un proyecto con ese nombre, se omite.
@@ -39,24 +48,47 @@ async def main(ruta: str) -> None:
         for item in data:
             nombre = item["nombre"]
             estructura = item["estructura"]
+            es_skill = bool(item.get("es_skill"))
+            estado = item.get("estado")
+            sin_arbol = bool(item.get("sin_arbol"))
+            forzar = bool(item.get("forzar"))
+
             existe = await db.list("proyectos", filters={"nombre": nombre}, limit=1)
             if existe:
                 print(f"[omitido] «{nombre}» ya existe.")
                 continue
             plan = importar_plan.normalizar_plan(estructura)
             gate = importar_plan.huecos_plan(plan)
-            if importar_plan.decidir_importacion(gate) == "preguntar":
-                print(f"[PAUSADO] «{nombre}»: faltan requeridos → {gate['faltan']}")
+            if importar_plan.decidir_importacion(gate, forzar=forzar) == "preguntar":
+                print(f"[PAUSADO] «{nombre}»: faltan requeridos -> {gate['faltan']}")
                 continue
+
+            # Skill solo-registro (parqueada): inserta el proyecto sin árbol.
+            if sin_arbol:
+                proyecto = await db.insert("proyectos", {
+                    "nombre": nombre,
+                    "estado": estado or ("aparcado" if es_skill else "activo"),
+                    "es_skill": es_skill,
+                    "objetivo": plan.get("objetivo") or None,
+                    "tipo": plan.get("tipo"),
+                    "parametros": plan.get("parametros") or {},
+                })
+                print(
+                    f"[OK] «{nombre}»: estado={proyecto['estado']}, es_skill={es_skill}, "
+                    f"registrada (sin arbol)"
+                )
+                continue
+
             res = await importar_plan.aplicar_importacion(
-                db, plan=plan, nombre=nombre, proyecto=None
+                db, plan=plan, nombre=nombre, proyecto=None,
+                es_skill=es_skill, estado=estado,
             )
             nodos = await db.list("arbol_nodos", filters={"proyecto_id": res["proyecto"]["id"]})
             pct = avance.porcentaje(nodos)
             raices = sum(1 for n in nodos if not n.get("parent_id"))
             print(
-                f"[OK] «{nombre}»: estado={res['estado']}, fases={raices}, "
-                f"nodos={res['nodos_creados']}, avance={pct}%"
+                f"[OK] «{nombre}»: estado={res['estado']}, es_skill={es_skill}, "
+                f"fases={raices}, nodos={res['nodos_creados']}, avance={pct}%"
             )
     finally:
         await db.aclose()

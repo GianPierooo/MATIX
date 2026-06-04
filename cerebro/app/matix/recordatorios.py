@@ -639,6 +639,8 @@ def iniciar(db: Postgrest) -> None:
             await planificador_diario.revisar_propuesta(db)
             await planificador_diario.revisar_escalacion(db)
             await planificador_diario.revisar_dormir(db)
+            # Dosis ligera de skills: sugerencia suave y opcional (sin escalación).
+            await planificador_diario.revisar_sugerencia_skill(db)
         except Exception:  # noqa: BLE001
             logger.exception("scheduler: el tick del planificador falló")
         # Motor de evolución (seguimiento): check-in semanal, celebración de

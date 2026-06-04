@@ -602,7 +602,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "mensaje que tienes que traducir al usuario: «ya tienes "
                 "3 proyectos activos, aparca o termina uno primero». "
                 "Para crear directo como aparcado o terminado, pasa "
-                "`estado` correspondiente."
+                "`estado` correspondiente. Para una SKILL/HÁBITO (inglés, "
+                "guitarra, trading…), pasa `es_skill=true`: NO consume el "
+                "tope de 3 y se dosifica ligero. Si ya hay 2 skills activas, "
+                "NO falla: te devuelve un `aviso` que le trasladas al usuario."
             ),
             "parameters": {
                 "type": "object",
@@ -621,6 +624,14 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         ),
                     },
                     "color": {"type": "string"},
+                    "es_skill": {
+                        "type": "boolean",
+                        "description": (
+                            "true si es una skill/hábito que se practica en "
+                            "ratos libres (no un proyecto de trabajo). No "
+                            "consume el tope de 3 y recibe dosis ligera."
+                        ),
+                    },
                 },
                 "required": ["nombre"],
                 "additionalProperties": False,
@@ -3067,7 +3078,8 @@ async def _eliminar_apunte(db: Postgrest, args: dict) -> dict[str, Any]:
 
 # ── Proyectos: crear / editar / aparcar / terminar / reactivar ──────
 
-_TOPE_PROYECTOS_ACTIVOS = 3
+_TOPE_PROYECTOS_ACTIVOS = creacion_proyecto.TOPE_PROYECTOS_ACTIVOS
+_TOPE_SKILLS_ACTIVAS = creacion_proyecto.TOPE_SKILLS_ACTIVAS
 _MSG_TOPE = (
     f"Ya hay {_TOPE_PROYECTOS_ACTIVOS} proyectos activos. Aparca o "
     "termina uno primero."
@@ -3077,10 +3089,24 @@ _MSG_TOPE = (
 async def _contar_proyectos_activos(
     db: Postgrest, *, excluir_id: str | None = None
 ) -> int:
+    """Proyectos de TRABAJO activos (es_skill=false): los que cuentan para el
+    tope duro de 3. Las skills no consumen slot."""
     activos = await db.list("proyectos", filters={"estado": "activo"})
+    activos = creacion_proyecto.solo_proyectos(activos)
     if excluir_id:
         activos = [p for p in activos if p["id"] != excluir_id]
     return len(activos)
+
+
+async def _contar_skills_activas(
+    db: Postgrest, *, excluir_id: str | None = None
+) -> int:
+    """Skills/hábitos activas (es_skill=true): para el tope BLANDO de 2."""
+    activos = await db.list("proyectos", filters={"estado": "activo"})
+    skills = creacion_proyecto.solo_skills(activos)
+    if excluir_id:
+        skills = [p for p in skills if p["id"] != excluir_id]
+    return len(skills)
 
 
 async def _crear_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
@@ -3090,8 +3116,17 @@ async def _crear_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
         return _err_validacion(e)
     payload = body.model_dump(mode="json", exclude_none=True)
 
+    es_skill = bool(payload.get("es_skill"))
+    aviso_skill: str | None = None
     if payload.get("estado", "activo") == "activo":
-        if await _contar_proyectos_activos(db) >= _TOPE_PROYECTOS_ACTIVOS:
+        if es_skill:
+            # Tope BLANDO de skills: no bloquea, solo avisa para que el usuario
+            # decida (un hobby no se gestiona con candado).
+            activas = await _contar_skills_activas(db)
+            cap = creacion_proyecto.evaluar_capacidad_skill(activas)
+            if cap["excede"]:
+                aviso_skill = cap["motivo"]
+        elif await _contar_proyectos_activos(db) >= _TOPE_PROYECTOS_ACTIVOS:
             return _error(
                 "tope_proyectos",
                 _MSG_TOPE,
@@ -3108,6 +3143,8 @@ async def _crear_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
             "id": fila["id"],
             "nombre": fila["nombre"],
             "estado": fila["estado"],
+            "es_skill": fila.get("es_skill", False),
+            **({"aviso": aviso_skill} if aviso_skill else {}),
             "nota": (
                 "Proyecto creado. AHORA lanza el INTAKE ANALÍTICO con "
                 "intake_proyecto (detecta el tipo y te da preguntas afiladas por "
@@ -3200,18 +3237,26 @@ async def _cambiar_estado_proyecto(
         "estado": nuevo_estado,
         "ultima_actividad_en": ahora,
     }
+    aviso_skill: str | None = None
     if nuevo_estado == "activo":
-        # Reactivar: aplicar tope.
-        activos = await _contar_proyectos_activos(db, excluir_id=proyecto_id)
-        if activos >= _TOPE_PROYECTOS_ACTIVOS:
-            return _error(
-                "tope_proyectos",
-                _MSG_TOPE,
-                sugerencia=(
-                    "Sugiere al usuario que aparque o termine otro "
-                    "antes de reactivar este."
-                ),
-            )
+        if actual.get("es_skill"):
+            # Tope BLANDO de skills: no bloquea, solo avisa.
+            activas = await _contar_skills_activas(db, excluir_id=proyecto_id)
+            cap = creacion_proyecto.evaluar_capacidad_skill(activas)
+            if cap["excede"]:
+                aviso_skill = cap["motivo"]
+        else:
+            # Reactivar un proyecto de trabajo: aplica el tope duro de 3.
+            activos = await _contar_proyectos_activos(db, excluir_id=proyecto_id)
+            if activos >= _TOPE_PROYECTOS_ACTIVOS:
+                return _error(
+                    "tope_proyectos",
+                    _MSG_TOPE,
+                    sugerencia=(
+                        "Sugiere al usuario que aparque o termine otro "
+                        "antes de reactivar este."
+                    ),
+                )
         payload["inactivo_desde"] = None
     else:
         payload["inactivo_desde"] = ahora
@@ -3225,6 +3270,7 @@ async def _cambiar_estado_proyecto(
             "nombre": fila["nombre"],
             "estado": fila["estado"],
             "estado_anterior": estado_actual,
+            **({"aviso": aviso_skill} if aviso_skill else {}),
         }
     )
 

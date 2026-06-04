@@ -20,6 +20,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..db import Postgrest
+from . import creacion_proyecto
 from .push_fcm import TokenInvalido, enviar_push
 
 logger = logging.getLogger("matix.planificador")
@@ -151,6 +152,39 @@ def texto_dormir() -> tuple[str, str]:
     return ("😴 Hora de ir cerrando", "Vas a dormir antes de las 12, ¿no? Apaga pantallas y descansa; mañana rendimos mejor.")
 
 
+# ── Skills/hábitos: dosis LIGERA (suave y opcional, nunca insistencia) ────────
+
+_DOSIS_SKILL = [
+    "¿Le metes 10 minutos a {n}? Solo si te provoca, sin presión.",
+    "Un ratito de {n} hoy suma. Si hoy no, no pasa nada.",
+    "¿Te animas a un toque de {n}? Lo justo para disfrutarlo.",
+    "Si te queda un hueco, ahí está {n}. Tranqui, es por gusto.",
+]
+
+
+def texto_dosis_skill(nombre: str, n: int) -> tuple[str, str]:
+    """Nudge SUAVE y OPCIONAL para una skill/hábito: invita, no exige (un hobby
+    fastidiado deja de ser un gusto). Rotado por `n` para no repetir. PURO."""
+    cuerpo = _DOSIS_SKILL[n % len(_DOSIS_SKILL)].format(n=nombre)
+    return ("Un ratito para ti", cuerpo)
+
+
+def texto_celebra_skill(nombre: str) -> tuple[str, str]:
+    """Celebra una victoria PEQUEÑA de una skill, sin solemnidad. PURO."""
+    return ("🎉 Eso suma", f"Le metiste a {nombre} hoy. Pequeño, pero cuenta. Sigue disfrutándolo.")
+
+
+def elegir_skill_del_dia(
+    skills: list[dict[str, Any]], ordinal: int
+) -> dict[str, Any] | None:
+    """Elige UNA skill del día rotando (round-robin por día) para no nudgear
+    siempre la misma. Orden estable por creación/id. PURO."""
+    if not skills:
+        return None
+    orden = sorted(skills, key=lambda p: str(p.get("creado_en") or p.get("id") or ""))
+    return orden[ordinal % len(orden)]
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # Helpers de fecha
 # ════════════════════════════════════════════════════════════════════════════
@@ -215,7 +249,11 @@ async def construir_set(db: Postgrest, *, ahora: datetime | None = None) -> list
 
     faltan = max(0, tamano - len(items))
     if faltan:
-        proyectos = await db.list("proyectos", filters={"estado": "activo"})
+        # Solo proyectos de TRABAJO entran al set comprometido: las skills se
+        # dosifican aparte (suave y opcional), nunca con la insistencia del set.
+        proyectos = creacion_proyecto.solo_proyectos(
+            await db.list("proyectos", filters={"estado": "activo"})
+        )
         nodos_por_proyecto: dict[str, list[dict]] = {}
         ya_en_set = {r.get("nodo_id") for r in rollover}
         for p in proyectos:
@@ -282,6 +320,8 @@ async def _porque_destacado(db: Postgrest) -> str | None:
         activos = await db.list("proyectos", filters={"estado": "activo"})
     except Exception:  # noqa: BLE001
         return None
+    # El porqué de la mañana empuja el TRABAJO, no los hobbies.
+    activos = creacion_proyecto.solo_proyectos(activos)
     activos.sort(key=lambda p: p.get("prioridad") or 99)
     for p in activos:
         porque = ((p.get("parametros") or {}).get("porque") or "").strip()
@@ -439,6 +479,50 @@ async def revisar_dormir(db: Postgrest, *, ahora: datetime | None = None) -> dic
     except RuntimeError:
         return {"dormir": 0, "error": "fcm_no_config"}
     return {"dormir": 0}
+
+
+async def revisar_sugerencia_skill(db: Postgrest, *, ahora: datetime | None = None) -> dict:
+    """Dosis LIGERA de skills: a lo más UNA sugerencia suave al día, a su hora,
+    dentro de ventana, rotando entre las skills activas. SIN escalación: si el
+    usuario no le hace caso, no se insiste (un hobby no se nudgea como una tarea
+    comprometida). Respeta el silencio igual que el resto."""
+    ahora = ahora or datetime.now(timezone.utc)
+    cfg = await _config(db)
+    if not cfg.get("activo"):
+        return {"sugerencia_skill": 0, "off": True}
+    local = ahora.astimezone(LIMA)
+    # Solo a su hora (default 18h Lima, ratos libres), con catch-up acotado.
+    if not _due_hora(local, int(cfg.get("hora_sugerencia_skill", 18))):
+        return {"sugerencia_skill": 0}
+    # Respeta silencio/ventana de disponibilidad (reusa el motor de nudges).
+    from . import recordatorios
+    ncfgs = await db.list("config_nudges", limit=1)
+    if ncfgs and not recordatorios.permitido_ahora(local, ncfgs[0]):
+        return {"sugerencia_skill": 0, "fuera_de_ventana": True}
+    # Una sola al día (anti-spam); nunca se repite ni se escala.
+    if await _ya_enviado(db, "sugerencia_skill", local.date()):
+        return {"sugerencia_skill": 0, "ya": True}
+
+    skills = creacion_proyecto.solo_skills(
+        await db.list("proyectos", filters={"estado": "activo"})
+    )
+    if not skills:
+        return {"sugerencia_skill": 0, "sin_skills": True}
+    skill = elegir_skill_del_dia(skills, local.date().toordinal())
+    tokens = await _tokens(db)
+    if not tokens:
+        return {"sugerencia_skill": 0, "sin_tokens": True}
+    titulo, cuerpo = texto_dosis_skill(skill["nombre"], local.date().toordinal())
+    try:
+        if await _push(db, tokens, titulo=titulo, cuerpo=cuerpo, payload=f"proyecto:{skill['id']}"):
+            await db.insert(
+                "planificacion_enviados",
+                {"tipo": "sugerencia_skill", "fecha": local.date().isoformat()},
+            )
+            return {"sugerencia_skill": 1, "skill": skill["nombre"]}
+    except RuntimeError:
+        return {"sugerencia_skill": 0, "error": "fcm_no_config"}
+    return {"sugerencia_skill": 0}
 
 
 async def resumen_cierre_db(db: Postgrest, *, ahora: datetime | None = None) -> tuple[int, int]:

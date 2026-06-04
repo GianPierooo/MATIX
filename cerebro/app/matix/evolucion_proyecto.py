@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 from ..db import Postgrest
 from . import avance as avance_mod
+from . import creacion_proyecto
 from .planificador_diario import LIMA, _push, _tokens
 
 logger = logging.getLogger("matix.evolucion")
@@ -179,7 +180,12 @@ async def revisar_checkin(db: Postgrest, *, ahora: datetime | None = None) -> di
     cfg = await _cfg_nudges(db)
     if not _en_ventana(local, cfg):
         return {"checkin": 0, "fuera_de_ventana": True}
-    if not await db.list("proyectos", filters={"estado": "activo"}, limit=1):
+    # El check-in semanal es sobre los proyectos de TRABAJO; si solo hay skills
+    # activas, no hay nada que revisar con esa lente.
+    activos_trabajo = creacion_proyecto.solo_proyectos(
+        await db.list("proyectos", filters={"estado": "activo"})
+    )
+    if not activos_trabajo:
         return {"checkin": 0, "sin_activos": True}
     semana = (local.date() - timedelta(days=local.isoweekday() - 1)).isoformat()
     if await _ya(db, "checkin", semana):
@@ -236,7 +242,11 @@ async def revisar_estancamiento(db: Postgrest, *, ahora: datetime | None = None)
     cfg = await _cfg_nudges(db)
     if not _en_ventana(local, cfg):
         return {"estancamiento": 0, "fuera_de_ventana": True}
-    activos = await db.list("proyectos", filters={"estado": "activo"})
+    # Las skills NO se avisan por estancamiento: un hobby puede dormir un tiempo
+    # sin culpa. Solo los proyectos de trabajo reciben el «¿retomamos?».
+    activos = creacion_proyecto.solo_proyectos(
+        await db.list("proyectos", filters={"estado": "activo"})
+    )
     enviados = 0
     for p in activos:
         info = estancado(p.get("ultima_actividad_en"), ahora=ahora)

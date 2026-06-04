@@ -42,7 +42,10 @@ def _ahora_iso() -> str:
 
 
 async def _contar_activos(db: Postgrest, *, excluir_id: str | None = None) -> int:
+    """Cuenta proyectos de TRABAJO activos (es_skill=false). Las skills NO
+    consumen el tope de 3: tienen su propio tope blando."""
     activos = await db.list(TABLE, filters={"estado": "activo"})
+    activos = [p for p in activos if not p.get("es_skill")]
     if excluir_id:
         activos = [p for p in activos if p["id"] != excluir_id]
     return len(activos)
@@ -165,8 +168,9 @@ async def crear_proyecto(
 ) -> dict:
     payload = body.model_dump(mode="json", exclude_none=True)
 
-    # Tope de 3 activos (default del schema es "activo")
-    if payload.get("estado", "activo") == "activo":
+    # Tope de 3 activos (default del schema es "activo"). Solo aplica a
+    # proyectos de TRABAJO: una skill no consume slot (tope blando aparte).
+    if payload.get("estado", "activo") == "activo" and not payload.get("es_skill"):
         if await _contar_activos(db) >= TOPE_ACTIVOS:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail=MSG_TOPE
@@ -228,8 +232,12 @@ async def actualizar_proyecto(
     estado_actual = actual["estado"]
     if nuevo_estado is not None and nuevo_estado != estado_actual:
         if nuevo_estado == "activo":
-            # Reactivar: validar tope (sin contarse a sí mismo)
-            if await _contar_activos(db, excluir_id=str(proyecto_id)) >= TOPE_ACTIVOS:
+            # Reactivar: validar tope (sin contarse a sí mismo). El tope duro
+            # solo aplica a proyectos de trabajo; una skill no consume slot.
+            sera_skill = payload.get("es_skill", actual.get("es_skill"))
+            if not sera_skill and await _contar_activos(
+                db, excluir_id=str(proyecto_id)
+            ) >= TOPE_ACTIVOS:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT, detail=MSG_TOPE
                 )

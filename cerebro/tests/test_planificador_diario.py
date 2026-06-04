@@ -89,3 +89,32 @@ def test_texto_escalacion_rota_y_es_sano():
     b = pl.texto_escalacion(2, 1)
     assert a[1] != b[1]  # rota
     assert "2" in a[1]  # nombra cuántas faltan
+
+
+def test_dosis_skill_es_suave_opcional_y_rota():
+    a = pl.texto_dosis_skill("Guitarra", 0)
+    b = pl.texto_dosis_skill("Guitarra", 1)
+    assert a[1] != b[1]  # rota
+    assert "Guitarra" in a[1]  # nombra la skill
+    # Suave/opcional: nada de lenguaje de obligación.
+    txt = (a[0] + a[1]).lower()
+    assert "sin presión" in txt or "si te provoca" in txt or "por gusto" in txt
+    assert "tienes que" not in txt and "obligat" not in txt
+
+
+def test_celebra_skill_es_positivo():
+    _, c = pl.texto_celebra_skill("Inglés")
+    assert "Inglés" in c
+    assert "suma" in c.lower() or "cuenta" in c.lower()
+
+
+def test_elegir_skill_del_dia_rota_por_dia():
+    skills = [
+        {"id": "a", "nombre": "Inglés", "creado_en": "2026-01-01"},
+        {"id": "b", "nombre": "Guitarra", "creado_en": "2026-02-01"},
+    ]
+    d0 = pl.elegir_skill_del_dia(skills, 0)
+    d1 = pl.elegir_skill_del_dia(skills, 1)
+    d2 = pl.elegir_skill_del_dia(skills, 2)
+    assert d0["id"] == "a" and d1["id"] == "b" and d2["id"] == "a"  # round-robin
+    assert pl.elegir_skill_del_dia([], 5) is None  # sin skills, nada

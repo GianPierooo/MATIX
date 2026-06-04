@@ -30,6 +30,9 @@ class ProyectoCreate(BaseModel):
     tarea_siguiente_id: UUID | None = None
     bloque_protegido: dict[str, Any] | None = None
     color: str | None = None
+    # Skill/hábito (inglés, guitarra…): NO consume el tope de 3 activos y se
+    # dosifica ligero. Default false = proyecto de trabajo normal.
+    es_skill: bool = False
 
 
 class ProyectoUpdate(BaseModel):
@@ -49,6 +52,7 @@ class ProyectoUpdate(BaseModel):
     tarea_siguiente_id: UUID | None = None
     bloque_protegido: dict[str, Any] | None = None
     color: str | None = None
+    es_skill: bool | None = None
 
 
 class ProyectoRead(BaseModel):
@@ -62,6 +66,7 @@ class ProyectoRead(BaseModel):
     ultima_actividad_en: datetime
     bloque_protegido: dict[str, Any] | None = None
     color: str | None = None
+    es_skill: bool = False
     inactivo_desde: datetime | None = None
     creado_en: datetime
     actualizado_en: datetime

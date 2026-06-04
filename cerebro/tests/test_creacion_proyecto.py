@@ -41,6 +41,32 @@ def test_guard_capacidad_carga_alta_cuestiona_aunque_haya_cupo():
     assert "carga" in ev["motivo"].lower() or "sobrecompromiso" in ev["motivo"].lower()
 
 
+def test_split_skills_vs_proyectos_de_trabajo():
+    proyectos = [
+        {"id": "p1", "nombre": "OneXotic", "es_skill": False},
+        {"id": "s1", "nombre": "Inglés", "es_skill": True},
+        {"id": "p2", "nombre": "Matix"},  # sin flag = trabajo
+        {"id": "s2", "nombre": "Guitarra", "es_skill": True},
+    ]
+    assert [p["id"] for p in cp.solo_proyectos(proyectos)] == ["p1", "p2"]
+    assert [p["id"] for p in cp.solo_skills(proyectos)] == ["s1", "s2"]
+    assert cp.es_skill({"es_skill": True}) is True
+    assert cp.es_skill({}) is False
+
+
+def test_tope_blando_skills_avisa_pero_no_bloquea():
+    # Con espacio (1 < 2): no excede, no bloquea.
+    libre = cp.evaluar_capacidad_skill(1)
+    assert libre["excede"] is False and libre["bloquea"] is False
+    # Al tope (2 >= 2): AVISA pero NUNCA bloquea (un hobby no se gestiona con
+    # candado).
+    lleno = cp.evaluar_capacidad_skill(2)
+    assert lleno["excede"] is True
+    assert lleno["bloquea"] is False
+    assert "aviso" in lleno["motivo"].lower() or "no te lo bloqueo" in lleno["motivo"].lower()
+    assert cp.TOPE_SKILLS_ACTIVAS == 2 and cp.TOPE_PROYECTOS_ACTIVOS == 3
+
+
 def test_intake_suficiente_para_disparar_arbol():
     # Falta estructura → todavía no.
     assert cp.intake_suficiente({"objetivo": "graduarme"}) is False

@@ -31,8 +31,59 @@ def detectar_material(texto: str, skills_disponibles: list[str]) -> str | None:
     return None
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# Skills/hábitos vs proyectos de trabajo (tope y dosificación) — PURO
+# ════════════════════════════════════════════════════════════════════════════
+
+# Tope DURO de proyectos de trabajo activos (es_skill=false): bloquea.
+TOPE_PROYECTOS_ACTIVOS = 3
+# Tope BLANDO de skills activas a la vez (es_skill=true): avisa, NO bloquea.
+# Un hobby no se gestiona con candado; solo se sugiere no dispersarse.
+TOPE_SKILLS_ACTIVAS = 2
+
+
+def es_skill(p: dict[str, Any]) -> bool:
+    """¿Este proyecto es una skill/hábito? PURO."""
+    return bool(p.get("es_skill"))
+
+
+def solo_proyectos(proyectos: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Solo los proyectos de TRABAJO (es_skill=false): los que cuentan para el
+    tope de 3 y reciben la dosificación firme. PURO."""
+    return [p for p in proyectos if not es_skill(p)]
+
+
+def solo_skills(proyectos: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Solo las skills/hábitos (es_skill=true): tope blando y dosis ligera. PURO."""
+    return [p for p in proyectos if es_skill(p)]
+
+
+def evaluar_capacidad_skill(
+    activas: int, *, tope: int = TOPE_SKILLS_ACTIVAS
+) -> dict[str, Any]:
+    """Tope BLANDO de skills activas: nunca bloquea (un hobby fastidiado deja de
+    ser un gusto). Si se pasa del tope, AVISA para que el usuario decida. PURO."""
+    excede = activas >= tope
+    if excede:
+        motivo = (
+            f"Ya tienes {activas} skills activas. La idea es no pasar de {tope} a "
+            "la vez para no dispersarte. Te lo aviso, no te lo bloqueo: súmala "
+            "igual si quieres, o parquea una y la retomas cuando quieras."
+        )
+    else:
+        libres = tope - activas
+        motivo = f"Tienes espacio para skills ({libres} cupo(s) blando(s))."
+    return {
+        "excede": excede,
+        "bloquea": False,  # nunca bloquea: tope blando
+        "activas": activas,
+        "tope": tope,
+        "motivo": motivo,
+    }
+
+
 def evaluar_capacidad(
-    activos: int, *, tope: int = 3, pendientes_abiertos: int = 0
+    activos: int, *, tope: int = TOPE_PROYECTOS_ACTIVOS, pendientes_abiertos: int = 0
 ) -> dict[str, Any]:
     """Guard anti-sobrecompromiso. Devuelve si el cupo duro lo permite, si lo
     RECOMIENDA (cupo + carga), y un motivo honesto. PURO — el cálculo fino de

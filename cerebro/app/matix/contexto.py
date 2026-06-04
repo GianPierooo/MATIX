@@ -175,10 +175,15 @@ async def contexto_vivo(db: Postgrest) -> str:
     )
     lineas.append("")
 
-    # Proyectos activos
-    if proyectos:
-        lineas.append("### Proyectos activos")
-        for p in proyectos:
+    # Proyectos activos (de TRABAJO) y skills/hábitos van por separado: las
+    # skills no consumen el tope de 3 y se dosifican ligero (no se marcan en
+    # riesgo ni se insiste como una tarea comprometida).
+    proyectos_trabajo = [p for p in proyectos if not p.get("es_skill")]
+    skills = [p for p in proyectos if p.get("es_skill")]
+
+    lineas.append("### Proyectos activos")
+    if proyectos_trabajo:
+        for p in proyectos_trabajo:
             prio = p.get("prioridad") or "?"
             linea = f"- **#{prio} {p['nombre']}**  `id={p['id']}`"
             if p.get("linea_meta"):
@@ -201,10 +206,22 @@ async def contexto_vivo(db: Postgrest) -> str:
             except Exception:
                 pass
             lineas.append(linea)
-        lineas.append("")
     else:
-        lineas.append("### Proyectos activos")
         lineas.append("- (ninguno)")
+    lineas.append("")
+
+    if skills:
+        lineas.append("### Skills / hábitos (dosis ligera, NO cuentan en el tope de 3)")
+        for p in skills:
+            linea = f"- **{p['nombre']}**  `id={p['id']}`"
+            obj = (p.get("objetivo") or p.get("linea_meta") or "").strip()
+            if obj:
+                linea += f" — {obj}"
+            lineas.append(linea)
+        lineas.append(
+            "(Trátalas suave: ofrece el SIGUIENTE trozo digerible del bloque "
+            "actual, nunca el currículo entero; celebra lo pequeño; no insistas.)"
+        )
         lineas.append("")
 
     # Vencidas

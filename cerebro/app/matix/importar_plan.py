@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..db import Postgrest
-from . import intake_analitico
+from . import creacion_proyecto, intake_analitico
 
 
 # Horizonte → granularidad del nodo: solo lo de CORTO plazo se detalla fino
@@ -125,16 +125,37 @@ _TOPE_ACTIVOS = 3
 
 
 async def aplicar_importacion(
-    db: Postgrest, *, plan: dict[str, Any], nombre: str, proyecto: dict | None = None
+    db: Postgrest,
+    *,
+    plan: dict[str, Any],
+    nombre: str,
+    proyecto: dict | None = None,
+    es_skill: bool = False,
+    estado: str | None = None,
 ) -> dict[str, Any]:
     """Crea (o usa) el proyecto, fija perfil/parámetros y arma el árbol desde el
-    plan. Respeta el tope de 3 activos (si está lleno, lo crea aparcado)."""
+    plan.
+
+    - `es_skill`: si es una skill/hábito, NO consume el tope de 3 (entra activa
+      por defecto; el tope blando de skills no bloquea).
+    - `estado`: fuerza el estado inicial (p. ej. `aparcado` para una skill que
+      solo se registra como disponible). Si no se pasa, se decide solo: las
+      skills entran `activo`; los proyectos de trabajo `activo` salvo que el tope
+      de 3 (contando solo proyectos de trabajo) esté lleno, donde entran
+      `aparcado`."""
     if proyecto is None:
-        activos = await db.list("proyectos", filters={"estado": "activo"})
-        estado = "activo" if len(activos) < _TOPE_ACTIVOS else "aparcado"
+        if estado is None:
+            if es_skill:
+                estado = "activo"  # tope blando: no fuerza aparcado
+            else:
+                trabajo_activos = creacion_proyecto.solo_proyectos(
+                    await db.list("proyectos", filters={"estado": "activo"})
+                )
+                estado = "activo" if len(trabajo_activos) < _TOPE_ACTIVOS else "aparcado"
         proyecto = await db.insert("proyectos", {
             "nombre": nombre,
             "estado": estado,
+            "es_skill": es_skill,
             "objetivo": plan.get("objetivo") or None,
             "tipo": plan.get("tipo"),
             "parametros": plan.get("parametros") or {},
