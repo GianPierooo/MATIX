@@ -87,10 +87,12 @@ _COMENTARIO_PROYECTO = re.compile(
     r"\b("
     r"avance|avances|avanc|"
     r"termine|complete|acabe|"
+    # verbos de "entregué/publiqué algo": reportes de avance frecuentes
+    r"subi|publique|lance|grabe|entregue|estrene|"
     r"me trabe|trabad|atascad|estancad|"
     r"cambie de (idea|rumbo|plan|enfoque)|"
     r"se me ocurrio|tengo una idea|idea nueva|"
-    r"ya hice|ya tengo|ya termine|ya complete|logre"
+    r"ya hice|ya tengo|ya termine|ya complete|ya subi|logre"
     r")\b"
 )
 

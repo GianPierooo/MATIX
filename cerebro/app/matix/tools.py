@@ -1878,12 +1878,16 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "(«crea un proyecto desde este plan», «importa este plan»). TÚ "
                 "parseas el texto del plan a `estructura` (objetivo, tipo, "
                 "parametros con porqué/meta/criterio, y fases con sus nodos y "
-                "horizonte). Llámame PRIMERO con confirmado=false: te devuelvo un "
-                "PREVIEW (perfil + árbol + tareas) y los huecos; muéstraselo al "
-                "usuario y, si faltan requeridos, pregúntale (no inventes). "
-                "Cuando confirme, llámame con confirmado=true para crear. Las "
-                "tareas van al ÁRBOL (no a la lista de Tareas); las fases lejanas "
-                "quedan gruesas (elaboración progresiva)."
+                "horizonte). CREAR DIRECTO (crear-luego-refinar, NO preview): si el "
+                "plan está completo te devuelvo `estado='creado'` con un `resumen` "
+                "(perfil + árbol) — muéstraselo CORTO y ofrécele corregir por chat o "
+                "deshacer; NO previsualices ni preguntes «¿lo creo?». SOLO si "
+                "devuelvo `estado='faltan_requeridos'`, mapea tus datos a las "
+                "`claves_requeridas` y pregúntale ÚNICAMENTE lo que de verdad NO "
+                "esté en el plan (no inventes); recién entonces reintenta. Respeta "
+                "el tope de 3 (si está lleno, entra `aparcado`). Las tareas van al "
+                "ÁRBOL (no a la lista de Tareas); las fases lejanas quedan gruesas "
+                "(elaboración progresiva)."
             ),
             "parameters": {
                 "type": "object",
@@ -1891,7 +1895,14 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "nombre": {"type": "string", "description": "Nombre del proyecto a crear."},
                     "proyecto_id": {"type": "string", "description": "Si importas a uno existente."},
                     "proyecto": {"type": "string"},
-                    "confirmado": {"type": "boolean", "description": "false = preview; true = crear."},
+                    "confirmado": {
+                        "type": "boolean",
+                        "description": (
+                            "Normalmente NO lo necesitas: si el plan está completo "
+                            "se crea directo. true SOLO fuerza crear pese a que "
+                            "falten requeridos (si el usuario insiste igual)."
+                        ),
+                    },
                     "estructura": {
                         "type": "object",
                         "description": "El plan parseado por ti.",
@@ -4671,11 +4682,12 @@ async def _importar_plan_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
         "nodos_creados": res["nodos_creados"],
         "resumen": importar_plan.resumen_importacion(plan),
         "nota": (
-            "Creado DIRECTO. Muéstrale CÓMO QUEDÓ (usa `resumen`: perfil + árbol) "
-            "y ofrécele editar o deshacer fácil (editar nodos/perfil, o "
-            "eliminar_proyecto con confirmado=true para deshacer). Las tareas "
-            "viven en el ÁRBOL, no en la lista de Tareas. Si "
-            "`proyecto_estado`='aparcado' es porque ya hay 3 activos; dilo."
+            "Creado DIRECTO (crear-luego-refinar). Muéstrale CÓMO QUEDÓ en CORTO "
+            "(usa `resumen`: objetivo/meta + árbol) y dile que puede corregir por "
+            "chat («cambia la meta a X», «el bloque 1 va así») o deshacer "
+            "(eliminar_proyecto con confirmado=true). Las tareas viven en el "
+            "ÁRBOL, no en la lista de Tareas. Si `proyecto_estado`='aparcado' es "
+            "porque ya hay 3 activos; dilo."
         ),
     })
 

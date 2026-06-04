@@ -45,6 +45,17 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Importar plan crear-luego-refinar + mejora continua más afinada. Si pegas un
+  plan limpio, lo creo de una y te muestro un resumen corto para que lo corrijas
+  por chat («cambia la meta a X», «el bloque 1 va así») o lo deshagas; ya no hay
+  preview→confirmar. Si algo no mapea o falta, me paro y te pregunto antes de
+  crear (como con Peyo). Y cuando me cuentas un avance («ya subí el primer video»,
+  «terminé el nodo Y», «me trabé en Z»), actualizo el estado vivo al toque
+  (marco hecho, recalculo %, refino el siguiente trozo, anoto blocker/perfil) y
+  te confirmo en corto. Si no tengo claro a qué proyecto o nodo te refieres, te
+  hago UNA pregunta antes de tocar nada (no adivino). Reportar un avance no me
+  hace soltarte una pila de tareas: respeto tu ritmo. El juicio corre en el
+  modelo fuerte.
 - Motor de seguimiento más fino: ahora ME ADAPTO a tu ritmo real. Si vienes
   cerrando poco o arrastras pendientes, REDUZCO el set del día en vez de apilarte
   más (urgencia que activa, no que estresa). El check-in semanal pasó a ser un

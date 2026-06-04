@@ -136,8 +136,22 @@ def test_comentario_de_progreso_va_al_fuerte():
         "me trabé en la pasarela de pago",
         "se me ocurrió una idea para el proyecto",
         "cambié de idea con el enfoque",
+        # Reportes de "entregué algo" (mejora continua conversacional):
+        "ya subí el primer video",
+        "terminé el nodo 3 del plan",
+        "publiqué el short en tiktok",
+        "grabé el episodio de hoy",
     ]:
-        assert _elegir(m).modelo == FUERTE, m
+        d = _elegir(m)
+        assert d.modelo == FUERTE, m
+        assert d.motivo == "intake_plan", m
+
+
+def test_consulta_no_se_confunde_con_progreso():
+    # Pedir ver material NO es un reporte de avance: no debe rutearse como
+    # "comentario de progreso" (que llevaría a tocar el plan).
+    d = _elegir("muéstrame el bloque 3 de guitarra")
+    assert d.motivo != "intake_plan"
 
 
 def test_intake_y_plan_van_al_fuerte():
