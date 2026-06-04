@@ -70,6 +70,7 @@ from . import (
     creacion_proyecto,
     evolucion_proyecto,
     finanzas,
+    horario,
     importar_plan,
     intake_analitico,
     memoria,
@@ -2122,6 +2123,95 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "hora_propuesta": {"type": "integer"},
                     "hora_nudge_dormir": {"type": "integer"},
                     "activo": {"type": "boolean"},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ── Capa de horario: plan del día colocado en las ventanas libres ───
+    {
+        "type": "function",
+        "function": {
+            "name": "plan_de_hoy",
+            "description": (
+                "Devuelve el PLAN DEL DÍA como data estructurada: coloca el set "
+                "priorizado del día + práctica de skills + tareas puntuales en las "
+                "VENTANAS libres reales, alrededor de tus compromisos fijos (clases "
+                "de uni, gym, anclas). Lo más importante va en el bloque pico de la "
+                "mañana; skills/tareas en ventanas ligeras; con buffers; nada "
+                "pasado tu hora de dormir. Úsala para «muéstrame el plan de hoy», "
+                "«¿cómo se ve mi día?», o en el briefing de la mañana. Muestra "
+                "`plan_texto` y, si hay `fuera`, di honesto qué no entró."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "desde_ahora": {
+                        "type": "boolean",
+                        "description": "true = solo el resto del día desde la hora actual.",
+                    },
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "replanificar_dia",
+            "description": (
+                "Recalcula el RESTO del día desde la hora actual (cuando se saltó "
+                "o se pasó de un bloque, o se marcó algo hecho): corre/suelta por "
+                "prioridad lo que queda pendiente y respeta tus compromisos fijos. "
+                "Para «replanifica», «se me corrió el día», «reordena lo que queda»."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configurar_horario",
+            "description": (
+                "Ajusta las ANCLAS y límites del horario: `hora_despertar`, "
+                "`hora_dormir` (no se agenda después), `pico_inicio`/`pico_fin` "
+                "(bloque de trabajo profundo), `buffer_min`, duraciones "
+                "(`dur_trabajo_min`/`dur_skill_min`/`dur_tarea_min`), y `anclas` "
+                "(lista de {titulo, inicio 'HH:MM', fin 'HH:MM', dias [1..7 ISO]}). "
+                "Para «despierto a las 6», «la calistenia es 7 a 7:45», «bloques de "
+                "trabajo de 1 hora»."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hora_despertar": {"type": "integer"},
+                    "hora_dormir": {"type": "integer"},
+                    "pico_inicio": {"type": "integer"},
+                    "pico_fin": {"type": "integer"},
+                    "buffer_min": {"type": "integer"},
+                    "dur_trabajo_min": {"type": "integer"},
+                    "dur_skill_min": {"type": "integer"},
+                    "dur_tarea_min": {"type": "integer"},
+                    "anclas": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "titulo": {"type": "string"},
+                                "inicio": {"type": "string"},
+                                "fin": {"type": "string"},
+                                "dias": {"type": "array", "items": {"type": "integer"}},
+                            },
+                            "required": ["titulo", "inicio", "fin"],
+                        },
+                    },
                 },
                 "required": [],
                 "additionalProperties": False,
@@ -4958,6 +5048,83 @@ async def _ver_set_dia(db: Postgrest, args: dict) -> dict[str, Any]:
     return _ok({"set": _formatear_set(items), "items": items})
 
 
+# ── Horario del día: coloca el set en las ventanas libres (capa de horario) ──
+
+def _formatear_plan(data: dict) -> str:
+    if not data.get("bloques"):
+        return "Hoy no hay bloques para agendar (¿sin ventanas libres o sin set?)."
+    etq = {"clase": "📚", "evento": "📌", "ancla": "⚓", "trabajo": "🛠️", "skill": "🎯", "tarea": "✅"}
+    lineas = []
+    for b in data["bloques"]:
+        marca = etq.get(b.get("tipo"), "•")
+        tent = " (tentativo)" if b.get("tentativo") else ""
+        ctx = ""
+        if b.get("proyecto"):
+            ctx = f"  · {b['proyecto']}"
+        elif b.get("skill"):
+            ctx = f"  · {b['skill']}"
+        lineas.append(f"- {b['inicio']}–{b['fin']}  {marca} {b['titulo']}{ctx}{tent}")
+    return "\n".join(lineas)
+
+
+async def _plan_de_hoy(db: Postgrest, args: dict) -> dict[str, Any]:
+    desde_ahora = bool(args.get("desde_ahora"))
+    data = await horario.plan_de_hoy_data(db, desde_ahora=desde_ahora)
+    return _ok({
+        **data,
+        "plan_texto": _formatear_plan(data),
+        "nota": (
+            "Plan del día (DATA estructurada para la vista «Hoy» y el calendario). "
+            "Los bloques `tentativo=true` son sugerencia AJUSTABLE (trabajo/skill/"
+            "tarea colocados); los fijos (clase/evento/ancla) no se mueven. El más "
+            "importante va en el pico de la mañana; skills/tareas en ventanas más "
+            "ligeras. `fuera` = lo que NO entró hoy (capacidad honesta: se recortó "
+            "por prioridad, no se amontonó) — dilo claro y ofrece moverlo a mañana o "
+            "achicar algo. No hay nada agendado pasado tu hora de dormir. Muéstralo "
+            "con `plan_texto`."
+        ),
+    })
+
+
+async def _replanificar_dia(db: Postgrest, args: dict) -> dict[str, Any]:
+    data = await horario.plan_de_hoy_data(db, desde_ahora=True)
+    return _ok({
+        **data,
+        "plan_texto": _formatear_plan(data),
+        "nota": (
+            "REPLAN desde la hora actual: recalculé el resto del día con lo que "
+            "queda pendiente (corre/suelta por prioridad). Lo ya hecho no vuelve a "
+            "aparecer. `fuera` = lo que ya no entra hoy; ofrécelo para mañana sin "
+            "culpa. Muéstralo con `plan_texto`."
+        ),
+    })
+
+
+async def _configurar_horario(db: Postgrest, args: dict) -> dict[str, Any]:
+    campos: dict[str, Any] = {}
+    for k in ("hora_despertar", "hora_dormir", "pico_inicio", "pico_fin",
+              "buffer_min", "dur_trabajo_min", "dur_skill_min", "dur_tarea_min"):
+        if args.get(k) is not None:
+            try:
+                campos[k] = int(args[k])
+            except (ValueError, TypeError):
+                return _error("validacion", f"`{k}` debe ser un número.")
+    if args.get("anclas") is not None:
+        anclas = args["anclas"]
+        if not isinstance(anclas, list):
+            return _error("validacion", "`anclas` debe ser una lista de {titulo, inicio, fin, dias}.")
+        campos["anclas"] = anclas
+    if not campos:
+        return _error("validacion", "No me pasaste qué cambiar del horario.")
+    filas = await db.list("config_horario", limit=1)
+    if filas:
+        await db.update("config_horario", filas[0]["id"], campos)
+    else:
+        await db.insert("config_horario", campos)
+    return _ok({"actualizado": sorted(campos.keys()),
+                "nota": "Listo, ajusté el horario. Vale para el próximo plan del día."})
+
+
 async def _aceptar_set_dia(db: Postgrest, args: dict) -> dict[str, Any]:
     ids = args.get("item_ids")
     item_ids = [str(x) for x in ids] if isinstance(ids, list) and ids else None
@@ -5333,6 +5500,10 @@ _HANDLERS = {
     "aceptar_set_dia": _aceptar_set_dia,
     "saltar_item_set": _saltar_item_set,
     "configurar_planificacion": _configurar_planificacion,
+    # Capa de horario: plan del día en ventanas, replan, config de anclas
+    "plan_de_hoy": _plan_de_hoy,
+    "replanificar_dia": _replanificar_dia,
+    "configurar_horario": _configurar_horario,
     # Automatizaciones (proactividad)
     "crear_automatizacion": _crear_automatizacion,
     "listar_automatizaciones": _listar_automatizaciones,
@@ -5432,6 +5603,10 @@ TABLAS_AFECTADAS = {
     "aceptar_set_dia": ["tareas"],
     "saltar_item_set": [],
     "configurar_planificacion": [],
+    # Horario: plan_de_hoy/replan son solo lectura (se calculan al vuelo)
+    "plan_de_hoy": [],
+    "replanificar_dia": [],
+    "configurar_horario": [],
     # Automatizaciones (tabla propia; la app no tiene pantalla en v1)
     "crear_automatizacion": [],
     "listar_automatizaciones": [],

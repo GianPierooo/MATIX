@@ -45,6 +45,17 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Plan del día con horario real (capa de horario). Ahora armo tu día colocando el
+  set priorizado en las ventanas libres reales, alrededor de tus compromisos
+  fijos: leo las clases de uni (de su horario), el gym y demás recurrentes (de
+  tus eventos) y tus anclas editables (despertar, calistenia, dormir). Lo más
+  importante va en el bloque pico de la mañana; las skills y tareas chicas en
+  ventanas más ligeras; con colchones entre bloques. Casi todo lleva hora pero es
+  tentativo y ajustable, y nunca agendo nada pasado tu hora de dormir. Si no
+  entra todo, recorto por prioridad y te digo honesto qué quedó fuera (no
+  amontono), respetando tu ritmo. Pídeme «muéstrame el plan de hoy» o
+  «replanifica» cuando se te corra el día. Por ahora se ve por chat; queda listo
+  como data para la vista «Hoy» y el calendario.
 - Intake como analista de verdad (antes de planear). Formalicé el esquema de
   parámetros por tipo (sumé el tipo «contenido» para proyectos de creador/canal,
   además de negocio, construir/software, skill y físico) y, lo importante, ahora
