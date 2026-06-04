@@ -75,9 +75,11 @@ def desglose_por_fase(nodos: list[dict[str, Any]]) -> list[dict[str, Any]]:
     salida: list[dict[str, Any]] = []
     for r in hijos_de.get(None, []):
         salida.append({
+            "id": r.get("id"),
             "fase": r.get("titulo", ""),
             "porcentaje": round(_completitud(r, hijos_de) * 100),
             "granularidad": r.get("granularidad"),
             "estado": r.get("estado"),
+            "tiene_hijos": bool(hijos_de.get(r.get("id"))),
         })
     return salida

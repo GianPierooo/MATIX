@@ -69,11 +69,14 @@ _INTAKE_PLAN = re.compile(
     r"\b("
     r"estructura|estructurame|estructuralo|estructurarlo|"
     r"entrevistame|entrevista|intake|"
-    r"planifica|planificame|planifiquemos|"
+    r"planifica|planificame|planifiquemos|replanifica|replanificame|"
+    r"reajusta|reajustame|reescopea|"
     r"crea(me)? un proyecto|nuevo proyecto"
     r")\b"
     r"|arma(me)? el plan|armemos el plan|plan en capas|plan del proyecto"
     r"|entender el proyecto|a fondo el proyecto"
+    r"|revisa(me)? (el|mi) proyecto|revision del proyecto|como va(mos)? (el|con el) proyecto"
+    r"|que sigue en el proyecto|mejora(r)? el plan"
 )
 
 # Fraseo de recordatorio / agenda: «recuérdame llamar al banco» es un

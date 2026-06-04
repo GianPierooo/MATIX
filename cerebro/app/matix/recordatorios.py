@@ -641,6 +641,16 @@ def iniciar(db: Postgrest) -> None:
             await planificador_diario.revisar_dormir(db)
         except Exception:  # noqa: BLE001
             logger.exception("scheduler: el tick del planificador falló")
+        # Motor de evolución (seguimiento): check-in semanal, celebración de
+        # hitos y aviso de estancamiento. Cada uno best-effort.
+        try:
+            from . import evolucion_proyecto
+
+            await evolucion_proyecto.revisar_checkin(db)
+            await evolucion_proyecto.revisar_hitos(db)
+            await evolucion_proyecto.revisar_estancamiento(db)
+        except Exception:  # noqa: BLE001
+            logger.exception("scheduler: el tick de evolución falló")
 
     sch = AsyncIOScheduler(timezone=LIMA)
     sch.add_job(

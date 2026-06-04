@@ -68,6 +68,7 @@ from . import (
     avance as avance_mod,
     busqueda_web,
     creacion_proyecto,
+    evolucion_proyecto,
     finanzas,
     intake_analitico,
     memoria,
@@ -1901,6 +1902,31 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "GATE de completitud: dice si ya se puede armar el plan (meta "
                 "clara, medible y con plazo + todos los parámetros requeridos del "
                 "tipo) o qué falta. Consúltalo antes de generar el árbol/plan."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": {"type": "string"},
+                    "proyecto": {"type": "string"},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "revisar_proyecto",
+            "description": (
+                "Revisión HOLÍSTICA de un proyecto para mejorarlo/generar tareas "
+                "SIN aislarse: te da todo el contexto (plan/árbol, %, meta y "
+                "criterios, lo ya hecho, la próxima fase a elaborar, el ritmo y si "
+                "está estancado). Úsala antes de agregar o refinar tareas, en el "
+                "check-in semanal, o cuando el usuario pregunte cómo va y qué "
+                "sigue. Con eso: no dupliques lo hecho, respeta el orden, elabora "
+                "solo la fase que toca, adapta al ritmo (sin castigar) y, si está "
+                "estancado, pregunta si sigue/reajusta/parquea."
             ),
             "parameters": {
                 "type": "object",
@@ -4550,6 +4576,69 @@ async def _puede_planear_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
     return _ok({"tipo": tipo, **intake_analitico.puede_planear(tipo, capturados)})
 
 
+_HORIZONTE_DIAS = {"año": 365, "anio": 365, "ano": 365, "mes": 30, "semana": 7, "dia": 1}
+
+
+def _dias_horizonte(texto: str) -> int | None:
+    """Estima días desde un horizonte en texto («2 años», «6 meses»). None si no
+    se puede. Best-effort para el ritmo."""
+    import re
+    t = (texto or "").lower()
+    m = re.search(r"(\d+)\s*(an|añ|mes|seman|dia|día)", t)
+    if not m:
+        return None
+    n = int(m.group(1))
+    raiz = m.group(2)
+    if raiz.startswith(("an", "añ")):
+        return n * 365
+    if raiz.startswith("mes"):
+        return n * 30
+    if raiz.startswith("seman"):
+        return n * 7
+    return n
+
+
+async def _revisar_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    """Revisión HOLÍSTICA: todo el proyecto en una foto para revisar/generar
+    tareas sin aislarse — coherente con lo hecho, el plan, la meta y el ritmo."""
+    r = await _resolver_proyecto_arg(db, args)
+    if not r["ok"]:
+        return r["error"]
+    proyecto = r["proyecto"]
+    ctx = await evolucion_proyecto.contexto_holistico(db, proyecto)
+
+    # Ritmo (best-effort): avance real vs esperado por el tiempo transcurrido.
+    ritmo = None
+    creado = proyecto.get("creado_en")
+    horizonte = (proyecto.get("horizonte") or (proyecto.get("parametros") or {}).get("horizonte_anios") or "")
+    dias_tot = _dias_horizonte(horizonte)
+    if ctx.get("porcentaje") is not None and creado and dias_tot:
+        try:
+            from datetime import datetime, timezone
+            c = datetime.fromisoformat(str(creado).replace("Z", "+00:00"))
+            dias_tr = (datetime.now(timezone.utc) - c).days
+            ritmo = evolucion_proyecto.evaluar_ritmo(ctx["porcentaje"], dias_tr, dias_tot)
+        except Exception:  # noqa: BLE001
+            ritmo = None
+
+    return _ok({
+        **ctx,
+        "ritmo": ritmo,
+        "nota": (
+            "REVISIÓN HOLÍSTICA: usa TODO esto (plan, %, meta/criterios, lo ya "
+            "hecho en `nodos_existentes`) para proponer próximos pasos COHERENTES. "
+            "NO dupliques lo que ya existe, no contradigas el plan, respeta orden/"
+            "dependencias. Si hay `fase_a_elaborar`, elabórala con refinar_fase "
+            "(solo esa; no adelantes fases lejanas). Adapta al ritmo: si "
+            "`ritmo`='adelantado' ofrece un estiramiento opcional; si 'atrasado' "
+            "RE-PRIORIZA o re-scopea (NO apiles tareas). Si "
+            "`estancamiento.estancado`, pregunta honesto: ¿sigue activo, lo "
+            "reajustamos o lo parqueas? Propón y deja que el usuario apruebe/edite; "
+            "no inundes su lista de Tareas en silencio."
+        ),
+    })
+
+
 async def _avance_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
     """% de avance + lectura cualitativa HONESTA contra el objetivo."""
     r = await _resolver_proyecto_arg(db, args)
@@ -4994,6 +5083,8 @@ _HANDLERS = {
     "intake_proyecto": _intake_proyecto,
     "guardar_parametro_proyecto": _guardar_parametro_proyecto,
     "puede_planear_proyecto": _puede_planear_proyecto,
+    # Evolución / seguimiento: revisión holística del proyecto
+    "revisar_proyecto": _revisar_proyecto,
     # Planificador diario: set del día + nudges (Paso 3)
     "proponer_set_dia": _proponer_set_dia,
     "ver_set_dia": _ver_set_dia,
@@ -5090,6 +5181,7 @@ TABLAS_AFECTADAS = {
     "intake_proyecto": [],
     "guardar_parametro_proyecto": ["proyectos"],
     "puede_planear_proyecto": [],
+    "revisar_proyecto": [],
     # Planificador diario: aceptar promueve a Tareas reales (refresca la lista)
     "proponer_set_dia": [],
     "ver_set_dia": [],

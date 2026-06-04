@@ -45,6 +45,13 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Motor de evolución de proyectos: con el tiempo voy mejorando cada proyecto
+  con el todo en mente (revisión holística: no duplico lo hecho ni contradigo el
+  plan), elaboro la próxima fase al acercarme, hago check-in semanal, detecto
+  estancamiento (¿sigue/reajustamos/parqueamos?) y adapto al ritmo sin
+  castigar. Notificaciones nuevas: recordatorio de la mañana con tu porqué,
+  check-in semanal, celebración de hitos y aviso de estancamiento (respetando
+  silencio 22-08 y la cadencia anti-spam).
 - Intake analítico por parámetros: al crear/entender un proyecto detecto su
   tipo (negocio, skill, construir, físico…) y lleno un esquema de parámetros
   con preguntas afiladas, señalando huecos e incoherencias (analizador, no

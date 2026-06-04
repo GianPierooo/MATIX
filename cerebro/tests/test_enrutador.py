@@ -113,6 +113,16 @@ def test_accion_de_dispositivo_no_pisa_lo_pesado():
     assert d.modelo == FUERTE and d.motivo == "modo_pesado"
 
 
+def test_revision_y_replan_van_al_fuerte():
+    for m in [
+        "revisa mi proyecto y dime qué sigue",
+        "replanifica el proyecto",
+        "reajusta el plan del proyecto",
+    ]:
+        d = _elegir(m)
+        assert d.modelo == FUERTE and d.motivo == "intake_plan", m
+
+
 def test_intake_y_plan_van_al_fuerte():
     # El intake analítico y la generación del plan son tareas duras → fuerte.
     for m in [

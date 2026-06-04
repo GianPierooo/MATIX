@@ -275,6 +275,21 @@ async def _config(db: Postgrest) -> dict[str, Any]:
     return filas[0] if filas else {}
 
 
+async def _porque_destacado(db: Postgrest) -> str | None:
+    """El porqué/motivación del proyecto activo de mayor prioridad que lo tenga
+    (perfil/intake), para tejerlo en el recordatorio de la mañana."""
+    try:
+        activos = await db.list("proyectos", filters={"estado": "activo"})
+    except Exception:  # noqa: BLE001
+        return None
+    activos.sort(key=lambda p: p.get("prioridad") or 99)
+    for p in activos:
+        porque = ((p.get("parametros") or {}).get("porque") or "").strip()
+        if porque:
+            return porque if porque.endswith((".", "!", "?")) else porque + "."
+    return None
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # Ticks del scheduler (best-effort; nunca lanzan)
 # ════════════════════════════════════════════════════════════════════════════
@@ -337,6 +352,11 @@ async def revisar_propuesta(db: Postgrest, *, ahora: datetime | None = None) -> 
     if not tokens:
         return {"propuesta": 0, "sin_tokens": True}
     cuerpo = f"Tu set de hoy: {len(pendientes)} cosa(s) para mover tus proyectos. Toca para revisarlo y aceptar."
+    # Reconecta con el PORQUÉ: si un proyecto activo tiene su motivación en el
+    # perfil, la teje en el recordatorio de la mañana (empuja, no castiga).
+    porque = await _porque_destacado(db)
+    if porque:
+        cuerpo = f"Recuerda por qué lo haces: {porque} Tu set de hoy son {len(pendientes)} cosa(s). Toca para verlo."
     try:
         if await _push(db, tokens, titulo="🌅 Tu set de hoy", cuerpo=cuerpo, payload="set_dia"):
             await db.insert("planificacion_enviados", {"tipo": "propuesta", "fecha": local.date().isoformat()})
