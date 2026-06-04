@@ -45,6 +45,16 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Motor de seguimiento más fino: ahora ME ADAPTO a tu ritmo real. Si vienes
+  cerrando poco o arrastras pendientes, REDUZCO el set del día en vez de apilarte
+  más (urgencia que activa, no que estresa). El check-in semanal pasó a ser un
+  resumen HONESTO por proyecto (cuánto va, qué está trabado, qué sigue) en una
+  sola notificación. Celebro los hitos de avance al cruzar 25/50/75/100% (una vez
+  cada uno, sin spam). Y cuando algo se estanca, te propongo achicar el siguiente
+  paso a un trozo de 10-15 min (o parquearlo sin culpa): agarro el estancamiento
+  temprano, no lo dejo morir en silencio. El juicio del review holístico corre en
+  el modelo fuerte; las skills siguen con toque ligero. Todo respeta tus horas de
+  silencio (22:00–08:00, hora de Lima).
 - Skills / hábitos aparte de los proyectos: ahora distingo una SKILL (inglés,
   guitarra, trading, portugués…) de un proyecto de trabajo. Las skills NO
   consumen el tope de 3 activos (tienen su propio tope BLANDO de 2: te aviso, no

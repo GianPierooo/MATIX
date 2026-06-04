@@ -650,6 +650,7 @@ def iniciar(db: Postgrest) -> None:
 
             await evolucion_proyecto.revisar_checkin(db)
             await evolucion_proyecto.revisar_hitos(db)
+            await evolucion_proyecto.revisar_hitos_pct(db)
             await evolucion_proyecto.revisar_estancamiento(db)
         except Exception:  # noqa: BLE001
             logger.exception("scheduler: el tick de evolución falló")

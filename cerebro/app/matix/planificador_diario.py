@@ -115,6 +115,42 @@ def tope_escalaciones_dia(intensidad: str) -> int:
     return {"alta": 8, "media": 5, "baja": 3}.get(intensidad, 8)
 
 
+# ── Adaptación al ritmo: reducir el set cuando vienes atrasado ────────────────
+# ANTI-PATRÓN explícito: NO apilar. Si el ritmo real de cierre es bajo o vienes
+# arrastrando pendientes, se REDUCE el volumen propuesto, nunca se suma más. La
+# urgencia activa, no estresa.
+
+def tasa_cierre(hechos: int, comprometidos: int) -> float | None:
+    """Fracción de lo comprometido que de verdad se cerró (0..1). None si no hay
+    nada comprometido todavía (sin datos no se castiga). PURO."""
+    if comprometidos <= 0:
+        return None
+    return hechos / comprometidos
+
+
+def ajustar_tamano_set(
+    base: int, tasa: float | None, carga_arrastrada: int
+) -> dict[str, Any]:
+    """Adapta el tamaño del set al ritmo REAL (anti-patrón: no apilar).
+
+    - Si vienes con varias arrastradas (carga ≥ base): recorta fuerte; lo no
+      cerrado ya ocupa el día.
+    - Si cierras poco (tasa < 40%): baja el volumen (urgencia activa, no estrés).
+    - Si el ritmo está algo flojo (tasa < 70%): reduce un poco.
+    - Si no hay datos o vas bien: mantiene la base. NUNCA sube por encima de ella.
+    PURO."""
+    if carga_arrastrada >= base and base > 1:
+        return {"tamano": max(1, base - 2), "base": base,
+                "motivo": "vienes con varias arrastradas; achico el set para no apilar."}
+    if tasa is not None and tasa < 0.4:
+        return {"tamano": max(1, base - 2), "base": base,
+                "motivo": "vienes cerrando poco; bajo el volumen (urgencia que activa, no que estresa)."}
+    if tasa is not None and tasa < 0.7:
+        return {"tamano": max(1, base - 1), "base": base,
+                "motivo": "ritmo algo bajo; reduzco un poco el set."}
+    return {"tamano": base, "base": base, "motivo": "ritmo normal; mantengo el set."}
+
+
 _ESCALACION = [
     "Te queda {n} del set de hoy. Un empujón y lo cierras. 💪",
     "Vas bien: cierra {n} que falta(n) del set. Tú puedes.",
@@ -233,7 +269,14 @@ async def construir_set(db: Postgrest, *, ahora: datetime | None = None) -> list
     )
 
     cfg = await _config(db)
-    tamano = int(cfg.get("tamano_set", 3))
+    base = int(cfg.get("tamano_set", 3))
+    # ANTI-PATRÓN (no apilar): si el ritmo real de cierre es bajo o vienes
+    # arrastrando pendientes de ayer, REDUCE el volumen — nunca sumes más.
+    tasa = await _tasa_cierre_reciente(db, hoy=hoy)
+    ajuste = ajustar_tamano_set(base, tasa, len(rollover))
+    tamano = ajuste["tamano"]
+    if tamano < base:
+        logger.info("planificador: set reducido %d→%d (%s)", base, tamano, ajuste["motivo"])
 
     items: list[dict[str, Any]] = []
     orden = 0
@@ -311,6 +354,26 @@ async def marcar_item_por_tarea(db: Postgrest, *, tarea_id: str, estado: str) ->
 async def _config(db: Postgrest) -> dict[str, Any]:
     filas = await db.list("config_planificacion", limit=1)
     return filas[0] if filas else {}
+
+
+async def _tasa_cierre_reciente(
+    db: Postgrest, *, hoy: date, dias: int = 7
+) -> float | None:
+    """Ritmo real de cierre en los últimos `dias` (sin contar hoy, que aún no
+    cierra): hechos / comprometidos del set. None si no hay historial."""
+    desde = (hoy - timedelta(days=dias)).isoformat()
+    try:
+        filas = await db.list(
+            "set_diario_items",
+            raw_filters={"fecha": f"gte.{desde}", "estado": f"in.(aceptado,hecho)"},
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    comprometidos = [i for i in filas if i.get("fecha") and i["fecha"] < hoy.isoformat()]
+    if not comprometidos:
+        return None
+    hechos = sum(1 for i in comprometidos if i.get("estado") == "hecho")
+    return tasa_cierre(hechos, len(comprometidos))
 
 
 async def _porque_destacado(db: Postgrest) -> str | None:

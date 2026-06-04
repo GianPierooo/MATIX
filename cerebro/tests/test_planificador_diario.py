@@ -108,6 +108,26 @@ def test_celebra_skill_es_positivo():
     assert "suma" in c.lower() or "cuenta" in c.lower()
 
 
+def test_tasa_cierre():
+    assert pl.tasa_cierre(0, 0) is None  # sin datos no castiga
+    assert pl.tasa_cierre(2, 4) == 0.5
+    assert pl.tasa_cierre(3, 3) == 1.0
+
+
+def test_ajustar_tamano_set_reduce_cuando_va_atrasado_y_nunca_apila():
+    # Sin datos o ritmo bueno → mantiene la base (nunca sube por encima).
+    assert pl.ajustar_tamano_set(3, None, 0)["tamano"] == 3
+    assert pl.ajustar_tamano_set(3, 1.0, 0)["tamano"] == 3
+    # Cierra poco (tasa baja) → recorta fuerte (anti-patrón: no apilar).
+    assert pl.ajustar_tamano_set(3, 0.3, 0)["tamano"] == 1
+    # Ritmo algo flojo → recorta un poco.
+    assert pl.ajustar_tamano_set(3, 0.6, 0)["tamano"] == 2
+    # Carga arrastrada alta (>= base) → recorta aunque la tasa sea buena.
+    assert pl.ajustar_tamano_set(3, 1.0, 3)["tamano"] == 1
+    # Nunca baja de 1.
+    assert pl.ajustar_tamano_set(2, 0.1, 0)["tamano"] == 1
+
+
 def test_elegir_skill_del_dia_rota_por_dia():
     skills = [
         {"id": "a", "nombre": "Inglés", "creado_en": "2026-01-01"},

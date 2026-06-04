@@ -4835,8 +4835,10 @@ async def _revisar_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
             "`ritmo`='adelantado' ofrece un estiramiento opcional; si 'atrasado' "
             "RE-PRIORIZA o re-scopea (NO apiles tareas). Si "
             "`estancamiento.estancado`, pregunta honesto: ¿sigue activo, lo "
-            "reajustamos o lo parqueas? Propón y deja que el usuario apruebe/edite; "
-            "no inundes su lista de Tareas en silencio."
+            "reajustamos o lo parqueas? — y si hay `reescopeo_sugerido`, "
+            "ofrécelo (achicar el siguiente paso a un trozo mínimo: anti-abandono, "
+            "no dejar morir el proyecto en silencio). Propón y deja que el usuario "
+            "apruebe/edite; no inundes su lista de Tareas en silencio."
         ),
     })
 

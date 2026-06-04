@@ -12,6 +12,20 @@ NO toca el cálculo de horario/ventanas (eso es otro paso). Reusa el árbol
 (Paso 2), el % de avance, el perfil (porqué/criterios), el scheduler y FCM.
 
 La parte PURA está separada y se testea sin BD.
+
+ANTI-PATRONES que este motor evita EXPLÍCITAMENTE (y dónde):
+- No duplicar tareas: `filtrar_duplicados` + `contexto_holistico` (nodos_existentes)
+  → el review nunca propone algo ya hecho o ya en la lista.
+- No apilar cuando va atrasado: `planificador_diario.ajustar_tamano_set` REDUCE
+  el set según el ritmo real; el review re-prioriza/re-escopa, no suma.
+- No bombardear (escalar, no fastidiar): cadencia + anti-fatiga del planificador;
+  hitos y check-in con dedup (un solo aviso).
+- No fastidiar hobbies: las skills se excluyen del set comprometido y del aviso
+  de estancamiento (`creacion_proyecto.solo_proyectos`); su dosis es suave.
+- Respetar el silencio 22:00–08:00 (America/Lima): `_en_ventana` /
+  `recordatorios.permitido_ahora` en cada tick que notifica.
+- Anti-abandono: `estancado` + `sugerir_reescopeo` agarran el estancamiento
+  temprano y proponen achicar el paso (o parquear sin culpa), no dejar morir.
 """
 from __future__ import annotations
 
@@ -23,7 +37,7 @@ from zoneinfo import ZoneInfo
 from ..db import Postgrest
 from . import avance as avance_mod
 from . import creacion_proyecto
-from .planificador_diario import LIMA, _push, _tokens
+from .planificador_diario import LIMA, _push, _tokens, candidatos_proyecto
 
 logger = logging.getLogger("matix.evolucion")
 
@@ -122,7 +136,26 @@ def texto_porque_morning(nombre: str, porque: str) -> tuple[str, str]:
     )
 
 
-def texto_checkin() -> tuple[str, str]:
+def linea_checkin_proyecto(
+    *, nombre: str, pct: int | None, estancado_dias: int, siguiente: str | None
+) -> str:
+    """Una línea HONESTA por proyecto para el check-in semanal: cuánto va (%),
+    si está trabado, y qué sigue. Sin maquillar. PURO."""
+    estado = f"{pct}%" if pct is not None else "sin plan"
+    if estancado_dias and estancado_dias >= DIAS_ESTANCAMIENTO:
+        estado += f", trabado {estancado_dias}d"
+    sig = f" → sigue: {siguiente}" if siguiente else ""
+    return f"{nombre} ({estado}){sig}"
+
+
+def texto_checkin(resumenes: list[str] | None = None) -> tuple[str, str]:
+    """Check-in semanal. Si se pasan resúmenes por proyecto, el cuerpo es la foto
+    honesta de la semana; si no, el genérico. PURO."""
+    if resumenes:
+        cuerpo = " · ".join(resumenes[:3])
+        if len(resumenes) > 3:
+            cuerpo += f" · +{len(resumenes) - 3} más"
+        return ("📈 Check-in semanal", f"{cuerpo}. Toca para revisarlo conmigo.")
     return (
         "📈 Check-in semanal",
         "Revisemos cómo van tus proyectos: qué avanzó, qué se estancó y qué "
@@ -134,6 +167,36 @@ def texto_hito(nombre: str, fase: str) -> tuple[str, str]:
     return (
         "🎉 ¡Hito cumplido!",
         f"Cerraste «{fase}» en {nombre}. Bien ahí, en serio. Vamos por lo que sigue.",
+    )
+
+
+# Umbrales de % que se celebran (refuerzo positivo, sin spam: cada uno UNA vez).
+_UMBRALES_PCT = (25, 50, 75, 100)
+
+
+def umbrales_cruzados(pct: int | None) -> list[int]:
+    """Umbrales de avance (25/50/75/100) ya alcanzados a este %. PURO."""
+    if pct is None:
+        return []
+    return [u for u in _UMBRALES_PCT if pct >= u]
+
+
+def texto_hito_pct(nombre: str, umbral: int) -> tuple[str, str]:
+    """Celebra cruzar un umbral de avance. PURO."""
+    if umbral >= 100:
+        return ("🏁 ¡Lo cerraste!", f"{nombre} al 100%. Lo terminaste, en serio. Disfruta esto.")
+    return ("🎉 Hito de avance", f"{nombre} cruzó el {umbral}%. Vas bien, un paso a la vez suma.")
+
+
+def sugerir_reescopeo(nodo_titulo: str | None) -> str | None:
+    """Re-scope HONESTO ante el estancamiento (guardrail anti-abandono): propone
+    ACHICAR el siguiente paso a un trozo mínimo, en vez de dejar morir el
+    proyecto en silencio. PURO."""
+    if not nodo_titulo:
+        return None
+    return (
+        f"Si «{nodo_titulo}» se siente grande, lo achicamos a un primer paso de "
+        "10-15 min. Mejor un trozo chico hoy que cero. O lo parqueamos sin culpa."
     )
 
 
@@ -170,6 +233,13 @@ async def _ya(db: Postgrest, tipo: str, fecha_iso: str) -> bool:
     return bool(filas)
 
 
+async def _ya_tipo(db: Postgrest, tipo: str) -> bool:
+    """¿Ya se envió alguna vez algo de este `tipo` (cualquier fecha)? Para hitos
+    de % que se celebran una sola vez en la vida del proyecto."""
+    filas = await db.list("planificacion_enviados", filters={"tipo": tipo}, limit=1)
+    return bool(filas)
+
+
 async def revisar_checkin(db: Postgrest, *, ahora: datetime | None = None) -> dict:
     """Check-in semanal (un solo push, no por proyecto, anti-spam): el lunes,
     dentro de ventana, una vez por semana ISO."""
@@ -193,7 +263,23 @@ async def revisar_checkin(db: Postgrest, *, ahora: datetime | None = None) -> di
     tokens = await _tokens(db)
     if not tokens:
         return {"checkin": 0, "sin_tokens": True}
-    titulo, cuerpo = texto_checkin()
+    # Resumen HONESTO por proyecto de trabajo activo: % real, si está trabado y
+    # qué sigue. Una sola notificación semanal (anti-spam); el detalle se
+    # conversa al tocarla (review holístico en el modelo fuerte).
+    activos_trabajo.sort(key=lambda p: p.get("prioridad") or 99)
+    resumenes: list[str] = []
+    for p in activos_trabajo:
+        nodos = await db.list("arbol_nodos", filters={"proyecto_id": p["id"]}, order="orden.asc")
+        pct = avance_mod.porcentaje(nodos)
+        est = estancado(p.get("ultima_actividad_en"), ahora=ahora)
+        cands = candidatos_proyecto(nodos)
+        siguiente = cands[0].get("titulo") if cands else None
+        resumenes.append(linea_checkin_proyecto(
+            nombre=p["nombre"], pct=pct,
+            estancado_dias=est["dias"] if est["estancado"] else 0,
+            siguiente=siguiente,
+        ))
+    titulo, cuerpo = texto_checkin(resumenes)
     try:
         if await _push(db, tokens, titulo=titulo, cuerpo=cuerpo, payload="checkin"):
             await db.insert("planificacion_enviados", {"tipo": "checkin", "fecha": semana})
@@ -232,6 +318,47 @@ async def revisar_hitos(db: Postgrest, *, ahora: datetime | None = None) -> dict
                 except RuntimeError:
                     return {"hitos": enviados, "error": "fcm_no_config"}
     return {"hitos": enviados}
+
+
+async def revisar_hitos_pct(db: Postgrest, *, ahora: datetime | None = None) -> dict:
+    """Celebra cruzar umbrales de avance (25/50/75/100) por proyecto/skill activo.
+    Refuerzo positivo, con dedup (cada umbral UNA vez en la vida del proyecto) y
+    respetando el silencio. INCLUYE skills: celebrar no es insistir."""
+    ahora = ahora or datetime.now(timezone.utc)
+    local = ahora.astimezone(LIMA)
+    cfg = await _cfg_nudges(db)
+    # ANTI-PATRÓN (silencio 22-08) + (no bombardear): solo en ventana y una vez
+    # por umbral.
+    if not _en_ventana(local, cfg):
+        return {"hitos_pct": 0, "fuera_de_ventana": True}
+    activos = await db.list("proyectos", filters={"estado": "activo"})
+    enviados = 0
+    for p in activos:
+        nodos = await db.list("arbol_nodos", filters={"proyecto_id": p["id"]}, order="orden.asc")
+        alcanzados = umbrales_cruzados(avance_mod.porcentaje(nodos))
+        if not alcanzados:
+            continue
+        no_enviados = [u for u in alcanzados if not await _ya_tipo(db, f"hito_pct:{p['id']}:{u}")]
+        if not no_enviados:
+            continue
+        top = max(no_enviados)  # celebra el más alto cruzado, sin ráfaga
+        tokens = await _tokens(db)
+        if not tokens:
+            return {"hitos_pct": enviados, "sin_tokens": True}
+        titulo, cuerpo = texto_hito_pct(p["nombre"], top)
+        try:
+            if await _push(db, tokens, titulo=titulo, cuerpo=cuerpo, payload=f"proyecto:{p['id']}"):
+                # Marca TODOS los umbrales cruzados no enviados (incl. los menores)
+                # para que no disparen después: un solo festejo, no goteo.
+                for u in no_enviados:
+                    await db.insert(
+                        "planificacion_enviados",
+                        {"tipo": f"hito_pct:{p['id']}:{u}", "fecha": local.date().isoformat()},
+                    )
+                enviados += 1
+        except RuntimeError:
+            return {"hitos_pct": enviados, "error": "fcm_no_config"}
+    return {"hitos_pct": enviados}
 
 
 async def revisar_estancamiento(db: Postgrest, *, ahora: datetime | None = None) -> dict:
@@ -283,6 +410,10 @@ async def contexto_holistico(db: Postgrest, proyecto: dict[str, Any]) -> dict[st
     params = proyecto.get("parametros") or {}
     fase = fase_a_elaborar(nodos)
     est = estancado(proyecto.get("ultima_actividad_en"), ahora=ahora)
+    cands = candidatos_proyecto(nodos)
+    siguiente = cands[0].get("titulo") if cands else None
+    # Re-scope honesto SOLO si está estancado (anti-abandono): achicar el paso.
+    reescopeo = sugerir_reescopeo(siguiente) if est["estancado"] else None
     return {
         "proyecto": proyecto.get("nombre"),
         "porcentaje": pct,
@@ -293,7 +424,9 @@ async def contexto_holistico(db: Postgrest, proyecto: dict[str, Any]) -> dict[st
         "plan": avance_mod.desglose_por_fase(nodos),
         "fase_a_elaborar": (fase or {}).get("titulo"),
         "fase_a_elaborar_id": (fase or {}).get("id"),
+        "siguiente_paso": siguiente,
         "estancamiento": est,
+        "reescopeo_sugerido": reescopeo,
         "nodos_existentes": [n.get("titulo", "") for n in nodos],
     }
 

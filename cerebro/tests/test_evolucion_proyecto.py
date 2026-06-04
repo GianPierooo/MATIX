@@ -63,3 +63,41 @@ def test_copys_son_sanos():
     assert "OnExotic" in c and "culpa" in c.lower()
     _, h = ev.texto_hito("Tesis", "Marco teórico")
     assert "Marco teórico" in h
+
+
+def test_linea_checkin_honesta():
+    # % + qué sigue.
+    l = ev.linea_checkin_proyecto(nombre="Matix", pct=60, estancado_dias=0, siguiente="Cerrar X")
+    assert "Matix" in l and "60%" in l and "Cerrar X" in l
+    # Sin plan.
+    assert "sin plan" in ev.linea_checkin_proyecto(nombre="Peyo", pct=None, estancado_dias=0, siguiente=None)
+    # Trabado se dice honesto.
+    assert "trabado 6d" in ev.linea_checkin_proyecto(nombre="Shadow", pct=20, estancado_dias=6, siguiente=None)
+
+
+def test_texto_checkin_resumen_vs_generico():
+    _, generico = ev.texto_checkin()
+    assert "Revisemos" in generico
+    _, resumen = ev.texto_checkin(["Matix (60%)", "Shadow (20%, trabado 6d)"])
+    assert "Matix (60%)" in resumen and "Shadow" in resumen
+
+
+def test_umbrales_cruzados():
+    assert ev.umbrales_cruzados(None) == []
+    assert ev.umbrales_cruzados(0) == []
+    assert ev.umbrales_cruzados(30) == [25]
+    assert ev.umbrales_cruzados(60) == [25, 50]
+    assert ev.umbrales_cruzados(100) == [25, 50, 75, 100]
+
+
+def test_texto_hito_pct():
+    _, c50 = ev.texto_hito_pct("Inglés", 50)
+    assert "50%" in c50
+    t100, c100 = ev.texto_hito_pct("Peyo", 100)
+    assert "100%" in c100 and ("cerr" in c100.lower() or "termin" in c100.lower())
+
+
+def test_sugerir_reescopeo():
+    assert ev.sugerir_reescopeo(None) is None
+    s = ev.sugerir_reescopeo("Montar la pasarela de pago")
+    assert "Montar la pasarela de pago" in s and "10-15" in s
