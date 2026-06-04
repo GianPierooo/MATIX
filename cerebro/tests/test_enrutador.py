@@ -128,6 +128,18 @@ def test_importar_plan_va_al_fuerte():
     assert _elegir("importa este plan").modelo == FUERTE
 
 
+def test_comentario_de_progreso_va_al_fuerte():
+    # Comentarios de avance/cambio/blocker disparan la mejora continua → fuerte.
+    for m in [
+        "ya terminé las fotos del drop",
+        "avancé con el marco teórico",
+        "me trabé en la pasarela de pago",
+        "se me ocurrió una idea para el proyecto",
+        "cambié de idea con el enfoque",
+    ]:
+        assert _elegir(m).modelo == FUERTE, m
+
+
 def test_intake_y_plan_van_al_fuerte():
     # El intake analítico y la generación del plan son tareas duras → fuerte.
     for m in [

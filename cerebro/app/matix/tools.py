@@ -704,6 +704,28 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "eliminar_proyecto",
+            "description": (
+                "BORRA un proyecto y todo lo suyo (árbol, perfil, set) — "
+                "permanente. Úsala para DESHACER una importación recién creada "
+                "(«bórralo», «deshazlo») o cuando el usuario quiera eliminar un "
+                "proyecto. SENSIBLE: di qué vas a borrar y espera su SÍ; recién "
+                "ahí llama con confirmado=true."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": _UUID,
+                    "confirmado": {"type": "boolean"},
+                },
+                "required": ["proyecto_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "buscar_apuntes",
             "description": (
                 "Busca en los apuntes del usuario por SIGNIFICADO "
@@ -3100,6 +3122,20 @@ async def _crear_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
     )
 
 
+async def _eliminar_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
+    """Borra un proyecto y todo lo suyo (árbol, perfil, set) — permanente.
+    Sirve para DESHACER una importación recién creada. Confirmación obligatoria
+    (está en _REQUIERE_CONFIRMACION)."""
+    proyecto_id, err = _validar_uuid(args.get("proyecto_id"), "proyecto_id")
+    if err:
+        return err
+    actual = await db.get("proyectos", proyecto_id)
+    if actual is None:
+        return _error("no_existe", "Ese proyecto ya no está.")
+    await db.delete("proyectos", proyecto_id)
+    return _ok({"id": proyecto_id, "nombre": actual.get("nombre"), "borrado": True})
+
+
 async def _editar_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
     proyecto_id, err = _validar_uuid(args.get("proyecto_id"), "proyecto_id")
     if err:
@@ -4556,24 +4592,25 @@ async def _importar_plan_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
             proyecto = r["proyecto"]
     nombre = (args.get("nombre") or "").strip() or (proyecto or {}).get("nombre") or ""
 
-    if not _confirmado(args):
+    # Crear DIRECTO si el plan está completo (o si el usuario fuerza con
+    # confirmado=true). Si faltan REQUERIDOS, preguntar antes — no inventar.
+    if importar_plan.decidir_importacion(gate, forzar=_confirmado(args)) == "preguntar":
         esquema = intake_analitico.esquema_de(plan["tipo"])
         claves_req = [
             {"clave": p["clave"], "pregunta": p["pregunta"]} for p in esquema["requeridos"]
         ]
         return _ok({
+            "estado": "faltan_requeridos",
             "preview": importar_plan.resumen_importacion(plan),
             "puede_planear": gate,
             "claves_requeridas": claves_req,
             "nota": (
-                "MUÉSTRALE este preview (perfil + árbol + tareas) y pídele "
-                "confirmar o editar — nada en silencio. Si `puede_planear.faltan` "
-                "trae claves, primero MAPEA tus datos del plan a ESAS `clave`s "
-                "exactas (de `claves_requeridas`) y vuelve a llamarme con la "
-                "`estructura.parametros` corregida; solo pregúntale al usuario lo "
-                "que de verdad NO esté en el plan (no inventes). Cuando confirme, "
-                "llámame con confirmado=true y la MISMA estructura "
-                "(re-parsea del plan que está en el historial)."
+                "NO crees todavía: faltan requeridos. Primero MAPEA tus datos del "
+                "plan a las `clave`s exactas de `claves_requeridas` y reintenta "
+                "(estructura.parametros corregida); solo pregúntale al usuario lo "
+                "que de verdad NO esté en el plan (no inventes). Si de verdad no "
+                "se puede completar pero igual quiere crearlo, reintenta con "
+                "confirmado=true."
             ),
         })
 
@@ -4581,15 +4618,18 @@ async def _importar_plan_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
         return _error("validacion", "¿Cómo se llama el proyecto? Dame el nombre para crearlo.")
     res = await importar_plan.aplicar_importacion(db, plan=plan, nombre=nombre, proyecto=proyecto)
     return _ok({
+        "estado": "creado",
+        "proyecto_id": res["proyecto"]["id"],
         "proyecto": res["proyecto"]["nombre"],
-        "estado": res["estado"],
+        "proyecto_estado": res["estado"],
         "nodos_creados": res["nodos_creados"],
-        "puede_planear": gate,
+        "resumen": importar_plan.resumen_importacion(plan),
         "nota": (
-            "Plan importado: perfil + árbol creados (las tareas viven en el árbol, "
-            "NO en tu lista de Tareas). Confírmalo en una línea. Si "
-            "`puede_planear.faltan`, sigue el intake para completarlos. Si el "
-            "estado quedó 'aparcado' es porque ya hay 3 activos; dilo."
+            "Creado DIRECTO. Muéstrale CÓMO QUEDÓ (usa `resumen`: perfil + árbol) "
+            "y ofrécele editar o deshacer fácil (editar nodos/perfil, o "
+            "eliminar_proyecto con confirmado=true para deshacer). Las tareas "
+            "viven en el ÁRBOL, no en la lista de Tareas. Si "
+            "`proyecto_estado`='aparcado' es porque ya hay 3 activos; dilo."
         ),
     })
 
@@ -5142,6 +5182,7 @@ _HANDLERS = {
     "aparcar_proyecto": _aparcar_proyecto,
     "terminar_proyecto": _terminar_proyecto,
     "reactivar_proyecto": _reactivar_proyecto,
+    "eliminar_proyecto": _eliminar_proyecto,
     # Acción siguiente + cierre
     "marcar_accion_siguiente_hecha": _marcar_accion_siguiente_hecha,
     "registrar_cierre": _registrar_cierre,
@@ -5246,6 +5287,7 @@ TABLAS_AFECTADAS = {
     "aparcar_proyecto": ["proyectos"],
     "terminar_proyecto": ["proyectos"],
     "reactivar_proyecto": ["proyectos"],
+    "eliminar_proyecto": ["proyectos"],
     "marcar_accion_siguiente_hecha": ["tareas", "proyectos"],
     "registrar_cierre": ["cierres_dia"],
     # Finanzas
@@ -5334,6 +5376,7 @@ _REQUIERE_CONFIRMACION = {
     "eliminar_apunte",
     "eliminar_movimiento",  # finanzas: borrado PERMANENTE
     "olvidar",              # memoria: borrado PERMANENTE
+    "eliminar_proyecto",    # borra el proyecto + árbol/perfil (deshacer import)
 }
 
 

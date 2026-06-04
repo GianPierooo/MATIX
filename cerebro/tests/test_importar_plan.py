@@ -72,6 +72,20 @@ def test_plan_a_nodos_respeta_elaboracion_progresiva():
     assert "Producción mayor" in (largo["notas"] or "")
 
 
+def test_decidir_importacion_crea_directo_o_pregunta():
+    # Plan completo → crear directo (sin gate de confirmación).
+    completo = ip.huecos_plan(ip.normalizar_plan(_plan_negocio()))
+    assert ip.decidir_importacion(completo) == "crear"
+    # Faltan requeridos → preguntar antes (no inventar).
+    incompleto = ip.huecos_plan(ip.normalizar_plan({
+        "objetivo": "Vender", "tipo": "negocio",
+        "parametros": {"que_vende": "polos"}, "fases": [{"titulo": "Inicio", "nodos": []}],
+    }))
+    assert ip.decidir_importacion(incompleto) == "preguntar"
+    # ...salvo que el usuario fuerce (confirmado=true).
+    assert ip.decidir_importacion(incompleto, forzar=True) == "crear"
+
+
 def test_resumen_importacion_muestra_perfil_y_arbol():
     txt = ip.resumen_importacion(ip.normalizar_plan(_plan_negocio()))
     assert "Objetivo" in txt and "Lanzamiento" in txt

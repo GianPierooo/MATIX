@@ -68,6 +68,12 @@ def huecos_plan(plan: dict[str, Any]) -> dict[str, Any]:
     return intake_analitico.puede_planear(plan.get("tipo", "generico"), capturados)
 
 
+def decidir_importacion(gate: dict[str, Any], forzar: bool = False) -> str:
+    """Crear DIRECTO si el plan está completo (gate listo) o si el usuario fuerza;
+    si faltan requeridos, PREGUNTAR antes (no inventar). PURO."""
+    return "crear" if (gate.get("listo") or forzar) else "preguntar"
+
+
 def plan_a_nodos(fases: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Convierte las fases normalizadas a la forma de inserción del árbol:
     - fase CORTO (fina): nodo raíz fino + sus nodos como hijos finos.

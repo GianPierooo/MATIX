@@ -45,6 +45,12 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Importar plan: crear DIRECTO + mejora continua conversacional. Si pegas un
+  plan completo, creo el proyecto de una y te muestro cómo quedó (con opción de
+  editar o deshacer fácil); solo te pregunto si falta algo requerido. Y cuando
+  me comentas algo de un proyecto en el chat («terminé las fotos», «me trabé en
+  X», «se me ocurrió Y»), actualizo el árbol, el perfil y el % en el momento y te
+  confirmo qué cambié — no solo en la revisión semanal.
 - Importar un proyecto desde un plan pegado: si ya tienes un plan armado
   (objetivo, porqué, meta, criterios, fases, tareas), me lo pegas y lo meto de
   una: lo parseo a perfil + árbol + tareas por horizonte, te muestro cómo quedó

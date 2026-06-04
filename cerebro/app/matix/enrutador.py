@@ -80,6 +80,20 @@ _INTAKE_PLAN = re.compile(
     r"|que sigue en el proyecto|mejora(r)? el plan"
 )
 
+# Comentarios de PROGRESO/cambio/blocker/idea sobre un proyecto: disparan la
+# mejora continua conversacional (actualizar árbol/perfil/% en el momento), que
+# es tarea dura → modelo FUERTE. Son frases típicas de avance.
+_COMENTARIO_PROYECTO = re.compile(
+    r"\b("
+    r"avance|avances|avanc|"
+    r"termine|complete|acabe|"
+    r"me trabe|trabad|atascad|estancad|"
+    r"cambie de (idea|rumbo|plan|enfoque)|"
+    r"se me ocurrio|tengo una idea|idea nueva|"
+    r"ya hice|ya tengo|ya termine|ya complete|logre"
+    r")\b"
+)
+
 # Fraseo de recordatorio / agenda: «recuérdame llamar al banco» es un
 # recordatorio, NO una llamada. Estos verbos VETAN la ruta de acción de
 # dispositivo (el «llamar/mandar» embebido es el contenido del recordatorio,
@@ -160,8 +174,9 @@ def elegir(
 
     texto = _norm(mensaje)
 
-    # Intake analítico / generación de plan: al modelo FUERTE (análisis duro).
-    if _INTAKE_PLAN.search(texto):
+    # Intake / plan / revisión / comentario de progreso de un proyecto: al
+    # modelo FUERTE (actualizar el plan/árbol coherente es tarea dura).
+    if _INTAKE_PLAN.search(texto) or _COMENTARIO_PROYECTO.search(texto):
         return Decision(fuerte, "intake_plan")
 
     # Acción del teléfono (abrir/llamar/mandar/galería): al modelo FUERTE, que
