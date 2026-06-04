@@ -96,4 +96,8 @@ async def buscar(
         logger.warning("Tavily falló: %s", type(e).__name__)
         raise BusquedaWebError("La búsqueda web no respondió.") from e
 
+    # Monitoreo de costo: una búsqueda exitosa cuenta para el gasto del día.
+    from .uso import medidor
+    medidor.registrar_busqueda_web(1)
+
     return _limpiar(resp)

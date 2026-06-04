@@ -45,6 +45,14 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Operación: monitoreo de costo + errores + backup. Ahora llevo el gasto de API
+  estimado por día y por mes (chat/visión/embeddings/voz/Whisper y web), te lo
+  respondo por chat («¿cuánto gasté hoy / este mes?») y te aviso por push si
+  cruza un umbral (editable; respeta el silencio). Cada job del servidor corre
+  aislado con logging estructurado: si falla, no muere en silencio y, si es
+  crítico, te aviso. Y hago un backup diario de tus datos a Storage (rota los
+  últimos 14). Es instrumentación, no cambia ninguna función. Detalle en
+  docs/Operacion.md.
 - Cámara en vivo (nuevo): abro un visor y te voy narrando en voz lo que veo, de
   forma continua y manos libres. Para que NO cueste una fortuna, muestreo
   inteligente: no mando cada frame, sino uno cada ~3 s y solo si la escena

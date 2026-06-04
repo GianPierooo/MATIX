@@ -24,6 +24,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..db import Postgrest
@@ -598,6 +599,54 @@ async def revisar_nudges(db: Postgrest, *, ahora: datetime | None = None) -> dic
 _scheduler = None
 
 
+async def correr_job(nombre: str, coro: Any) -> bool:
+    """Corre un job del scheduler AISLADO, con logging estructurado. Un job que
+    falla NO muere en silencio ni tumba a los demás: se loguea con contexto
+    (nombre del job + tipo de error, SIN datos sensibles) y se devuelve False.
+    Devuelve True si terminó bien."""
+    try:
+        await coro
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.error(
+            "scheduler job=%s FALLÓ: %s", nombre, type(e).__name__, exc_info=True
+        )
+        return False
+
+
+async def _avisar_error_critico(db: Postgrest, nombre: str) -> None:
+    """Push de error CRÍTICO (un job clave falló), una vez por día y respetando
+    el silencio. Best-effort: nunca lanza."""
+    try:
+        from .planificador_diario import LIMA as _L, _push, _tokens
+
+        local = datetime.now(timezone.utc).astimezone(_L)
+        cfgs = await db.list("config_nudges", limit=1)
+        if cfgs and not permitido_ahora(local, cfgs[0]):
+            return
+        hoy = local.date().isoformat()
+        tipo = f"error:{nombre}"
+        if await db.list(
+            "planificacion_enviados", filters={"tipo": tipo, "fecha": hoy}, limit=1
+        ):
+            return
+        tokens = await _tokens(db)
+        if not tokens:
+            return
+        if await _push(
+            db,
+            tokens,
+            titulo="⚠ Matix: fallo de operación",
+            cuerpo=f"Falló «{nombre}» en el servidor. Revisa los logs.",
+            payload="uso",
+        ):
+            await db.insert(
+                "planificacion_enviados", {"tipo": tipo, "fecha": hoy}
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("no pude avisar el error crítico de %s", nombre)
+
+
 def iniciar(db: Postgrest) -> None:
     """Arranca el job cada minuto. Solo si FCM está configurado (si no, no
     tiene sentido y evitamos ruido en los logs / en tests)."""
@@ -613,47 +662,40 @@ def iniciar(db: Postgrest) -> None:
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
     async def _job() -> None:
-        try:
-            await revisar_y_enviar(db)
-        except Exception:  # noqa: BLE001
-            logger.exception("scheduler: el tick de recordatorios falló")
-        try:
-            await revisar_rituales(db)
-        except Exception:  # noqa: BLE001
-            logger.exception("scheduler: el tick de rituales falló")
-        try:
-            await revisar_nudges(db)
-        except Exception:  # noqa: BLE001
-            logger.exception("scheduler: el tick de nudges falló")
-        try:
-            from . import automatizaciones
+        # Cada job corre AISLADO: un fallo se loguea con contexto (nombre + tipo
+        # de error, sin datos sensibles) y NO tumba a los demás (correr_job).
+        from . import (
+            automatizaciones,
+            backup,
+            costos,
+            evolucion_proyecto,
+            planificador_diario,
+        )
 
-            await automatizaciones.revisar_automatizaciones(db)
-        except Exception:  # noqa: BLE001
-            logger.exception("scheduler: el tick de automatizaciones falló")
-        # Planificador diario (Paso 3): propuesta del set, escalación sobre lo
-        # aceptado, y nudge de dormir. Cada uno best-effort.
-        try:
-            from . import planificador_diario
-
-            await planificador_diario.revisar_propuesta(db)
-            await planificador_diario.revisar_escalacion(db)
-            await planificador_diario.revisar_dormir(db)
-            # Dosis ligera de skills: sugerencia suave y opcional (sin escalación).
-            await planificador_diario.revisar_sugerencia_skill(db)
-        except Exception:  # noqa: BLE001
-            logger.exception("scheduler: el tick del planificador falló")
-        # Motor de evolución (seguimiento): check-in semanal, celebración de
-        # hitos y aviso de estancamiento. Cada uno best-effort.
-        try:
-            from . import evolucion_proyecto
-
-            await evolucion_proyecto.revisar_checkin(db)
-            await evolucion_proyecto.revisar_hitos(db)
-            await evolucion_proyecto.revisar_hitos_pct(db)
-            await evolucion_proyecto.revisar_estancamiento(db)
-        except Exception:  # noqa: BLE001
-            logger.exception("scheduler: el tick de evolución falló")
+        await correr_job("recordatorios", revisar_y_enviar(db))
+        await correr_job("rituales", revisar_rituales(db))
+        await correr_job("nudges", revisar_nudges(db))
+        await correr_job(
+            "automatizaciones", automatizaciones.revisar_automatizaciones(db)
+        )
+        # Planificador diario: propuesta del set, escalación, dormir, skills.
+        await correr_job("planificador.propuesta", planificador_diario.revisar_propuesta(db))
+        await correr_job("planificador.escalacion", planificador_diario.revisar_escalacion(db))
+        await correr_job("planificador.dormir", planificador_diario.revisar_dormir(db))
+        await correr_job(
+            "planificador.sugerencia_skill",
+            planificador_diario.revisar_sugerencia_skill(db),
+        )
+        # Motor de evolución: check-in, hitos, hitos de %, estancamiento.
+        await correr_job("evolucion.checkin", evolucion_proyecto.revisar_checkin(db))
+        await correr_job("evolucion.hitos", evolucion_proyecto.revisar_hitos(db))
+        await correr_job("evolucion.hitos_pct", evolucion_proyecto.revisar_hitos_pct(db))
+        await correr_job("evolucion.estancamiento", evolucion_proyecto.revisar_estancamiento(db))
+        # Operación: monitoreo de costo (cada minuto) y backup diario (crítico).
+        await correr_job("costos.snapshot", costos.snapshot_y_alertar(db))
+        ok_backup = await correr_job("backup", backup.revisar_backup(db))
+        if not ok_backup:
+            await correr_job("backup.aviso", _avisar_error_critico(db, "backup"))
 
     sch = AsyncIOScheduler(timezone=LIMA)
     sch.add_job(

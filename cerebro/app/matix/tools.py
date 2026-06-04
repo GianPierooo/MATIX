@@ -67,6 +67,7 @@ from . import (
     automatizaciones,
     avance as avance_mod,
     busqueda_web,
+    costos,
     creacion_proyecto,
     evolucion_proyecto,
     finanzas,
@@ -859,12 +860,28 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "name": "consultar_uso",
             "description": (
                 "Devuelve el consumo acumulado de la API de OpenAI "
-                "desde que arrancó este proceso del cerebro: tokens "
-                "(input/output/cached), llamadas, segundos de "
-                "Whisper y costo estimado en USD. Es solo lectura, "
-                "no modifica nada. Úsala cuando el usuario pregunte "
-                "«cuánto he gastado», «cuánto consumí», «qué tan caro "
-                "vas», etc."
+                "desde que arrancó este proceso del cerebro (SESIÓN, en "
+                "memoria): tokens, llamadas, segundos de Whisper y costo "
+                "estimado en USD. Para el gasto por DÍA o por MES usa "
+                "`consultar_gasto`. Solo lectura."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_gasto",
+            "description": (
+                "Gasto ESTIMADO de la API persistido: cuánto va HOY y este MES "
+                "(USD), con desglose por categoría. Para «¿cuánto gasté hoy?», "
+                "«¿cuánto va este mes?», «¿cuánto me cuesta Matix?». Distinto de "
+                "`consultar_uso` (esa es la sesión en memoria, se pierde al "
+                "reiniciar). Solo lectura."
             ),
             "parameters": {
                 "type": "object",
@@ -3545,6 +3562,25 @@ async def _consultar_uso(_db: Postgrest, _args: dict) -> dict[str, Any]:
     )
 
 
+async def _consultar_gasto(db: Postgrest, _args: dict) -> dict[str, Any]:
+    """Gasto de API persistido: hoy y este mes (estimado USD). Sin efectos."""
+    r = await costos.resumen_gasto(db)
+    return _ok(
+        {
+            "hoy_usd": r["hoy_usd"],
+            "mes_usd": r["mes_usd"],
+            "por_categoria_hoy": r["por_categoria_hoy"],
+            "sesion_usd": r["sesion_usd"],
+            "nota": (
+                "Es el gasto ESTIMADO de la API (no tu plata personal): hoy y "
+                "este mes, persistido por día. Da el número claro y breve; si "
+                "preguntan el detalle, menciona las categorías (chat/visión, voz, "
+                "embeddings, web). Es aproximado."
+            ),
+        }
+    )
+
+
 # ── Repetición (copia de la lógica del router de tareas) ─────────────
 
 
@@ -5460,6 +5496,7 @@ _HANDLERS = {
     "buscar_material": _buscar_material,
     "leer_apunte": _leer_apunte,
     "consultar_uso": _consultar_uso,
+    "consultar_gasto": _consultar_gasto,
     "consultar_tareas": _consultar_tareas,
     "consultar_eventos": _consultar_eventos,
     "consultar_proyectos": _consultar_proyectos,
@@ -5567,6 +5604,7 @@ TABLAS_AFECTADAS = {
     "buscar_material": [],  # solo lectura
     "leer_apunte": [],  # solo lectura
     "consultar_uso": [],  # solo lectura
+    "consultar_gasto": [],  # solo lectura
     "consultar_tareas": [],  # solo lectura
     "consultar_eventos": [],  # solo lectura
     "consultar_proyectos": [],  # solo lectura

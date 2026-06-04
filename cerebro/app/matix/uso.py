@@ -48,6 +48,11 @@ _PRECIO_TTS_POR_M_CHARS = 15.0
 # orden de cientos a unos miles de tokens cada uno.
 _PRECIO_EMBED_POR_M = 0.020
 
+# Tavily (búsqueda web) · USD por búsqueda. Aproximado: el plan tiene un cupo
+# gratis mensual; arriba de eso cuesta ~$0.008 por búsqueda. Es un ESTIMADO
+# para que el monitoreo de costo dé noción.
+_PRECIO_TAVILY_POR_BUSQUEDA = 0.008
+
 
 @dataclass
 class _Snapshot:
@@ -65,6 +70,7 @@ class _Snapshot:
     llamadas_tts: int = 0
     tokens_embedding: int = 0
     llamadas_embedding: int = 0
+    llamadas_busqueda_web: int = 0
 
 
 class MedidorUso:
@@ -137,18 +143,32 @@ class MedidorUso:
             self._s.tokens_embedding += int(tokens)
             self._s.llamadas_embedding += 1
 
+    def registrar_busqueda_web(self, n: int = 1) -> None:
+        if n <= 0:
+            return
+        with self._lock:
+            self._s.llamadas_busqueda_web += int(n)
+
     def snapshot(self) -> dict[str, Any]:
         """Devuelve el estado actual + costo estimado en USD."""
         with self._lock:
             s = _Snapshot(**self._s.__dict__)
-        # El costo del CHAT ya viene acumulado por request con el precio del
-        # modelo usado. Whisper/TTS/embeddings son siempre OpenAI a precio fijo.
-        costo = (
-            s.costo_chat_usd
-            + (s.segundos_whisper / 60.0) * _PRECIO_WHISPER_POR_MIN
-            + s.caracteres_tts * _PRECIO_TTS_POR_M_CHARS / 1_000_000
-            + s.tokens_embedding * _PRECIO_EMBED_POR_M / 1_000_000
-        )
+        # El costo del CHAT (incluye visión) ya viene acumulado por request con
+        # el precio del modelo usado. Whisper/TTS/embeddings/Tavily a precio fijo.
+        costo_whisper = (s.segundos_whisper / 60.0) * _PRECIO_WHISPER_POR_MIN
+        costo_tts = s.caracteres_tts * _PRECIO_TTS_POR_M_CHARS / 1_000_000
+        costo_embed = s.tokens_embedding * _PRECIO_EMBED_POR_M / 1_000_000
+        costo_tavily = s.llamadas_busqueda_web * _PRECIO_TAVILY_POR_BUSQUEDA
+        # Desglose por categoría (USD acumulado del proceso). Lo usa el
+        # monitoreo de costo persistido (costos.py) para sumar por día/mes.
+        costos = {
+            "chat": round(s.costo_chat_usd, 6),
+            "whisper": round(costo_whisper, 6),
+            "tts": round(costo_tts, 6),
+            "embedding": round(costo_embed, 6),
+            "tavily": round(costo_tavily, 6),
+        }
+        costo = s.costo_chat_usd + costo_whisper + costo_tts + costo_embed + costo_tavily
         return {
             "prompt_tokens": s.prompt_tokens,
             "cached_prompt_tokens": s.cached_prompt_tokens,
@@ -161,7 +181,9 @@ class MedidorUso:
             "llamadas_tts": s.llamadas_tts,
             "tokens_embedding": s.tokens_embedding,
             "llamadas_embedding": s.llamadas_embedding,
+            "llamadas_busqueda_web": s.llamadas_busqueda_web,
             "costo_usd": round(costo, 6),
+            "costos": costos,
             # Útil para la UI: precios usados para el cálculo.
             "precios": {
                 "input_por_m_usd": _PRECIO_INPUT_POR_M,

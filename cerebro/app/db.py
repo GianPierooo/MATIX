@@ -144,6 +144,22 @@ class Postgrest:
         r.raise_for_status()
         return len(r.json())
 
+    async def upsert(
+        self, table: str, payload: dict[str, Any], *, on_conflict: str
+    ) -> dict[str, Any]:
+        """Inserta o reemplaza por la columna de conflicto (`on_conflict`).
+        Reemplaza la fila completa con `payload` — el caller calcula los valores
+        nuevos (p.ej. acumular el gasto del día) y pasa la fila final."""
+        r = await self._http.post(
+            f"/{table}",
+            params={"on_conflict": on_conflict},
+            json=payload,
+            headers={"Prefer": "resolution=merge-duplicates,return=representation"},
+        )
+        r.raise_for_status()
+        data = r.json()
+        return data[0] if data else payload
+
     async def rpc(
         self, function: str, payload: dict[str, Any] | None = None
     ) -> Any:
