@@ -1302,6 +1302,55 @@ async def hablar(
     return await resp.aread()
 
 
+# ── Cámara en vivo: narración corta de un frame (visión, gpt-4o-mini) ─────────
+
+_NARRACION_SYSTEM = (
+    "Eres los OJOS de Matix en una sesión de cámara EN VIVO. En UNA sola frase "
+    "corta (máximo ~14 palabras), natural y en español peruano, di lo más "
+    "relevante que se ve AHORA. No saludes, no uses asteriscos, no inventes lo "
+    "que no aparece, no describas la calidad de la imagen. Si la escena es "
+    "esencialmente la MISMA que la narración previa, responde EXACTAMENTE: SIN CAMBIOS."
+)
+
+
+async def narrar_frame(
+    imagen_data_url: str, *, narracion_previa: str | None = None
+) -> str:
+    """Narra en una frase corta lo que se ve en un frame de la cámara en vivo.
+
+    Usa gpt-4o-mini con visión en `detail=low` (barato) — SIEMPRE OpenAI, como
+    Whisper/TTS/embeddings. Devuelve '' si no hay nada nuevo respecto a la
+    narración previa (el caller no narra). Metido en el medidor de uso."""
+    client = _get_openai_client()
+    previa = (narracion_previa or "").strip()
+    pedido = (
+        "¿Qué ves ahora?"
+        if not previa
+        else f"Narración previa: «{previa}». Di qué cambió o qué ves ahora."
+    )
+    resp = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=40,
+        messages=[
+            {"role": "system", "content": _NARRACION_SYSTEM},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": pedido},
+                    {"type": "image_url",
+                     "image_url": {"url": imagen_data_url, "detail": "low"}},
+                ],
+            },
+        ],
+    )
+    _registrar_chat_openai(resp.usage, "gpt-4o-mini")
+    out = (resp.choices[0].message.content or "").strip()
+    # Normaliza el "sin cambios" (con o sin signos) a vacío.
+    if out.upper().strip(" .!¡¿?\"'") == "SIN CAMBIOS":
+        return ""
+    return out
+
+
 def _es_alucinacion_de_whisper(texto: str) -> bool:
     """True si `texto` es una alucinación conocida de Whisper sobre
     silencio/ruido. Comparación case-insensitive y robusta a signos

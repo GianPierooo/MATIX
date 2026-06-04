@@ -43,6 +43,8 @@ from ..schemas.matix import (
     ExtraerTareasRequest,
     ExtraerTareasResponse,
     MuestraVozResponse,
+    NarrarFrameRequest,
+    NarrarFrameResponse,
     TranscripcionResponse,
     VozRequest,
 )
@@ -586,6 +588,38 @@ async def voz(body: VozRequest) -> Response:
             "Content-Length": str(len(audio)),
         },
     )
+
+
+@router.post("/narrar-frame", response_model=NarrarFrameResponse)
+async def narrar_frame(body: NarrarFrameRequest) -> dict:
+    """Cámara EN VIVO: narra en una frase corta un frame muestreado por la app.
+
+    El MUESTREO y los TOPES (intervalo, frames/min, auto-corte) los hace la app:
+    acá solo llegan los frames que pasaron el filtro, así el costo se controla
+    en origen. La imagen viaja como data URL y NO se persiste. Devuelve narración
+    vacía si no hay nada nuevo (gpt-4o-mini con visión en `detail=low`, barato)."""
+    img = (body.imagen or "").strip()
+    if not img.startswith("data:image/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Falta `imagen` como data URL (data:image/...).",
+        )
+    if len(img) > 8_000_000:  # ~6 MB de imagen; tope defensivo
+        raise HTTPException(status_code=413, detail="La imagen es demasiado grande.")
+    try:
+        narracion = await llm.narrar_frame(
+            img, narracion_previa=body.narracion_previa
+        )
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"El modelo de visión falló: {e}",
+        ) from e
+    return {"narracion": narracion}
 
 
 # ---------------------------------------------------------------------------

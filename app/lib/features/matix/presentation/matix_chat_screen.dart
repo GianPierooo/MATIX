@@ -25,6 +25,7 @@ import '../domain/mensaje.dart';
 import '../providers/matix_chat_providers.dart';
 import '../providers/uso_providers.dart';
 import '../providers/voz_providers.dart';
+import '../../live_camara/presentation/live_camara_screen.dart';
 import 'manos_libres_screen.dart';
 import 'widgets/menu_adjuntar.dart';
 import 'widgets/opciones_interactivas.dart';
@@ -607,6 +608,13 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen>
             icon: const Icon(Icons.headphones),
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const ManosLibresScreen()),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Cámara en vivo',
+            icon: const Icon(Icons.videocam_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const LiveCamaraScreen()),
             ),
           ),
           IconButton(

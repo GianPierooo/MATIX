@@ -23,8 +23,12 @@ SOLO-BACKEND (existe en el cerebro, sin pantalla propia en la app).
   sintetiza con su voz y cita fuentes.
 - Wake word "oye Matix": SÍ existe. Modelo `oye_matix.onnx` (~214 KB) en la
   raíz, endpoints `/matix/wakeword/muestras*`, pantalla `entrenar_voz_screen`.
-- Cámara en vivo: NO. La visión es por FOTO puntual / galería (recibos,
-  pizarras, documentos) → OCR/extracción. No hay stream de cámara en tiempo real.
+- Cámara en vivo: SÍ (desde 2026-06-04). Sesión en vivo con narración continua
+  por muestreo inteligente (frame cada ~3 s + cambio de escena; topes de
+  frames/min, duración y auto-stop). Frame → gpt-4o-mini (detail=low) → frase
+  corta → TTS onyx. Endpoint `/matix/narrar-frame`; muestreo y topes en la app
+  (`features/live_camara`). Además sigue la visión por FOTO/galería (recibos,
+  pizarras, documentos) → OCR/extracción. No promete tiempo real frame-perfect.
 - Teléfono Tier B: NO. Solo hay Fase 1 (intents), Tier C.0 (leer pantalla, solo
   lectura) y Tier C.1 (enviar WhatsApp tras confirmación). No hay automatización
   libre de tocar/escribir en apps arbitrarias.

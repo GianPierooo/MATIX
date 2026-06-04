@@ -392,3 +392,18 @@ class MuestraVozResponse(BaseModel):
     ok: bool = True
     objeto: str
     conteo: ConteoMuestrasResponse
+
+
+class NarrarFrameRequest(BaseModel):
+    """Un frame muestreado de la cámara en vivo + la narración previa (para no
+    repetir). La imagen viaja como data URL (`data:image/jpeg;base64,...`); el
+    muestreo y los topes los hace la app (solo llegan frames que pasan el filtro)."""
+
+    imagen: str
+    narracion_previa: str | None = None
+
+
+class NarrarFrameResponse(BaseModel):
+    """Narración corta de lo que se ve. Vacía si no hay nada nuevo que narrar."""
+
+    narracion: str = ""

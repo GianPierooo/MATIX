@@ -45,6 +45,16 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Cámara en vivo (nuevo): abro un visor y te voy narrando en voz lo que veo, de
+  forma continua y manos libres. Para que NO cueste una fortuna, muestreo
+  inteligente: no mando cada frame, sino uno cada ~3 s y solo si la escena
+  cambió (salto lo repetido/estático); cada frame que pasa va a la visión
+  (gpt-4o-mini) → frase corta → voz (tts-1 onyx), sin redescribir lo mismo.
+  Guardrails de costo: tope de frames por minuto, tope de duración con
+  auto-corte, auto-stop si no hay cambios o si la app pasa a segundo plano, e
+  indicador «EN VIVO» con el tiempo y el gasto aproximado. Botón grande para
+  parar; se abre desde el chat de Matix. Honesto: priorizo fluidez, no es
+  tiempo real perfecto.
 - Consolidación: una sola vista del plan + limpieza de legacy. Retiré el viejo
   «planificar mi día» (planificar_dia): ahora la vista «Hoy» (la línea de tiempo)
   es la ÚNICA vista del plan, sin dos caminos que confundan. La sección de Inicio
