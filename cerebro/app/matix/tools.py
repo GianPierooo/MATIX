@@ -1845,15 +1845,20 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "llenar el esquema de ese tipo, con una pista de análisis. Úsala "
                 "al crear un proyecto y para entender uno existente a fondo. "
                 "Flujo: llama intake_proyecto → haz la pregunta en tu voz "
-                "(analítica, cavando) → guarda con guardar_parametro_proyecto → "
-                "repite. NO planees hasta que `puede_planear.listo` sea true. "
-                "Una pregunta a la vez; resumible."
+                "(analítica, cavando) → cuando el usuario responda, vuelve a "
+                "llamar intake_proyecto con `respuesta`=lo que dijo (se guarda "
+                "sola y te da la siguiente) → repite. NO planees hasta que "
+                "`puede_planear.listo` sea true. Una pregunta a la vez; resumible."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "proyecto_id": {"type": "string"},
                     "proyecto": {"type": "string"},
+                    "respuesta": {
+                        "type": "string",
+                        "description": "Lo que respondió el usuario a la pregunta anterior (se guarda sola).",
+                    },
                     "tipo": {
                         "type": "string",
                         "enum": list(intake_analitico.TIPOS),
@@ -4467,6 +4472,17 @@ async def _intake_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
     est = await intake_analitico.estado_intake(db, proyecto["id"])
     preguntados = list((est or {}).get("preguntados") or [])
 
+    # Guarda la RESPUESTA del usuario a la última pregunta hecha (el modelo no
+    # tiene que recordar la clave entre turnos: la rastrea el servidor).
+    respuesta = (args.get("respuesta") or "").strip()
+    if respuesta and preguntados:
+        clave_pendiente = preguntados[-1]
+        if not (capturados.get(clave_pendiente) or "").strip():
+            await intake_analitico.guardar_parametro(
+                db, proyecto=proyecto, clave=clave_pendiente, valor=respuesta,
+            )
+            capturados[clave_pendiente] = respuesta
+
     pregunta = intake_analitico.siguiente_pregunta_intake(tipo, capturados, preguntados)
     gate = intake_analitico.puede_planear(tipo, capturados)
 
@@ -4500,9 +4516,12 @@ async def _intake_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
         "nota": (
             "Hazle ESA pregunta en tu voz, afilada y analítica (no robótica). "
             "Si la respuesta deja un hueco o incoherencia, señálalo y cava. "
-            "Guarda la respuesta con guardar_parametro_proyecto(clave='" + pregunta["clave"] + "') "
-            "y vuelve a llamar intake_proyecto. Una pregunta a la vez; se puede "
-            "pausar y seguir. NO generes el plan hasta que el gate diga listo."
+            "Cuando el usuario responda, vuelve a llamar intake_proyecto con "
+            "`respuesta`=lo que dijo: se guarda sola y te doy la siguiente (no "
+            "tienes que recordar la clave). Si de una respuesta sacas varios "
+            "datos, usa guardar_parametro_proyecto para los extra. Una pregunta "
+            "a la vez; se puede pausar. NO generes el plan hasta que el gate diga "
+            "listo."
         ),
     })
 
