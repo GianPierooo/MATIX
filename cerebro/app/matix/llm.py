@@ -188,15 +188,18 @@ def _contenido_usuario_anthropic(content: Any) -> Any:
 
 
 def _a_anthropic(messages: list[dict]) -> tuple[str, list[dict]]:
-    """Traduce los mensajes en shape OpenAI (lo que arma `chat.py`) a
+    """Traduce la conversación NEUTRA (lo que arma `chat.py`) a
     (system, messages) de Anthropic:
 
     - los `system` se concatenan en el parámetro `system` aparte,
+    - el assistant NEUTRO (`{contenido, tool_calls:[{id,nombre,args}]}`) se
+      serializa a bloques `text` + `tool_use` de Anthropic,
     - los resultados de tool (`role:tool`) se agrupan en UN mensaje `user`
       con bloques `tool_result` (Anthropic lo exige así),
-    - el `raw` re-inyectado (assistant con content lista de bloques) pasa
-      tal cual,
     - las imágenes de un user multimodal se traducen a bloques `image`.
+
+    NUNCA recibe bloques crudos de OTRO proveedor: la representación es neutra,
+    así el failover a mitad de turno y manos libres con tools funcionan.
     """
     system_partes: list[str] = []
     out: list[dict] = []
@@ -229,15 +232,77 @@ def _a_anthropic(messages: list[dict]) -> tuple[str, list[dict]]:
             continue
         _flush()
         if rol == "assistant":
-            contenido = m.get("content")
-            # `raw` re-inyectado: ya viene como lista de bloques Anthropic.
-            out.append({"role": "assistant", "content": contenido if isinstance(contenido, list) else (contenido or "")})
+            texto = m.get("contenido")
+            if not isinstance(texto, str):
+                texto = m.get("content") if isinstance(m.get("content"), str) else ""
+            bloques: list[dict[str, Any]] = []
+            if texto and texto.strip():
+                bloques.append({"type": "text", "text": texto})
+            for c in m.get("tool_calls") or []:
+                bloques.append(
+                    {
+                        "type": "tool_use",
+                        "id": c.get("id"),
+                        "name": c.get("nombre"),
+                        "input": c.get("args") or {},
+                    }
+                )
+            # Anthropic rechaza assistant vacío; placeholder si no hay nada.
+            out.append({"role": "assistant", "content": bloques or (texto or "(ok)")})
         else:  # user
             out.append(
                 {"role": "user", "content": _contenido_usuario_anthropic(m.get("content"))}
             )
     _flush()
     return "\n\n".join(system_partes), out
+
+
+def _a_openai(messages: list[dict]) -> list[dict]:
+    """Serializa la conversación NEUTRA al formato de OpenAI Chat Completions.
+
+    system/user/tool ya vienen con el shape de OpenAI; el assistant NEUTRO
+    (`{contenido, tool_calls:[{id,nombre,args}]}`) se traduce a
+    `{role:assistant, content, tool_calls:[{id,type:function,function:{name,
+    arguments}}]}`. NUNCA filtra bloques `tool_use` de Anthropic a OpenAI.
+    """
+    out: list[dict] = []
+    for m in messages:
+        if m.get("role") == "assistant" and ("tool_calls" in m or "contenido" in m):
+            tcs = m.get("tool_calls") or []
+            texto = m.get("contenido")
+            if not isinstance(texto, str):
+                texto = ""
+            if tcs:
+                out.append(
+                    {
+                        "role": "assistant",
+                        "content": texto or None,
+                        "tool_calls": [
+                            {
+                                "id": c.get("id"),
+                                "type": "function",
+                                "function": {
+                                    "name": c.get("nombre"),
+                                    "arguments": json.dumps(
+                                        c.get("args") or {}, ensure_ascii=False
+                                    ),
+                                },
+                            }
+                            for c in tcs
+                        ],
+                    }
+                )
+            else:
+                out.append({"role": "assistant", "content": texto})
+        else:
+            out.append(m)
+    return out
+
+
+def _raw_neutral(contenido: str, calls: list[dict]) -> dict[str, Any]:
+    """Mensaje del asistente en representación NEUTRA, para re-inyectar en el
+    historial sin atarlo a ningún proveedor."""
+    return {"role": "assistant", "contenido": contenido or "", "tool_calls": calls}
 
 
 def _tools_a_anthropic(tools: list[dict]) -> list[dict]:
@@ -387,21 +452,47 @@ async def _chat_json(
 
 async def _openai_texto(messages, *, model, temperature) -> str:
     client = _get_openai_client()
-    resp = await client.chat.completions.create(
-        model=model, messages=messages, temperature=temperature
+    resp = await _crear_openai(
+        client, model=model, temperature=temperature,
+        base_kwargs={"messages": _a_openai(messages)},
     )
     _registrar_chat_openai(resp.usage, model)
     return (resp.choices[0].message.content or "").strip()
 
 
+async def _crear_openai(client, *, model, base_kwargs, temperature):
+    """Llama a OpenAI agregando `temperature` solo si el modelo la soporta. Si
+    pese a eso un modelo nuevo la rechaza con 400, reintenta UNA vez sin ella
+    (red de seguridad: el 400 no debe llegar al usuario como error genérico)."""
+    kwargs = dict(base_kwargs)
+    if modelos_llm.soporta_temperature(model):
+        kwargs["temperature"] = temperature
+    try:
+        return await client.chat.completions.create(model=model, **kwargs)
+    except Exception as e:  # noqa: BLE001
+        code = getattr(e, "status_code", None)
+        msj = str(e).lower()
+        if code == 400 and "temperature" in msj:
+            logger.warning(
+                "modelo «%s» no acepta temperature; reintento sin el parámetro",
+                model,
+            )
+            kwargs.pop("temperature", None)
+            return await client.chat.completions.create(model=model, **kwargs)
+        raise
+
+
 async def _openai_con_tools(messages, tools, *, model, temperature, tool_choice) -> dict:
     client = _get_openai_client()
-    resp = await client.chat.completions.create(
+    resp = await _crear_openai(
+        client,
         model=model,
-        messages=messages,
         temperature=temperature,
-        tools=tools,
-        tool_choice=tool_choice,
+        base_kwargs={
+            "messages": _a_openai(messages),
+            "tools": tools,
+            "tool_choice": tool_choice,
+        },
     )
     _registrar_chat_openai(resp.usage, model)
     msg = resp.choices[0].message
@@ -416,22 +507,23 @@ async def _openai_con_tools(messages, tools, *, model, temperature, tool_choice)
         return {
             "tipo": "tool_calls",
             "tool_calls": calls,
-            "raw": msg.model_dump(exclude_none=True),
+            "raw": _raw_neutral((msg.content or "").strip(), calls),
         }
     return {
         "tipo": "texto",
         "contenido": (msg.content or "").strip(),
-        "raw": msg.model_dump(exclude_none=True),
+        "raw": _raw_neutral((msg.content or "").strip(), []),
     }
 
 
 async def _openai_json(messages, *, model, temperature) -> str:
     client = _get_openai_client()
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=temperature,
-        response_format={"type": "json_object"},
+    resp = await _crear_openai(
+        client, model=model, temperature=temperature,
+        base_kwargs={
+            "messages": _a_openai(messages),
+            "response_format": {"type": "json_object"},
+        },
     )
     _registrar_chat_openai(resp.usage, model)
     return resp.choices[0].message.content or "{}"
@@ -456,28 +548,35 @@ async def _anthropic_texto(messages, *, model, temperature) -> str:
     return _texto_de_anthropic(resp.content).strip()
 
 
+def _system_anthropic(system: str) -> Any:
+    """System de Anthropic con CACHÉ de prompt: el bloque grande y fijo (reglas
+    + documento maestro + capacidades) se marca `cache_control` para que Claude
+    lo cachee entre turnos. Baja latencia y costo en el camino del modelo fuerte.
+    """
+    return [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+
+
 async def _anthropic_con_tools(messages, tools, *, model, temperature, tool_choice) -> dict:
     client = _get_anthropic_client()
     system, msgs = _a_anthropic(messages)
     kwargs: dict[str, Any] = {
         "model": model,
         "max_tokens": _MAX_TOKENS_ANTHROPIC,
-        "temperature": temperature,
         "messages": msgs,
         "tools": _tools_a_anthropic(tools),
         "tool_choice": _tool_choice_a_anthropic(tool_choice),
     }
+    if modelos_llm.soporta_temperature(model):
+        kwargs["temperature"] = temperature
     if system:
-        kwargs["system"] = system
+        kwargs["system"] = _system_anthropic(system)
     resp = await client.messages.create(**kwargs)
     _registrar_uso_anthropic(resp.usage, model)
 
     calls: list[dict] = []
     textos: list[str] = []
-    raw_bloques: list[dict] = []
     for b in resp.content:
         bloque = b.model_dump() if hasattr(b, "model_dump") else dict(b)
-        raw_bloques.append(bloque)
         if bloque.get("type") == "tool_use":
             calls.append(
                 {
@@ -489,10 +588,11 @@ async def _anthropic_con_tools(messages, tools, *, model, temperature, tool_choi
         elif bloque.get("type") == "text":
             textos.append(bloque.get("text", ""))
 
-    raw = {"role": "assistant", "content": raw_bloques}
+    texto = "".join(textos).strip()
+    raw = _raw_neutral(texto, calls)
     if calls:
         return {"tipo": "tool_calls", "tool_calls": calls, "raw": raw}
-    return {"tipo": "texto", "contenido": "".join(textos).strip(), "raw": raw}
+    return {"tipo": "texto", "contenido": texto, "raw": raw}
 
 
 async def _anthropic_json(messages, *, model, temperature) -> str:

@@ -13,6 +13,7 @@ Endpoints:
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -46,6 +47,8 @@ from ..schemas.matix import (
     VozRequest,
 )
 from ..security import require_api_key
+
+logger = logging.getLogger("matix.routers.matix")
 
 router = APIRouter(
     prefix="/matix",
@@ -154,6 +157,16 @@ async def chat(body: ChatRequest, db: Postgrest = Depends(get_db)) -> dict:
             detail=str(e),
         ) from e
     except Exception as e:  # noqa: BLE001
+        # Logueamos con detalle (incluido el body del 400 del proveedor) para
+        # diagnosticar. Un 400 de request inválido NO es un 502: lo reportamos
+        # como 400 para no esconderlo tras un "error del cerebro" genérico.
+        code = getattr(e, "status_code", None)
+        logger.exception("chat: fallo llamando al modelo (status=%s)", code)
+        if code == 400:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Petición inválida al modelo: {e}",
+            ) from e
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Error llamando al modelo: {e}",

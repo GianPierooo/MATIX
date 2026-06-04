@@ -73,6 +73,11 @@ def _ahora_lima_es() -> str:
 # capturas), pero cada una infla tokens. 5 es un techo razonable.
 _MAX_IMAGENES = 5
 
+# Tope de mensajes del historial que se mandan al modelo cada turno (12
+# intercambios ≈ 24 mensajes). Recorta el contexto para bajar latencia/costo;
+# lo más viejo se recupera por el recall semántico, no se reenvía entero.
+_MAX_HISTORIAL_MENSAJES = 24
+
 
 async def conversar(
     db: Postgrest,
@@ -241,10 +246,14 @@ async def conversar(
     # pero Anthropic RECHAZA contenido vacío y rompería el hilo al cambiar a
     # Claude. Le ponemos un placeholder neutro para no perder el turno ni el
     # orden de la conversación.
-    for m in historial:
+    # Recorte de historial: solo los últimos turnos van al modelo (latencia +
+    # costo). Lo viejo no se pierde — se recupera por el recall semántico
+    # (buscar_en_historial) cuando el usuario referencia el pasado.
+    historial_reciente = [
+        m for m in historial if (m.get("rol") or m.get("role")) in ("user", "assistant")
+    ][-_MAX_HISTORIAL_MENSAJES:]
+    for m in historial_reciente:
         rol = m.get("rol") or m.get("role")
-        if rol not in ("user", "assistant"):
-            continue
         contenido = (m.get("contenido") or "").strip() or "(adjunto)"
         mensajes.append({"role": rol, "content": contenido})
 

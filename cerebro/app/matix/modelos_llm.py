@@ -62,6 +62,20 @@ DEFAULT_BARATO = "gpt-4o-mini"
 DEFAULT_FUERTE = "claude-sonnet-4-6"
 
 
+# Modelos que NO aceptan parámetros de sampling custom (temperature, top_p):
+# los razonadores de OpenAI (familia GPT-5 y o-series) solo permiten el valor
+# por defecto. Enviarles `temperature` da un 400 «Unsupported value». Para esos
+# NO mandamos el parámetro. Claude y gpt-4o(-mini) sí lo soportan.
+_PREFIJOS_SIN_TEMPERATURE = ("gpt-5", "o1", "o3", "o4")
+
+
+def soporta_temperature(modelo_id: str | None) -> bool:
+    """¿El modelo acepta `temperature` custom? Los razonadores GPT-5/o-series
+    no (solo el default). Para esos, el caller omite el parámetro."""
+    m = (modelo_id or "").strip().lower()
+    return not m.startswith(_PREFIJOS_SIN_TEMPERATURE)
+
+
 def proveedor_de_id(modelo_id: str | None) -> str:
     """Infiere el proveedor del id del modelo. Si no se reconoce, cae al
     proveedor del env (`MATIX_LLM_PROVIDER`) y, si tampoco, a openai."""
