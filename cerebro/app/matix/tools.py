@@ -4557,14 +4557,23 @@ async def _importar_plan_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
     nombre = (args.get("nombre") or "").strip() or (proyecto or {}).get("nombre") or ""
 
     if not _confirmado(args):
+        esquema = intake_analitico.esquema_de(plan["tipo"])
+        claves_req = [
+            {"clave": p["clave"], "pregunta": p["pregunta"]} for p in esquema["requeridos"]
+        ]
         return _ok({
             "preview": importar_plan.resumen_importacion(plan),
             "puede_planear": gate,
+            "claves_requeridas": claves_req,
             "nota": (
                 "MUÉSTRALE este preview (perfil + árbol + tareas) y pídele "
-                "confirmar o editar — nada en silencio. Si faltan requeridos "
-                "(`puede_planear.faltan`), díselos y pregúntale lo que falte (no "
-                "inventes). Cuando confirme, vuelve a llamarme con confirmado=true."
+                "confirmar o editar — nada en silencio. Si `puede_planear.faltan` "
+                "trae claves, primero MAPEA tus datos del plan a ESAS `clave`s "
+                "exactas (de `claves_requeridas`) y vuelve a llamarme con la "
+                "`estructura.parametros` corregida; solo pregúntale al usuario lo "
+                "que de verdad NO esté en el plan (no inventes). Cuando confirme, "
+                "llámame con confirmado=true y la MISMA estructura "
+                "(re-parsea del plan que está en el historial)."
             ),
         })
 
