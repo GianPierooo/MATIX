@@ -81,6 +81,7 @@ class ContextoMascota {
     this.hechasHoy = 0,
     this.proyectosActivos = 0,
     this.proyectosEnRiesgo = 0,
+    this.tareasSinFecha = 0,
     this.proyectoFoco,
     this.proyectoSinSiguiente,
   });
@@ -90,6 +91,10 @@ class ContextoMascota {
   final int hechasHoy;
   final int proyectosActivos;
   final int proyectosEnRiesgo;
+
+  /// Tareas en el BACKLOG: sin fecha y sin bloque agendado. El planificador ya
+  /// las jala a huecos, y el robot las surfacea para que no mueran calladas.
+  final int tareasSinFecha;
 
   /// Nombre del proyecto activo top (el de mayor prioridad), para mensajes que
   /// invitan a empujar lo importante. `null` si no hay proyectos activos.

@@ -27,6 +27,7 @@ final contextoMascotaProvider = Provider<ContextoMascota>((ref) {
     return d != null && (esHoy(d) || d.isBefore(ahora));
   }).length;
   final vencidas = pendientes.where((t) => t.estaVencida).length;
+  final sinFecha = pendientes.where((t) => t.esBacklog).length;
   final hechasHoy =
       tareas.where((t) => t.completada && esHoy(t.completadaEn)).length;
   final activos = proyectos.where((p) => p.esActivo && !p.esSkill).toList()
@@ -47,6 +48,7 @@ final contextoMascotaProvider = Provider<ContextoMascota>((ref) {
     hechasHoy: hechasHoy,
     proyectosActivos: activos.length,
     proyectosEnRiesgo: enRiesgo,
+    tareasSinFecha: sinFecha,
     proyectoFoco: foco,
     proyectoSinSiguiente: sinSiguiente,
   );

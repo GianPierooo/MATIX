@@ -259,6 +259,35 @@ def _norm(s: Any) -> str:
     return t.translate(tildes)
 
 
+def anclas_fijas(
+    anclas: list[dict[str, Any]],
+    *,
+    iso_weekday: int,
+    skills_norm: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Anclas que rigen HOY como bloques FIJOS (inmovibles). EXCLUYE las que son
+    una PRÁCTICA de skill: una práctica nunca es fija — se coloca tentativa, en
+    tiempo ligero, y se puede mover. Solo clases y eventos (gym) son fijos; las
+    anclas que NO son skill (rutinas que el usuario fijó a propósito) siguen
+    fijas. Sacar la skill-ancla de la mañana además libera el pico para trabajo.
+    PURO y testeable."""
+    sk = skills_norm or set()
+    out: list[dict[str, Any]] = []
+    for a in anclas or []:
+        if iso_weekday not in (a.get("dias") or [1, 2, 3, 4, 5, 6, 7]):
+            continue
+        titulo = a.get("titulo") or "Ancla"
+        if _norm(titulo) in sk:
+            continue  # es una skill → tentativa, no fija (la coloca `colocar`)
+        ini = hhmm_a_min(a.get("inicio") or "")
+        fin = hhmm_a_min(a.get("fin") or "")
+        if ini is None or fin is None or fin <= ini:
+            continue
+        out.append({"ini_min": ini, "fin_min": fin, "tipo": "ancla",
+                    "titulo": titulo})
+    return out
+
+
 def pool_sugerencias(fuera: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """De lo que NO entró hoy arma un pool de sugerencias ofrecibles en los huecos
     libres (práctica de skill o tarea de proyecto corto), cada una con su duración
@@ -345,10 +374,13 @@ async def _config(db: Postgrest) -> dict[str, Any]:
 
 
 async def _compromisos_fijos(
-    db: Postgrest, *, fecha: date, anclas: list[dict[str, Any]]
+    db: Postgrest, *, fecha: date, anclas: list[dict[str, Any]],
+    skills_norm: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Clases de uni (sesiones_clase) + recurrentes/sueltos (eventos) + anclas,
-    como rangos en minutos. NO duplica: lee de donde ya viven."""
+    como rangos en minutos. NO duplica: lee de donde ya viven. Las anclas que son
+    una práctica de skill NO entran acá (son tentativas, no fijas): se excluyen
+    con `skills_norm`."""
     fijos: list[dict[str, Any]] = []
 
     # Clases de uni (dia_semana: 0=Lun..6=Dom).
@@ -392,17 +424,11 @@ async def _compromisos_fijos(
         fijos.append({"ini_min": ini, "fin_min": fin, "tipo": "evento",
                       "titulo": e.get("titulo") or "Evento"})
 
-    # Anclas editables (dias en ISO 1..7).
-    iso = fecha.isoweekday()
-    for a in anclas or []:
-        if iso not in (a.get("dias") or [1, 2, 3, 4, 5, 6, 7]):
-            continue
-        ini = hhmm_a_min(a.get("inicio") or "")
-        fin = hhmm_a_min(a.get("fin") or "")
-        if ini is None or fin is None or fin <= ini:
-            continue
-        fijos.append({"ini_min": ini, "fin_min": fin, "tipo": "ancla",
-                      "titulo": a.get("titulo") or "Ancla"})
+    # Anclas editables: solo las que NO son práctica de skill (esas son
+    # tentativas). La lógica vive en `anclas_fijas` para testearla sin BD.
+    fijos.extend(anclas_fijas(
+        anclas, iso_weekday=fecha.isoweekday(), skills_norm=skills_norm,
+    ))
 
     fijos.sort(key=lambda c: c["ini_min"])
     return fijos
@@ -530,7 +556,18 @@ async def plan_de_hoy_data(
     pico_ini = int(cfg["pico_inicio"]) * 60
     pico_fin = int(cfg["pico_fin"]) * 60
 
-    fijos = await _compromisos_fijos(db, fecha=fecha, anclas=cfg.get("anclas") or [])
+    # Nombres de skills ACTIVAS (normalizados): una ancla que coincide con una
+    # skill es una práctica → tentativa, no fija. La sacamos de los compromisos
+    # fijos para que el pico quede libre para trabajo y la práctica se mueva.
+    try:
+        _proys_activos = await db.list("proyectos", filters={"estado": "activo"})
+    except Exception:  # noqa: BLE001
+        _proys_activos = []
+    skills_norm = {_norm(s["nombre"]) for s in creacion_proyecto.solo_skills(_proys_activos)}
+
+    fijos = await _compromisos_fijos(
+        db, fecha=fecha, anclas=cfg.get("anclas") or [], skills_norm=skills_norm,
+    )
     desde_min = (local.hour * 60 + local.minute) if desde_ahora else None
     ventanas = ventanas_libres(
         fijos, despertar_min=despertar, dormir_min=dormir,

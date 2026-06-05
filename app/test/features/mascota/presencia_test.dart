@@ -149,6 +149,21 @@ void main() {
       );
       expect(pool.any((m) => m.texto.contains('OneXotic')), isTrue);
     });
+
+    test('backlog: surfacea las tareas sin fecha (no mueren calladas)', () {
+      final pool = poolPresencia(
+        null, const ContextoMascota(tareasSinFecha: 3), nueve);
+      final backlog = pool.firstWhere(
+          (m) => m.texto.contains('sin fecha') || m.texto.contains('sin fecha sueltas'),
+          orElse: () => pool.firstWhere((m) => m.texto.contains('3')));
+      expect(backlog.texto, contains('3'));
+      expect(backlog.texto.contains('*'), isFalse);
+    });
+
+    test('sin backlog no aparece la sugerencia de sin fecha', () {
+      final pool = poolPresencia(null, ContextoMascota.vacio, nueve);
+      expect(pool.any((m) => m.texto.contains('sin fecha')), isFalse);
+    });
   });
 
   group('mensajePresencia con rotación', () {

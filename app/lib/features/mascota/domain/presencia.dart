@@ -239,6 +239,21 @@ List<MensajePresencia> poolPresencia(
     ));
   }
 
+  // 8b) Backlog: tareas sueltas sin fecha. El planificador ya las jala a
+  // huecos; el robot lo surfacea para que no mueran calladas (dosificado: es
+  // un candidato más del pool que rota, no un ping).
+  if (ctx.tareasSinFecha > 0) {
+    final n = ctx.tareasSinFecha;
+    out.add(MensajePresencia(
+      tipo: TipoPresencia.pendientes,
+      texto: _rot([
+        'Tienes $n sin fecha sueltas. ¿Las acomodo en un hueco?',
+        '$n tareas esperan turno sin fecha. ¿Les busco lugar hoy?',
+      ], semilla),
+      acciones: _acInfo,
+    ));
+  }
+
   // 9) Aliento ambiental (siempre disponible, da variedad).
   out.add(MensajePresencia(
     tipo: TipoPresencia.idle,
