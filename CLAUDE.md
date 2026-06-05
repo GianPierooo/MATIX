@@ -49,6 +49,13 @@ Estas reglas rigen TODO cambio, sin que el usuario tenga que repetirlas:
    los logs (ver §7).
 8. **Reusa lo que ya existe; no dupliques.** Cuando necesites aclarar algo,
    una sola pregunta a la vez.
+9. **Auto-update del estado**: al cerrar cualquier prompt que cambie capacidades
+   o cierre / destape ítems, actualiza `docs/ESTADO.md` (sección capacidades)
+   y `docs/CHECKLIST_1.0.md` (mueve ítems entre "Hecho" / "Falta para 1.0" /
+   "Post-1.0"). Estos dos archivos viajan al chat de Matix como contexto fresco
+   (system prompt): el dueño NO depende de un advisor externo para saber el
+   estado de su proyecto — se lo pregunta al chat. No es bloqueante, pero sí
+   parte del flujo estándar del cierre del prompt, igual que el commit.
 
 ---
 

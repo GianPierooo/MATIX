@@ -47,8 +47,10 @@ providers del Flutter):
 from __future__ import annotations
 
 import logging
+import subprocess
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -868,6 +870,32 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "obtener_cambios_recientes",
+            "description": (
+                "Últimos N commits del repo (default 10): hash corto, fecha "
+                "ISO y mensaje de la primera línea. Para que respondas «¿qué "
+                "se actualizó hoy / esta semana / últimamente?» con datos "
+                "reales del repo, no inventando. Cruza con la sección «Hecho» "
+                "del CHECKLIST_1.0.md (te llega en el system prompt) para "
+                "decir qué capacidades cerraron. Solo lectura."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "description": "Cuántos commits traer (1..50, default 10).",
+                    },
+                },
                 "additionalProperties": False,
             },
         },
@@ -3553,6 +3581,51 @@ async def _leer_apunte(db: Postgrest, args: dict) -> dict[str, Any]:
 # ── consultar_uso — solo lectura ─────────────────────────────────────
 
 
+def parsear_git_log(salida: str) -> list[dict[str, str]]:
+    """Convierte la salida de `git log --pretty=format:%h%x1f%aI%x1f%s` (separador
+    US/0x1f) en una lista de commits. PURA y testeable. Tolera líneas vacías y
+    campos faltantes (los rellena con cadenas vacías)."""
+    commits: list[dict[str, str]] = []
+    for linea in salida.splitlines():
+        linea = linea.strip()
+        if not linea:
+            continue
+        partes = linea.split("\x1f")
+        commits.append({
+            "sha": partes[0] if len(partes) > 0 else "",
+            "fecha": partes[1] if len(partes) > 1 else "",
+            "mensaje": partes[2] if len(partes) > 2 else "",
+        })
+    return commits
+
+
+# Raíz del repo (cerebro/app/matix/tools.py → cerebro/app/matix → cerebro/app
+# → cerebro → MATIX). Cacheada como módulo: no cambia entre turnos.
+_REPO_RAIZ = Path(__file__).resolve().parent.parent.parent.parent
+
+
+async def _obtener_cambios_recientes(_db: Postgrest, args: dict) -> dict[str, Any]:
+    """Lee `git log` del repo y devuelve los últimos N commits parseados. Sirve
+    para que Matix responda «qué se actualizó» con datos reales del repo. NO
+    toca BD. Best-effort: si git falla (deploy sin .git, p. ej. Railway), devuelve
+    una lista vacía con `motivo` honesto en vez de tumbar el turno."""
+    n = int(args.get("n", 10) or 10)
+    n = max(1, min(50, n))
+    try:
+        # %x1f = separador US (no choca con texto humano). %aI = ISO 8601 estricto.
+        r = subprocess.run(
+            ["git", "log", f"-n{n}",
+             "--pretty=format:%h\x1f%aI\x1f%s"],
+            cwd=str(_REPO_RAIZ),
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError) as e:
+        return _ok({"commits": [], "motivo": f"sin git en este entorno: {type(e).__name__}"})
+    if r.returncode != 0:
+        return _ok({"commits": [], "motivo": f"git log falló: {r.stderr.strip()[:200]}"})
+    return _ok({"commits": parsear_git_log(r.stdout)})
+
+
 async def _consultar_uso(_db: Postgrest, _args: dict) -> dict[str, Any]:
     """Devuelve el snapshot del medidor. Sin efectos en BD."""
     s = medidor.snapshot()
@@ -5514,6 +5587,7 @@ _HANDLERS = {
     "buscar_material": _buscar_material,
     "leer_apunte": _leer_apunte,
     "consultar_uso": _consultar_uso,
+    "obtener_cambios_recientes": _obtener_cambios_recientes,
     "consultar_gasto": _consultar_gasto,
     "consultar_tareas": _consultar_tareas,
     "consultar_eventos": _consultar_eventos,
@@ -5622,6 +5696,7 @@ TABLAS_AFECTADAS = {
     "buscar_material": [],  # solo lectura
     "leer_apunte": [],  # solo lectura
     "consultar_uso": [],  # solo lectura
+    "obtener_cambios_recientes": [],  # solo lectura del repo
     "consultar_gasto": [],  # solo lectura
     "consultar_tareas": [],  # solo lectura
     "consultar_eventos": [],  # solo lectura

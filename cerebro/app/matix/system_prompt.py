@@ -26,6 +26,14 @@ _DOCUMENTO_MAESTRO = _RAIZ / "docs" / "Matix_Documento_Maestro_del_Usuario.md"
 # desactualizado sobre sí mismo (ni rehúse una capacidad real ni diga que «lo
 # último fue X» cuando ya no lo es).
 _CAPACIDADES = _RAIZ / "docs" / "Matix_Capacidades_y_Cambios.md"
+# Estado vivo del proyecto: ESTADO.md (inventario honesto de capacidades sacado
+# del repo) + CHECKLIST_1.0.md (qué cierra la 1.0 vs qué falta vs post-1.0). Se
+# inyectan al system prompt para que el dueño pueda preguntarle a Matix qué se
+# actualizó, qué falta para 1.0 y qué atacar ahora — sin depender de un advisor
+# externo para saber el estado de su propio proyecto. Si los archivos crecen
+# demasiado, mover a contexto vivo dinámico (no romper el cache).
+_ESTADO = _RAIZ / "docs" / "ESTADO.md"
+_CHECKLIST_1_0 = _RAIZ / "docs" / "CHECKLIST_1.0.md"
 
 
 REGLAS = """\
@@ -1111,6 +1119,8 @@ def system_prompt_fijo() -> str:
     """Parte fija del system prompt — se cachea entre turnos."""
     docto = _leer(_DOCUMENTO_MAESTRO, "(Documento Maestro no disponible en este entorno.)")
     capacidades = _leer(_CAPACIDADES, "(Doc de capacidades no disponible.)")
+    estado = _leer(_ESTADO, "(ESTADO.md no disponible en este entorno.)")
+    checklist = _leer(_CHECKLIST_1_0, "(CHECKLIST_1.0.md no disponible en este entorno.)")
     return f"""{REGLAS}
 
 ---
@@ -1121,6 +1131,33 @@ responde según ESTE documento (no según suposiciones). No lo recites entero
 salvo que lo pidan.
 
 {capacidades}
+
+---
+
+ESTADO VIVO DEL PROYECTO — debajo está el inventario honesto de qué hay HOY
+en el repo y la checklist de qué cierra la versión 1.0. Cuando el dueño te
+pregunte:
+- «qué se actualizó» (hoy/esta semana/últimamente) → resume los cambios
+  recientes usando la tool `obtener_cambios_recientes` para datos reales del
+  repo (no inventes). Cita la sección «Hecho» del checklist si ya entró ahí.
+- «qué falta para 1.0» → responde con los ítems de la sección «Falta para 1.0»
+  del checklist. Sé concreto, no genérico.
+- «qué me sugieres atacar ahora» → propón el siguiente paso priorizando lo
+  que CIERRA un ítem del checklist (no que abre features nuevas) y que calce
+  con el plan/horario/bloques del día. El polish de UI y animaciones está
+  marcado como post-1.0 explícito: NUNCA lo sugieras como «siguiente paso 1.0».
+
+No recites estos documentos enteros salvo que te lo pidan. Úsalos como
+referencia: el chat ES la interfaz para que el dueño conozca el estado de su
+propio proyecto.
+
+ESTADO.md:
+
+{estado}
+
+CHECKLIST_1.0.md:
+
+{checklist}
 
 ---
 
