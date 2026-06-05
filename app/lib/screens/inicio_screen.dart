@@ -23,6 +23,7 @@ import '../features/finanzas/presentation/formato_finanzas.dart';
 import '../features/finanzas/providers/movimientos_providers.dart';
 import '../features/horario/presentation/plan_dia_section.dart';
 import '../features/horario/providers/horario_providers.dart';
+import '../features/mascota/presentation/saludo_mascota_card.dart';
 import '../features/matix/data/captura_apunte_repository.dart';
 import '../features/matix/data/grabacion_voz_service.dart';
 import '../features/matix/data/matix_transcribir_repository.dart';
@@ -269,6 +270,7 @@ class InicioScreen extends ConsumerWidget {
             MatixLayout.bottomNavGuard(context),
           ),
           children: const [
+            SaludoMascotaCard(),
             _BotonesRitual(),
             _CapturaApunte(),
             PlanDiaSection(),

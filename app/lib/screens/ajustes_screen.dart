@@ -22,6 +22,8 @@ import '../features/matix/presentation/accesibilidad_screen.dart';
 import '../features/memoria/presentation/sobre_mi_screen.dart';
 import '../features/modelos/presentation/modelo_screen.dart';
 import '../features/nudges/providers/nudges_providers.dart';
+import '../features/mascota/domain/dosificacion.dart';
+import '../features/mascota/providers/mascota_providers.dart';
 import '../features/papelera/presentation/papelera_screen.dart';
 import '../features/proactividad/domain/nivel_proactividad.dart';
 import '../features/proactividad/providers/proactividad_providers.dart';
@@ -345,6 +347,9 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
             subtitle: 'Push REAL desde el cerebro. Este SÍ debería llegar '
                 'aunque el OEM mate la app.',
           ),
+
+          const _Seccion('Matix, tu compañía'),
+          const _MascotaTile(),
 
           const _Seccion('Proactividad'),
           const _ProactividadTile(),
@@ -1587,6 +1592,90 @@ class _FilaDisponibilidad extends ConsumerWidget {
               child: Text('No disponible',
                   style: TextStyle(fontSize: 12.5, color: MatixColors.muted)),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Mascota Matix: el robot que te saluda al entrar, se despide al salir y
+/// aparece de vez en cuando con un mensaje. On/off + frecuencia (normal o
+/// discreta). Dosificada: respeta el silencio y baja si la ignoras.
+class _MascotaTile extends ConsumerWidget {
+  const _MascotaTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cfg = ref.watch(mascotaConfigProvider);
+    final ctrl = ref.read(mascotaConfigProvider.notifier);
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
+      decoration: BoxDecoration(
+        color: MatixColors.card,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Matix te acompaña',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: MatixColors.text,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Te saluda al entrar, se despide al salir y aparece de '
+                      'vez en cuando con un mensaje. Apágalo si prefieres.',
+                      style: TextStyle(fontSize: 12, color: MatixColors.muted),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Switch(
+                value: cfg.habilitada,
+                onChanged: ctrl.setHabilitada,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Opacity(
+            opacity: cfg.habilitada ? 1 : 0.4,
+            child: Row(
+              children: [
+                for (final f in FrecuenciaMascota.values) ...[
+                  Expanded(
+                    child: _NivelChip(
+                      label: f.etiqueta,
+                      activo: cfg.frecuencia == f,
+                      enabled: cfg.habilitada,
+                      onTap: () => ctrl.setFrecuencia(f),
+                    ),
+                  ),
+                  if (f != FrecuenciaMascota.values.last)
+                    const SizedBox(width: 8),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            cfg.frecuencia == FrecuenciaMascota.discreta
+                ? 'Discreta: aparece poco, solo cuando suma.'
+                : 'Normal: aparece de a ratos, sin fastidiar.',
+            style: const TextStyle(fontSize: 12, color: MatixColors.muted),
+          ),
         ],
       ),
     );

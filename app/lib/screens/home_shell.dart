@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/matix_client.dart';
@@ -14,6 +15,8 @@ import '../features/matix/presentation/dispositivo_confirmacion.dart';
 import '../features/matix/presentation/matix_chat_screen.dart';
 import '../features/matix/providers/dispositivo_providers.dart';
 import '../features/matix/providers/navegacion_matix_provider.dart';
+import '../features/mascota/presentation/mascota_burbuja.dart';
+import '../features/mascota/providers/mascota_providers.dart';
 import '../features/proyectos/presentation/proyectos_list_screen.dart';
 import '../features/tareas/presentation/tareas_list_screen.dart';
 import '../theme/matix_colors.dart';
@@ -167,14 +170,39 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       });
     });
 
-    return Scaffold(
-      // Permite que el círculo elevado de Matix "sobresalga" sobre el body
-      // sin recortarse.
-      extendBody: true,
-      body: IndexedStack(index: _index, children: _screens),
-      bottomNavigationBar: _MatixBottomNav(
-        currentIndex: _index,
-        onTap: (i) => setState(() => _index = i),
+    // Despedida al salir (dosificada): al intentar cerrar la app desde la raíz,
+    // si toca, la mascota se despide un instante antes de cerrar. Si no toca
+    // (silencio / muy seguido / apagada), cierra al toque, sin fricción.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final mostro =
+            await ref.read(mascotaControllerProvider.notifier).prepararDespedida();
+        if (mostro) await Future<void>.delayed(const Duration(milliseconds: 1300));
+        await SystemNavigator.pop();
+      },
+      child: Scaffold(
+        // Permite que el círculo elevado de Matix "sobresalga" sobre el body
+        // sin recortarse.
+        extendBody: true,
+        body: Stack(
+          children: [
+            IndexedStack(index: _index, children: _screens),
+            // Burbuja de la mascota: flota sobre el contenido, encima de la
+            // barra inferior. Si no hay mensaje, no ocupa ni intercepta nada.
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: MediaQuery.viewPaddingOf(context).bottom + 88,
+              child: const MascotaBurbuja(),
+            ),
+          ],
+        ),
+        bottomNavigationBar: _MatixBottomNav(
+          currentIndex: _index,
+          onTap: (i) => setState(() => _index = i),
+        ),
       ),
     );
   }

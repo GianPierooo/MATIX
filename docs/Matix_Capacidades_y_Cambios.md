@@ -45,6 +45,16 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Matix con cara y personalidad (mascota). El robot Matix te saluda al abrir la
+  app desde una tarjeta cálida en Inicio (template + contexto: franja del día y
+  un dato rápido, sin llamar al modelo), se despide cortito al salir, y aparece
+  de vez en cuando con una burbuja tocable: aliento, un comentario, una
+  felicitación cuando avanzaste, o un empujoncito suave (nunca culpalón). Tocar
+  una opción reusa el chat de siempre. Tiene voz propia: de pana, tú peruano,
+  con su gracia. Anti-fastidio como la proactividad: dosificado, respeta tus
+  horas de silencio, los saludos son breves y baja el volumen si lo ignoras. El
+  avatar es un robot simple con parpadeo (reemplazable luego por arte custom). En
+  Ajustes puedes apagarlo o ponerlo en modo discreto.
 - Motor de proactividad (Capa 8): ahora me adelanto por iniciativa propia, no
   solo reacciono. En el tick del scheduler evalúo gatillos anticipatorios y, con
   frenos firmes, mando UN aviso accionable a la vez: (1) pre-tiempo-libre — un
