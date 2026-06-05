@@ -45,6 +45,15 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Los proyectos de trabajo ya generan tareas. Antes el árbol existía pero no
+  surgían tareas reales ni próxima acción, así que el día no tenía qué colocar.
+  Ahora, al crear/importar un proyecto (y ya corrido para OneXotic, Matix y
+  Shadow), siembro las primeras tareas accionables de corto plazo a la lista de
+  Tareas (dosificado, no vuelco todo) y fijo la próxima acción; el % se calcula
+  del árbol y SUBE cuando completas (completar la tarea marca su nodo). El
+  planificador ya coloca esas tareas como bloques de trabajo profundo en el pico,
+  no solo las prácticas de skill. Y en el detalle del proyecto ves la
+  descomposición (fases corto/medio/largo → pasos, con lo hecho marcado).
 - Preguntas con opciones tocables (elicitación), afinado: cuando ayuda, te
   ofrezco botones para elegir (uno o varios) en vez de escribir todo —en el
   intake (tipo de proyecto, prioridad), en el set del día (aceptar/editar/saltar)

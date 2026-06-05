@@ -17,3 +17,9 @@ final proyectoProvider =
     FutureProvider.family<Proyecto, String>((ref, id) async {
   return ref.watch(proyectosRepositoryProvider).obtener(id);
 });
+
+/// Descomposición (árbol) del proyecto, para mostrarla en el detalle.
+final arbolProyectoProvider =
+    FutureProvider.family<List<NodoArbol>, String>((ref, id) async {
+  return ref.watch(proyectosRepositoryProvider).arbol(id);
+});

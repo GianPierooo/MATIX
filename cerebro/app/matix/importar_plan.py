@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..db import Postgrest
-from . import creacion_proyecto, intake_analitico
+from . import creacion_proyecto, intake_analitico, siembra_tareas
 
 
 # Horizonte → granularidad del nodo: solo lo de CORTO plazo se detalla fino
@@ -184,4 +184,17 @@ async def aplicar_importacion(
                 "orden": j, "fase": raiz["fase"], "granularidad": "fino",
             })
             creados += 1
-    return {"proyecto": proyecto, "estado": proyecto.get("estado"), "nodos_creados": creados}
+
+    # Sembrar las tareas inmediatas de corto plazo + fijar la próxima acción.
+    # Solo proyectos de TRABAJO: una skill no inunda la lista de Tareas (su
+    # práctica se dosifica aparte). Idempotente y no destructivo.
+    sembradas = {"creadas": 0, "proxima_id": None}
+    if not es_skill:
+        sembradas = await siembra_tareas.sembrar_inmediatas(db, proyecto)
+
+    return {
+        "proyecto": proyecto,
+        "estado": proyecto.get("estado"),
+        "nodos_creados": creados,
+        "tareas_sembradas": sembradas["creadas"],
+    }

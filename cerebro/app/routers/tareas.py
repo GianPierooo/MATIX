@@ -102,6 +102,21 @@ async def actualizar_tarea(
     if se_completa_ahora and repeticion and actual.get("vence_en"):
         await _crear_siguiente_instancia(db, actual, repeticion)
 
+    # Sincroniza con el árbol del proyecto: completar/reabrir una tarea enlazada
+    # a un nodo marca ese nodo hecho/pendiente, para que el % de avance suba/baje
+    # de verdad. Best-effort: si no es tarea de un plan, no toca nada.
+    if "completada" in payload and payload["completada"] != actual.get("completada"):
+        try:
+            from ..matix import arbol_proyecto
+
+            await arbol_proyecto.marcar_por_tarea(
+                db,
+                tarea_id=str(tarea_id),
+                estado="hecho" if payload["completada"] else "pendiente",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
     return row
 
 

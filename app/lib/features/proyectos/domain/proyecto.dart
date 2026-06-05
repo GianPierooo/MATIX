@@ -96,3 +96,47 @@ class Proyecto {
         avance: json['avance'] as int?,
       );
 }
+
+/// Un nodo de la descomposición (árbol) del proyecto: una fase (raíz) o un paso
+/// (hijo). `granularidad` fino = detallado (corto plazo); grueso = por
+/// desglosar (medio/largo plazo).
+class NodoArbol {
+  const NodoArbol({
+    required this.id,
+    required this.titulo,
+    required this.granularidad,
+    required this.estado,
+    required this.orden,
+    this.parentId,
+    this.fase,
+    this.tareaId,
+    this.notas,
+  });
+
+  final String id;
+  final String? parentId;
+  final String titulo;
+  final String? fase;
+  final String granularidad; // 'fino' | 'grueso'
+  final String estado; // 'pendiente' | 'en_curso' | 'hecho'
+  final int orden;
+  final String? tareaId;
+  final String? notas;
+
+  bool get esRaiz => parentId == null;
+  bool get hecho => estado == 'hecho';
+  bool get enCurso => estado == 'en_curso';
+  bool get grueso => granularidad == 'grueso';
+
+  factory NodoArbol.fromJson(Map<String, dynamic> j) => NodoArbol(
+        id: j['id'] as String,
+        parentId: j['parent_id'] as String?,
+        titulo: (j['titulo'] as String?) ?? '',
+        fase: j['fase'] as String?,
+        granularidad: (j['granularidad'] as String?) ?? 'fino',
+        estado: (j['estado'] as String?) ?? 'pendiente',
+        orden: (j['orden'] as num?)?.toInt() ?? 0,
+        tareaId: j['tarea_id'] as String?,
+        notas: j['notas'] as String?,
+      );
+}

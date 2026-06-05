@@ -160,6 +160,24 @@ async def obtener_proyecto(
     return row
 
 
+@router.get("/{proyecto_id}/arbol")
+async def obtener_arbol(
+    proyecto_id: UUID, db: Postgrest = Depends(get_db)
+) -> dict:
+    """Descomposición (árbol) del proyecto para mostrarla en el detalle: fases
+    (corto fino / medio-largo grueso) → pasos. Devuelve los nodos planos (la app
+    arma el árbol por `parent_id`) + el % de avance calculado del árbol."""
+    row = await db.get(TABLE, str(proyecto_id))
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Proyecto no encontrado"
+        )
+    nodos = await db.list(
+        "arbol_nodos", filters={"proyecto_id": str(proyecto_id)}, order="orden.asc"
+    )
+    return {"nodos": nodos, "avance": avance_mod.porcentaje(nodos)}
+
+
 @router.post(
     "", response_model=ProyectoRead, status_code=status.HTTP_201_CREATED
 )

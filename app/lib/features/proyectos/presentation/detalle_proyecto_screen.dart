@@ -164,6 +164,9 @@ class _Cuerpo extends ConsumerWidget {
             child: BarraAvance(porcentaje: proyecto.avance!),
           ),
 
+        // Descomposición (árbol): fases corto/medio/largo → pasos.
+        _Descomposicion(proyectoId: proyecto.id),
+
         if (proyecto.lineaMeta != null)
           _BloqueInfo(
             titulo: 'LÍNEA DE META',
@@ -450,6 +453,152 @@ class _BloqueInfo extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Descomposición del proyecto: las fases (corto detallado / medio-largo por
+/// desglosar) con sus pasos. Lee el árbol del cerebro; si no hay, no se muestra.
+class _Descomposicion extends ConsumerWidget {
+  const _Descomposicion({required this.proyectoId});
+  final String proyectoId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(arbolProyectoProvider(proyectoId));
+    final nodos = async.valueOrNull ?? const <NodoArbol>[];
+    if (nodos.isEmpty) return const SizedBox.shrink();
+
+    final raices = nodos.where((n) => n.esRaiz).toList()
+      ..sort((a, b) => a.orden.compareTo(b.orden));
+    final hijosDe = <String, List<NodoArbol>>{};
+    for (final n in nodos) {
+      if (!n.esRaiz && n.parentId != null) {
+        (hijosDe[n.parentId!] ??= <NodoArbol>[]).add(n);
+      }
+    }
+    for (final l in hijosDe.values) {
+      l.sort((a, b) => a.orden.compareTo(b.orden));
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(6, 6, 0, 8),
+            child: Text(
+              'DESCOMPOSICIÓN',
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1,
+                color: MatixColors.muted,
+              ),
+            ),
+          ),
+          for (final fase in raices)
+            _FaseTile(fase: fase, pasos: hijosDe[fase.id] ?? const []),
+        ],
+      ),
+    );
+  }
+}
+
+class _FaseTile extends StatelessWidget {
+  const _FaseTile({required this.fase, required this.pasos});
+  final NodoArbol fase;
+  final List<NodoArbol> pasos;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = pasos.length;
+    final hechos = pasos.where((p) => p.hecho).length;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: MatixColors.card,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: MatixColors.hairline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  fase.titulo,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: MatixColors.text,
+                  ),
+                ),
+              ),
+              if (total > 0)
+                Text(
+                  '$hechos/$total',
+                  style: const TextStyle(fontSize: 12, color: MatixColors.muted),
+                ),
+            ],
+          ),
+          if (fase.grueso && pasos.isEmpty) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Icon(Icons.more_horiz, size: 14, color: MatixColors.muted),
+                const SizedBox(width: 6),
+                Text(
+                  'Por desglosar (se detalla al acercarte)',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: MatixColors.muted,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
+            ),
+          ],
+          for (final paso in pasos)
+            Padding(
+              padding: const EdgeInsets.only(top: 7),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    paso.hecho
+                        ? Icons.check_circle
+                        : paso.enCurso
+                            ? Icons.timelapse
+                            : Icons.circle_outlined,
+                    size: 16,
+                    color: paso.hecho
+                        ? MatixColors.green
+                        : paso.enCurso
+                            ? MatixColors.accent
+                            : MatixColors.muted,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      paso.titulo,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        height: 1.3,
+                        color: paso.hecho ? MatixColors.muted : MatixColors.text,
+                        decoration:
+                            paso.hecho ? TextDecoration.lineThrough : null,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }

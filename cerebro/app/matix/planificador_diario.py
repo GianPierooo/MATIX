@@ -54,6 +54,8 @@ def candidatos_proyecto(nodos: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 continue
             if h.get("granularidad") != "fino":
                 continue
+            if h.get("tarea_id"):
+                continue  # ya surgió como tarea real (sembrada/aceptada): no re-ofrecer
             out.append(h)
             break  # solo la PRIMERA pendiente de la fase (desbloqueada)
     return out

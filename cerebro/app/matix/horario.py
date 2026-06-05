@@ -386,6 +386,14 @@ async def _items_a_colocar(
             "proyecto": next((p.get("nombre") for p in proyectos if p["id"] == s.get("proyecto_id")), None),
         })
 
+    # Ids de proyectos de TRABAJO (no skills): sus tareas son trabajo PROFUNDO
+    # (van al pico), no slots chicos.
+    ids_trabajo = {
+        p["id"] for p in proyectos
+        if p.get("estado") == "activo" and not creacion_proyecto.es_skill(p)
+    }
+    nombre_proy = {p["id"]: p.get("nombre") for p in proyectos}
+
     # Tareas puntuales de hoy que NO son del set (vencen hoy, sin completar).
     try:
         tareas = await db.list("tareas", raw_filters={"eliminado_en": "is.null"})
@@ -397,11 +405,22 @@ async def _items_a_colocar(
         vence = _parse_dt(t.get("vence_en"))
         if vence is None or vence.astimezone(LIMA).date() != fecha:
             continue
-        items.append({
-            "titulo": t.get("titulo") or "Tarea", "tipo": "tarea",
-            "dur": int(cfg["dur_tarea_min"]), "prioridad": 5, "orden": 100,
-            "tarea_id": t.get("id"),
-        })
+        pid = t.get("proyecto_id")
+        if pid in ids_trabajo:
+            # Tarea de un proyecto de trabajo → bloque de trabajo profundo (pico).
+            items.append({
+                "titulo": t.get("titulo") or "Tarea", "tipo": "trabajo",
+                "dur": int(cfg["dur_trabajo_min"]),
+                "prioridad": prio.get(pid, 9), "orden": 50,
+                "proyecto_id": pid, "tarea_id": t.get("id"),
+                "proyecto": nombre_proy.get(pid),
+            })
+        else:
+            items.append({
+                "titulo": t.get("titulo") or "Tarea", "tipo": "tarea",
+                "dur": int(cfg["dur_tarea_min"]), "prioridad": 5, "orden": 100,
+                "tarea_id": t.get("id"),
+            })
 
     # Skills activas: slot chico opcional cada una (lo más ligero, va al final).
     skills = creacion_proyecto.solo_skills(

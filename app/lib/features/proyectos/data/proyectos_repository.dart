@@ -24,6 +24,15 @@ class ProyectosRepository {
     return Proyecto.fromJson(j);
   }
 
+  /// Descomposición (árbol) del proyecto: fases → pasos, para el detalle.
+  Future<List<NodoArbol>> arbol(String id) async {
+    final j = await _client.getOne('/api/v1/proyectos/$id/arbol');
+    return (j['nodos'] as List? ?? const [])
+        .cast<Map<String, dynamic>>()
+        .map(NodoArbol.fromJson)
+        .toList(growable: false);
+  }
+
   Future<Proyecto> crear({
     required String nombre,
     String? descripcion,
