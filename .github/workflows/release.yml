@@ -1,10 +1,21 @@
-# Build APK release + publicar en Supabase Storage + registrar versión
+# Gate de calidad (flutter analyze + flutter test + tests puros del cerebro)
+# + Build APK release + publicar en Supabase Storage + registrar versión.
 #
-# Reemplazó (Capa Infra · Auto-actualización in-app) a Firebase App
-# Distribution. La app se autoactualiza consultando `/api/v1/version`
-# del cerebro, que apunta al APK público en Supabase Storage.
+# El gate corre en CADA push (y en PRs), no solo el build. El APK NO se
+# construye ni publica si el gate falla: `build-and-publish` depende de los
+# jobs `gate-flutter` y `gate-cerebro`. Así la calidad se enforza sin importar
+# desde qué máquina se codee.
 #
-# Secrets requeridos:
+# - gate-flutter: `flutter analyze` + `flutter test` en app/. Sin secretos.
+# - gate-cerebro: tests PUROS del cerebro (Python + uv). Sin secretos ni BD:
+#   los de integración (pytest contra Supabase) NO corren en CI — el conftest
+#   los omite sin `cerebro/.env.test`. Un SUPABASE_URL dummy (no secreto) basta
+#   para que la app importe.
+# - build-and-publish: solo en push y solo si cambió app/** (evita republicar
+#   un APK idéntico en cambios solo-cerebro). Los secretos del build siguen
+#   viniendo de GitHub Secrets.
+#
+# Secrets requeridos (SOLO para el build, no para el gate):
 #
 #   MATIX_API_URL                 URL pública del cerebro en Railway.
 #   MATIX_API_KEY                 token X-Matix-Key del cerebro.
@@ -15,18 +26,92 @@
 #   SUPABASE_SERVICE_ROLE_KEY     service role (bypassa RLS y permite
 #                                 subir a Storage + insertar en BD).
 
-name: Release APK · publica versión
+name: CI · gate (analyze + tests) + Release APK
 
 on:
   push:
     branches: [main]
     paths:
       - 'app/**'
+      - 'cerebro/**'
+      - '.github/workflows/release.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'cerebro/**'
       - '.github/workflows/release.yml'
   workflow_dispatch:
 
 jobs:
+  # ── Detecta qué cambió, para no republicar el APK en cambios solo-cerebro ──
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.decide.outputs.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name != 'workflow_dispatch'
+        with:
+          filters: |
+            app:
+              - 'app/**'
+      - id: decide
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "app=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "app=${{ steps.filter.outputs.app }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── GATE 1: análisis estático + tests de la app Flutter ──────────────────
+  gate-flutter:
+    name: Gate · app (analyze + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Flutter pub get
+        working-directory: app
+        run: flutter pub get
+      - name: Flutter analyze
+        working-directory: app
+        run: flutter analyze
+      - name: Flutter test
+        working-directory: app
+        run: flutter test
+
+  # ── GATE 2: tests PUROS del cerebro (sin BD; integración se omite) ────────
+  gate-cerebro:
+    name: Gate · cerebro (tests puros)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: uv sync (deps + dev)
+        working-directory: cerebro
+        run: uv sync
+      - name: Pytest (solo puros; integración se omite sin .env.test)
+        working-directory: cerebro
+        env:
+          # Dummy NO secreto: solo para que pydantic-settings (Settings) pueda
+          # importar la app. Los tests puros no tocan Supabase; los de
+          # integración hacen skip sin cerebro/.env.test.
+          SUPABASE_URL: https://ci.invalid
+        run: uv run pytest -q
+
   build-and-publish:
+    needs: [changes, gate-flutter, gate-cerebro]
+    # Solo construye/publica en push (no en PRs) y solo si cambió la app.
+    if: github.event_name != 'pull_request' && needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -227,10 +312,3 @@ jobs:
             exit 1
           fi
           echo "✓ Versión $VERSION build $BUILD_NUMBER registrada"
-
-      - name: Subir APKs como artifact (backup, los 3 ABIs)
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release-${{ github.sha }}
-          path: app/build/app/outputs/flutter-apk/*-release.apk
-          retention-days: 30

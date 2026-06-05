@@ -44,7 +44,9 @@ import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+import httpx
 import pytest
+import pytest_asyncio
 
 # IMPORTANTE: cargar `.env.test` ANTES de importar la app. Si lo
 # cargamos después, `app.config.Settings()` ya leyó el `.env` normal
@@ -71,54 +73,63 @@ def _url_supabase_en(ruta: Path) -> str | None:
     return None
 
 
-# ─── Guarda 1: sin `.env.test` no se corre (nunca caemos a prod) ──────
-if not _ENV_TEST.exists():
-    pytest.exit(
-        "\n\n  [x] No existe cerebro/.env.test — el suite NO corre contra prod.\n"
-        "      Crea un proyecto Supabase de test aparte y copia\n"
-        "      cerebro/.env.test.example a cerebro/.env.test con sus\n"
-        "      credenciales. Los pasos están dentro de ese .example.\n",
-        returncode=2,
-    )
+# ─── Modo SOLO-PUROS: sin `cerebro/.env.test` corremos únicamente la
+#     lógica pura (sin BD). Antes abortábamos con `pytest.exit`; eso impedía
+#     correr cualquier test sin credenciales. Ahora, sin `.env.test`, NO
+#     tocamos Supabase ni importamos la app: las fixtures de integración hacen
+#     `skip`, y solo corre la lógica pura. Esto es lo que enforza el CI (gate
+#     de tests puros) y reproduce el `pytest` local cuando no tienes el .env.test.
+#     CON `.env.test` presente, el comportamiento es idéntico al de antes
+#     (las tres guardas + integración real). ──────────────────────────────────
+_SOLO_PUROS = not _ENV_TEST.exists()
 
-# ─── Guarda 2: `.env.test` no puede apuntar al mismo Supabase que prod ─
-_URL_PROD = _url_supabase_en(_ENV_PROD)
-_URL_TEST = _url_supabase_en(_ENV_TEST)
-if _URL_PROD and _URL_TEST and _URL_PROD == _URL_TEST:
-    pytest.exit(
-        "\n\n  [x] cerebro/.env.test apunta al MISMO Supabase que .env (prod).\n"
-        "      Apúntalo a un proyecto de test APARTE. Abortando para no\n"
-        "      escribir en producción.\n",
-        returncode=2,
-    )
+if _SOLO_PUROS:
+    # Sentinels: las fixtures de integración hacen skip antes de tocarlos.
+    settings = None  # type: ignore[assignment]
+    Postgrest = get_db = app = None  # type: ignore[assignment]
+    ASGITransport = AsyncClient = None  # type: ignore[assignment]
+else:
+    # ─── Guarda 2: `.env.test` no puede apuntar al mismo Supabase que prod ─
+    _URL_PROD = _url_supabase_en(_ENV_PROD)
+    _URL_TEST = _url_supabase_en(_ENV_TEST)
+    if _URL_PROD and _URL_TEST and _URL_PROD == _URL_TEST:
+        pytest.exit(
+            "\n\n  [x] cerebro/.env.test apunta al MISMO Supabase que .env (prod).\n"
+            "      Apúntalo a un proyecto de test APARTE. Abortando para no\n"
+            "      escribir en producción.\n",
+            returncode=2,
+        )
 
-load_dotenv(_ENV_TEST, override=True)
+    load_dotenv(_ENV_TEST, override=True)
 
-import httpx  # noqa: E402
-import pytest_asyncio  # noqa: E402
-from httpx import ASGITransport, AsyncClient  # noqa: E402
+    from httpx import ASGITransport, AsyncClient  # noqa: E402
 
-from app.config import settings  # noqa: E402
-from app.db import Postgrest, get_db  # noqa: E402
-from app.main import app  # noqa: E402
+    from app.config import settings  # noqa: E402
+    from app.db import Postgrest, get_db  # noqa: E402
+    from app.main import app  # noqa: E402
 
-# ─── Guarda 3: el modo declarado debe ser 'test' ──────────────────────
-if settings.matix_env != "test":
-    pytest.exit(
-        f"\n\n  [x] MATIX_ENV no es 'test' (lee '{settings.matix_env}').\n"
-        "      Pon MATIX_ENV=test en cerebro/.env.test.\n",
-        returncode=2,
-    )
+    # ─── Guarda 3: el modo declarado debe ser 'test' ──────────────────────
+    if settings.matix_env != "test":
+        pytest.exit(
+            f"\n\n  [x] MATIX_ENV no es 'test' (lee '{settings.matix_env}').\n"
+            "      Pon MATIX_ENV=test en cerebro/.env.test.\n",
+            returncode=2,
+        )
 
 
 def pytest_report_header(config: object) -> str:  # noqa: ARG001
-    """Imprime una línea al inicio del run aclarando contra qué
-    Supabase corren los tests. Ayuda a evitar sorpresas."""
+    """Imprime una línea al inicio del run aclarando el modo. Ayuda a evitar
+    sorpresas (¿estoy corriendo integración o solo lo puro?)."""
+    if _SOLO_PUROS:
+        return ("tests: SOLO PUROS (sin cerebro/.env.test · integración omitida; "
+                "no se toca Supabase)")
     return f"supabase para tests: {settings.supabase_url} (.env.test · MATIX_ENV=test)"
 
 
 @pytest_asyncio.fixture
 async def _fresh_db() -> AsyncIterator[Postgrest]:
+    if _SOLO_PUROS:
+        pytest.skip("test de integración: requiere cerebro/.env.test")
     pg = Postgrest()
     app.dependency_overrides[get_db] = lambda: pg
     try:

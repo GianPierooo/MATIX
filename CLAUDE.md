@@ -26,7 +26,11 @@ Estas reglas rigen TODO cambio, sin que el usuario tenga que repetirlas:
    en la zona de Lima.
 4. **Antes de commitear**: tests y `flutter analyze` en verde. Si NO puedes
    correrlos localmente (p. ej. falta el toolchain de Flutter), dilo explícito
-   y NO afirmes que están en verde — reporta qué pudiste y qué no.
+   y NO afirmes que están en verde — reporta qué pudiste y qué no. Desde
+   2026-06-05 el CI enforza este gate en cada push: `flutter analyze` +
+   `flutter test` (app) y los tests PUROS del cerebro (`uv` + `pytest`). Si el
+   gate falla, el APK NO se construye ni publica (ver `.github/workflows/
+   release.yml` y `docs/ESTADO.md`).
 5. **Commit y push a `main`** al terminar cada cambio. SIN footer de
    co-autoría (nada de `Co-Authored-By`). Mensaje claro tipo
    `feat(...)` / `fix(...)` / `docs(...)`.

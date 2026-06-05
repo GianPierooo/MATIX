@@ -291,6 +291,20 @@ Pasos completados de Capa 2:
 
 ## Decisiones tomadas
 
+- 2026-06-05 — **El CI ahora corre un GATE de calidad real**, no solo arma el
+  APK. `.github/workflows/release.yml` (renombrado a "CI · gate + Release APK")
+  corre en cada push y PR: `gate-flutter` (`flutter analyze` + `flutter test`
+  en `app/`) y `gate-cerebro` (tests PUROS del cerebro con `uv` + `pytest`). El
+  job `build-and-publish` DEPENDE de ambos gates (`needs`): si analyze o tests
+  fallan, el APK NO se construye ni publica. El build solo corre en push y solo
+  si cambió `app/**` (paths-filter), para no republicar un APK idéntico en
+  cambios solo-cerebro. Los tests de integración del cerebro (pytest contra
+  Supabase) NO corren en CI: el conftest entró en "modo solo-puros" cuando falta
+  `cerebro/.env.test` (antes hacía `pytest.exit`; ahora omite integración con
+  `skip` y no toca Supabase). El gate no usa secretos nuevos (solo un
+  `SUPABASE_URL` dummy para que la app importe); los del build siguen en GitHub
+  Secrets. Con esto la calidad se enforza sin importar desde qué máquina se
+  codee.
 - 2026-05-26 — **Proveedor LLM para Capa 2: OpenAI**, no Claude. El
   usuario ya tiene su `OPENAI_API_KEY` y prefiere un solo proveedor.
   Decisión asociada: **la llamada al modelo vive en un único módulo
