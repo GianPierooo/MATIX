@@ -248,7 +248,9 @@ class _GastosPorCategoria extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    '${(datos[i].total / total * 100).round()}%',
+                    total > 0
+                        ? '${(datos[i].total / total * 100).round()}%'
+                        : '0%',
                     style: const TextStyle(
                         fontSize: 12, color: MatixColors.muted),
                   ),
