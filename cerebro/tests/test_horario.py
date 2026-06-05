@@ -108,3 +108,31 @@ def test_colocar_mete_buffer_entre_bloques():
     r = h.colocar(items, ventanas, buffer_min=10, pico_ini=PICO_INI, pico_fin=PICO_FIN)
     a, b = r["bloques"][0], r["bloques"][1]
     assert b["ini_min"] - a["fin_min"] == 10   # buffer exacto entre bloques
+
+
+def test_norm_ignora_tildes_mayusculas_espacios():
+    assert h._norm("  Calistenia ") == "calistenia"
+    assert h._norm("Inglés") == "ingles"
+    assert h._norm("CALISTENIA") == h._norm("calistenia")
+    assert h._norm(None) == ""
+
+
+def test_pool_sugerencias_desde_lo_que_no_entro():
+    fuera = [
+        {"titulo": "Práctica: Inglés", "tipo": "skill", "dur": 30,
+         "skill": "Inglés", "proyecto_id": "p9",
+         "motivo": "no entró en las ventanas de hoy"},
+        {"titulo": "OneXotic: landing", "tipo": "trabajo", "dur": 90,
+         "proyecto": "OneXotic", "tarea_id": "t7", "nodo_id": "n3"},
+    ]
+    pool = h.pool_sugerencias(fuera)
+    assert len(pool) == 2
+    assert pool[0]["skill"] == "Inglés" and pool[0]["dur_min"] == 30
+    assert pool[1]["tarea_id"] == "t7" and pool[1]["dur_min"] == 90
+    # No arrastra el motivo (es pool ofrecible, no descarte).
+    assert "motivo" not in pool[0]
+
+
+def test_pool_sugerencias_dur_default_si_falta():
+    pool = h.pool_sugerencias([{"titulo": "X", "tipo": "tarea"}])
+    assert pool[0]["dur_min"] == 30

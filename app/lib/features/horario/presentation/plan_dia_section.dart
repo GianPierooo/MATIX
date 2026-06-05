@@ -21,10 +21,18 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
   final Map<String, ({String inicio, String fin})> _overrides = {};
   // Bloques saltados localmente (skills/tareas sin id de set).
   final Set<String> _ocultos = {};
+  // Sugerencias que el usuario aceptó en un hueco → bloques tentativos locales.
+  final List<BloquePlan> _aceptadas = [];
+  // Claves de sugerencias ya usadas (no volver a ofrecer la misma en otro hueco).
+  final Set<String> _sugUsadas = {};
+  // Huecos donde el usuario descartó la sugerencia (clave del bloque previo).
+  final Set<String> _huecosSaltados = {};
+  // "Otra": contador de rotación por hueco (clave del bloque previo).
+  final Map<String, int> _huecoOtra = {};
   bool _trabajando = false;
 
   List<BloquePlan> _visibles(PlanDia plan) {
-    final lista = plan.bloques
+    final lista = [...plan.bloques, ..._aceptadas]
         .where((b) => !_ocultos.contains(b.clave))
         .map((b) {
       final o = _overrides[b.clave];
@@ -32,6 +40,14 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
     }).toList()
       ..sort((a, b) => a.inicioMin.compareTo(b.inicioMin));
     return lista;
+  }
+
+  void _aceptarSugerencia(Sugerencia s, int iniMin, int hueco) {
+    setState(() {
+      _aceptadas.add(s.aBloque(iniMin, hueco));
+      _sugUsadas.add(s.clave);
+    });
+    _aviso('Listo, lo metí al día. Si no, lo sueltas nomás.');
   }
 
   Future<void> _hecho(BloquePlan b) async {
@@ -96,6 +112,10 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
     setState(() {
       _overrides.clear();
       _ocultos.clear();
+      _aceptadas.clear();
+      _sugUsadas.clear();
+      _huecosSaltados.clear();
+      _huecoOtra.clear();
     });
     ref.read(replanActivoProvider.notifier).state = true;
     ref.invalidate(planDiaProvider);
@@ -135,6 +155,37 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
       ..showSnackBar(SnackBar(content: Text(texto)));
   }
 
+  /// Un hueco libre: si hay una sugerencia que cabe (y no fue descartada) la
+  /// ofrece tocable; si no, lo muestra como tiempo libre, sin culpa. Dosifica:
+  /// una sola sugerencia por hueco.
+  Widget _huecoWidget(PlanDia plan, {required BloquePlan prev, required int hueco}) {
+    final key = prev.clave;
+    final descartado = _huecosSaltados.contains(key);
+    final sug = descartado
+        ? null
+        : elegirSugerencia(
+            plan.sugerencias,
+            hueco,
+            usadas: _sugUsadas,
+            saltar: _huecoOtra[key] ?? 0,
+          );
+    if (sug == null) return _LibreFila(minutos: hueco);
+
+    // ¿Hay otra alternativa distinta para este hueco? (para mostrar "Otra").
+    final caben = plan.sugerencias
+        .where((s) => !_sugUsadas.contains(s.clave) && s.durMin <= hueco)
+        .length;
+    return _SugerenciaFila(
+      hueco: hueco,
+      sugerencia: sug,
+      hayOtra: caben > 1,
+      habilitado: !_trabajando,
+      onHacer: () => _aceptarSugerencia(sug, prev.finMin, hueco),
+      onOtra: () => setState(() => _huecoOtra[key] = (_huecoOtra[key] ?? 0) + 1),
+      onSaltar: () => setState(() => _huecosSaltados.add(key)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final planAsync = ref.watch(planDiaProvider);
@@ -171,8 +222,10 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
                 for (var i = 0; i < bloques.length; i++) ...[
                   if (i > 0 &&
                       huecoVisible(bloques[i - 1].fin, bloques[i].inicio))
-                    _LibreFila(
-                      minutos: huecoMin(bloques[i - 1].fin, bloques[i].inicio),
+                    _huecoWidget(
+                      plan,
+                      prev: bloques[i - 1],
+                      hueco: huecoMin(bloques[i - 1].fin, bloques[i].inicio),
                     ),
                   _BloqueFila(
                     bloque: bloques[i],
@@ -460,6 +513,179 @@ class _LibreFila extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Un hueco libre con UNA sugerencia tocable (skill o tarea de proyecto corto).
+/// Es oferta, no relleno: el usuario la hace, pide otra, o la deja pasar.
+class _SugerenciaFila extends StatelessWidget {
+  const _SugerenciaFila({
+    required this.hueco,
+    required this.sugerencia,
+    required this.hayOtra,
+    required this.habilitado,
+    required this.onHacer,
+    required this.onOtra,
+    required this.onSaltar,
+  });
+  final int hueco;
+  final Sugerencia sugerencia;
+  final bool hayOtra;
+  final bool habilitado;
+  final VoidCallback onHacer;
+  final VoidCallback onOtra;
+  final VoidCallback onSaltar;
+
+  @override
+  Widget build(BuildContext context) {
+    final h = hueco ~/ 60;
+    final m = hueco % 60;
+    final libre = h > 0 ? '${h}h${m > 0 ? ' ${m}min' : ''}' : '${m}min';
+    final contexto = sugerencia.proyecto ?? sugerencia.skill;
+    final color = _colorTipo(sugerencia.tipo, null);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 4, 16, 4),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        decoration: BoxDecoration(
+          color: MatixColors.card,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.30)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.more_vert, size: 14, color: MatixColors.muted),
+                const SizedBox(width: 4),
+                Text(
+                  'Libre · $libre',
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    color: MatixColors.muted,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  'aprovecha si quieres',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: MatixColors.muted.withValues(alpha: 0.8),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Container(width: 3, height: 30, color: color),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        sugerencia.titulo,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: MatixColors.text,
+                          height: 1.3,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        contexto != null
+                            ? '$contexto · ~${sugerencia.durMin}min'
+                            : '~${sugerencia.durMin}min',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: MatixColors.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _SugChip(
+                  texto: 'Hacer',
+                  primario: true,
+                  enabled: habilitado,
+                  onTap: onHacer,
+                ),
+                if (hayOtra)
+                  _SugChip(
+                    texto: 'Otra',
+                    primario: false,
+                    enabled: habilitado,
+                    onTap: onOtra,
+                  ),
+                _SugChip(
+                  texto: 'Ahora no',
+                  primario: false,
+                  enabled: habilitado,
+                  onTap: onSaltar,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Chip tocable de la sugerencia (mismo lenguaje visual que las opciones de
+/// Matix: pastilla redonda acento).
+class _SugChip extends StatelessWidget {
+  const _SugChip({
+    required this.texto,
+    required this.primario,
+    required this.enabled,
+    required this.onTap,
+  });
+  final String texto;
+  final bool primario;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: primario
+          ? MatixColors.accent
+          : MatixColors.accent.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(99),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(99),
+        onTap: enabled ? onTap : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          child: Text(
+            texto,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: primario ? Colors.white : MatixColors.accent,
+            ),
+          ),
+        ),
       ),
     );
   }

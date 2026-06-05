@@ -37,6 +37,7 @@ class Proyecto {
     required this.creadoEn,
     required this.actualizadoEn,
     this.avance,
+    this.esSkill = false,
   });
 
   final String id;
@@ -56,6 +57,10 @@ class Proyecto {
   /// % de avance (0..100) calculado desde el árbol del proyecto, o `null` si
   /// el proyecto no tiene plan todavía (no se muestra barra).
   final int? avance;
+
+  /// Skill/hábito (no proyecto de trabajo): no consume el tope de 3 y va en su
+  /// propio grupo en la pantalla de Proyectos.
+  final bool esSkill;
 
   bool get esActivo => estado == EstadoProyecto.activo;
 
@@ -94,6 +99,7 @@ class Proyecto {
         creadoEn: DateTime.parse(json['creado_en'] as String),
         actualizadoEn: DateTime.parse(json['actualizado_en'] as String),
         avance: json['avance'] as int?,
+        esSkill: json['es_skill'] as bool? ?? false,
       );
 }
 

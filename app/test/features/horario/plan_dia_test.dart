@@ -91,5 +91,85 @@ void main() {
       expect(plan.esReplan, isTrue);
       expect(plan.desde, '16:30');
     });
+
+    test('parsea sugerencias (pool de huecos libres)', () {
+      final plan = PlanDia.fromJson({
+        ...json,
+        'sugerencias': [
+          {
+            'titulo': 'Práctica: Inglés',
+            'tipo': 'skill',
+            'dur_min': 30,
+            'skill': 'Inglés',
+          },
+          {
+            'titulo': 'OneXotic: cerrar landing',
+            'tipo': 'trabajo',
+            'dur_min': 90,
+            'proyecto': 'OneXotic',
+            'tarea_id': 't7',
+          },
+        ],
+      });
+      expect(plan.sugerencias.length, 2);
+      expect(plan.sugerencias[0].skill, 'Inglés');
+      expect(plan.sugerencias[1].durMin, 90);
+      expect(plan.sugerencias[1].clave, 't7');
+    });
+
+    test('sin sugerencias el pool queda vacío (compat)', () {
+      final plan = PlanDia.fromJson(json);
+      expect(plan.sugerencias, isEmpty);
+    });
+  });
+
+  group('elegirSugerencia (dosificación por hueco)', () {
+    final pool = [
+      const Sugerencia(titulo: 'Inglés', tipo: 'skill', durMin: 30, skill: 'Inglés'),
+      const Sugerencia(
+          titulo: 'Guitarra', tipo: 'skill', durMin: 45, skill: 'Guitarra'),
+      const Sugerencia(
+          titulo: 'OneXotic: landing',
+          tipo: 'trabajo',
+          durMin: 90,
+          proyecto: 'OneXotic',
+          tareaId: 't7'),
+    ];
+
+    test('prefiere la de mayor duración que aún cabe en el hueco', () {
+      final s = elegirSugerencia(pool, 60);
+      expect(s, isNotNull);
+      expect(s!.titulo, 'Guitarra'); // 45 cabe en 60; 90 no
+    });
+
+    test('hueco grande deja entrar la más larga', () {
+      final s = elegirSugerencia(pool, 120);
+      expect(s!.durMin, 90);
+    });
+
+    test('hueco chico sin nada que quepa devuelve null', () {
+      expect(elegirSugerencia(pool, 20), isNull);
+    });
+
+    test('no repite una sugerencia ya usada', () {
+      final s = elegirSugerencia(pool, 60, usadas: {'skill|Guitarra'});
+      expect(s!.titulo, 'Inglés'); // Guitarra ya usada → la siguiente que cabe
+    });
+
+    test('saltar rota entre las que caben (una por hueco)', () {
+      final a = elegirSugerencia(pool, 60, saltar: 0);
+      final b = elegirSugerencia(pool, 60, saltar: 1);
+      expect(a!.titulo, 'Guitarra');
+      expect(b!.titulo, 'Inglés');
+    });
+
+    test('aBloque coloca tentativo al inicio del hueco, acotado', () {
+      final b = pool[2].aBloque(600, 60); // hueco de 60min, dur 90 → recorta a 60
+      expect(b.inicio, '10:00');
+      expect(b.fin, '11:00');
+      expect(b.tentativo, isTrue);
+      expect(b.tipo, 'trabajo');
+      expect(b.tareaId, 't7');
+    });
   });
 }

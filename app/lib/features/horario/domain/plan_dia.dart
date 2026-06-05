@@ -80,6 +80,64 @@ class FueraPlan {
       );
 }
 
+/// Una sugerencia ofrecible en un hueco libre: práctica de skill o tarea de
+/// proyecto corto que no entró al plan. Se ofrece, no se impone: la app dosifica
+/// (una por hueco, casada por tamaño) y el usuario decide tocarla o dejarla.
+@immutable
+class Sugerencia {
+  const Sugerencia({
+    required this.titulo,
+    required this.tipo,
+    required this.durMin,
+    this.proyecto,
+    this.skill,
+    this.nodoId,
+    this.tareaId,
+    this.setItemId,
+  });
+
+  final String titulo;
+  final String tipo; // trabajo | skill | tarea
+  final int durMin; // duración estimada (para casar con el hueco)
+  final String? proyecto;
+  final String? skill;
+  final String? nodoId;
+  final String? tareaId;
+  final String? setItemId;
+
+  /// Clave estable para no repetir la misma sugerencia entre huecos.
+  String get clave => tareaId ?? nodoId ?? setItemId ?? '$tipo|$titulo';
+
+  factory Sugerencia.fromJson(Map<String, dynamic> j) => Sugerencia(
+        titulo: (j['titulo'] as String?) ?? '',
+        tipo: (j['tipo'] as String?) ?? 'tarea',
+        durMin: (j['dur_min'] as num?)?.toInt() ?? 30,
+        proyecto: j['proyecto'] as String?,
+        skill: j['skill'] as String?,
+        nodoId: j['nodo_id'] as String?,
+        tareaId: j['tarea_id'] as String?,
+        setItemId: j['set_item_id'] as String?,
+      );
+
+  /// Convierte la sugerencia aceptada en un bloque tentativo del plan, colocado
+  /// al inicio del hueco con su duración (acotada al hueco disponible).
+  BloquePlan aBloque(int iniMin, int huecoMin) {
+    final dur = durMin.clamp(15, huecoMin);
+    return BloquePlan(
+      inicio: hhmmDesdeMin(iniMin),
+      fin: hhmmDesdeMin(iniMin + dur),
+      titulo: titulo,
+      tipo: tipo,
+      tentativo: true,
+      proyecto: proyecto,
+      skill: skill,
+      nodoId: nodoId,
+      tareaId: tareaId,
+      setItemId: setItemId,
+    );
+  }
+}
+
 /// El plan del día que devuelve el cerebro (capa de horario).
 @immutable
 class PlanDia {
@@ -89,6 +147,7 @@ class PlanDia {
     required this.duerme,
     required this.bloques,
     required this.fuera,
+    this.sugerencias = const [],
     this.desde,
   });
 
@@ -98,6 +157,7 @@ class PlanDia {
   final String? desde; // "HH:MM" si es replan desde la hora actual
   final List<BloquePlan> bloques;
   final List<FueraPlan> fuera;
+  final List<Sugerencia> sugerencias;
 
   bool get vacio => bloques.isEmpty;
   bool get esReplan => desde != null;
@@ -114,7 +174,28 @@ class PlanDia {
         fuera: ((j['fuera'] as List<dynamic>?) ?? const [])
             .map((e) => FueraPlan.fromJson(e as Map<String, dynamic>))
             .toList(),
+        sugerencias: ((j['sugerencias'] as List<dynamic>?) ?? const [])
+            .map((e) => Sugerencia.fromJson(e as Map<String, dynamic>))
+            .toList(),
       );
+}
+
+/// Elige UNA sugerencia para un hueco de [huecoMin] minutos, de entre el [pool],
+/// saltando las ya usadas (en [usadas]). Prefiere la de mayor duración que aún
+/// quepa (aprovecha el hueco sin pasarse). Devuelve `null` si ninguna cabe.
+/// PURA: la usa la vista para dosificar (una por hueco) y es testeable.
+Sugerencia? elegirSugerencia(
+  List<Sugerencia> pool,
+  int huecoMin, {
+  Set<String> usadas = const {},
+  int saltar = 0,
+}) {
+  final caben = pool
+      .where((s) => !usadas.contains(s.clave) && s.durMin <= huecoMin)
+      .toList()
+    ..sort((a, b) => b.durMin.compareTo(a.durMin));
+  if (caben.isEmpty) return null;
+  return caben[saltar % caben.length];
 }
 
 // ── Helpers puros (sin Flutter UI, testeables) ───────────────────────────────

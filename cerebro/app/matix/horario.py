@@ -219,6 +219,35 @@ def colocar(
     return {"bloques": bloques, "fuera": fuera}
 
 
+def _norm(s: Any) -> str:
+    """Normaliza un título para comparar sin tropezar con tildes/mayúsculas/
+    espacios (p. ej. 'Calistenia' vs 'calistenia '). PURO."""
+    t = str(s or "").strip().lower()
+    tildes = str.maketrans("áéíóúüñ", "aeiouun")
+    return t.translate(tildes)
+
+
+def pool_sugerencias(fuera: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """De lo que NO entró hoy arma un pool de sugerencias ofrecibles en los huecos
+    libres (práctica de skill o tarea de proyecto corto), cada una con su duración
+    para casar por tamaño de hueco. La app dosifica: una por hueco, sin rellenar.
+    PURO."""
+    pool: list[dict[str, Any]] = []
+    for f in fuera:
+        pool.append({
+            "titulo": f.get("titulo") or "",
+            "tipo": f.get("tipo") or "",
+            "dur_min": int(f.get("dur") or 30),
+            "proyecto": f.get("proyecto"),
+            "skill": f.get("skill"),
+            "proyecto_id": f.get("proyecto_id"),
+            "nodo_id": f.get("nodo_id"),
+            "tarea_id": f.get("tarea_id"),
+            "set_item_id": f.get("set_item_id"),
+        })
+    return pool
+
+
 # ── Helpers de recurrencia / fechas (puros) ──────────────────────────────────
 
 def _ordinal_ocurrencia(freq: str, dias_semana: Any, inicio: date, fecha: date) -> int:
@@ -348,7 +377,8 @@ async def _compromisos_fijos(
 
 
 async def _items_a_colocar(
-    db: Postgrest, *, fecha: date, cfg: dict[str, Any], solo_pendientes: bool
+    db: Postgrest, *, fecha: date, cfg: dict[str, Any], solo_pendientes: bool,
+    titulos_fijos: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Construye la cola priorizada: trabajo (set del día, por prioridad del
     proyecto) → tareas puntuales de hoy → skills (ligeras, opcionales, al final).
@@ -423,10 +453,16 @@ async def _items_a_colocar(
             })
 
     # Skills activas: slot chico opcional cada una (lo más ligero, va al final).
+    # Si la skill YA tiene su rutina como compromiso fijo del día (p. ej.
+    # Calistenia a las 07:00), su práctica ocurre AHÍ: no agendamos un segundo
+    # bloque tentativo duplicado.
+    fijos_norm = titulos_fijos or set()
     skills = creacion_proyecto.solo_skills(
         [p for p in proyectos if p.get("estado") == "activo"]
     )
     for sk in skills:
+        if _norm(sk["nombre"]) in fijos_norm:
+            continue
         items.append({
             "titulo": f"Práctica: {sk['nombre']}", "tipo": "skill",
             "dur": int(cfg["dur_skill_min"]), "prioridad": 8, "orden": 200,
@@ -461,7 +497,13 @@ async def plan_de_hoy_data(
         buffer_min=buffer_min, desde_min=desde_min,
     )
 
-    items = await _items_a_colocar(db, fecha=fecha, cfg=cfg, solo_pendientes=desde_ahora)
+    # Títulos de los compromisos fijos de hoy (normalizados) → una skill cuya
+    # rutina ya cae en un fijo del día no se duplica como bloque tentativo.
+    titulos_fijos = {_norm(c["titulo"]) for c in fijos}
+    items = await _items_a_colocar(
+        db, fecha=fecha, cfg=cfg, solo_pendientes=desde_ahora,
+        titulos_fijos=titulos_fijos,
+    )
     colocado = colocar(items, ventanas, buffer_min=buffer_min, pico_ini=pico_ini, pico_fin=pico_fin)
 
     # Bloques fijos (no tentativos) + bloques colocados (tentativos), ordenados.
@@ -493,6 +535,8 @@ async def plan_de_hoy_data(
         "desde": min_a_hhmm(desde_min) if desde_min is not None else None,
         "bloques": bloques,
         "fuera": fuera,
+        # Pool ofrecible en los huecos libres (la app dosifica: una por hueco).
+        "sugerencias": pool_sugerencias(colocado["fuera"]),
     }
 
 

@@ -45,6 +45,16 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Proyectos, Calistenia y huecos libres, tres arreglos finos. (1) En Proyectos
+  las skills/hábitos (Inglés, Guitarra, Calistenia) ya NO se mezclan con los
+  proyectos de trabajo: van en su propio grupo «Skills» y el tope «X / 3»
+  cuenta solo trabajo (se acabó el «6/3»). (2) Calistenia ya no aparece dos
+  veces en el día: si una skill tiene su rutina como compromiso fijo (su ancla
+  de las 07:00), su práctica ocurre ahí y el planificador no agenda un segundo
+  bloque tentativo duplicado. (3) En la vista «Hoy», cada hueco libre ofrece
+  una sugerencia tocable (práctica de skill o tarea de proyecto corto, casada
+  al tamaño del hueco): la haces, pides otra, o la dejas pasar. Es oferta, no
+  relleno: una sola por hueco, el tiempo libre respira.
 - Los proyectos de trabajo ya generan tareas. Antes el árbol existía pero no
   surgían tareas reales ni próxima acción, así que el día no tenía qué colocar.
   Ahora, al crear/importar un proyecto (y ya corrido para OneXotic, Matix y

@@ -37,10 +37,16 @@ class ProyectosListScreen extends ConsumerWidget {
           onRetry: () => ref.invalidate(proyectosListProvider),
         ),
         data: (proyectos) {
-          final activos = proyectos
-              .where((p) => p.estado == EstadoProyecto.activo)
+          final activosTrabajo = proyectos
+              .where((p) => p.estado == EstadoProyecto.activo && !p.esSkill)
               .toList()
             ..sort((a, b) => (a.prioridad ?? 99).compareTo(b.prioridad ?? 99));
+          // Las skills (es_skill=true) son su propio grupo: NO consumen el
+          // tope de 3. Acá van las activas; las parqueadas caen en "Aparcados".
+          final skills = proyectos
+              .where((p) => p.estado == EstadoProyecto.activo && p.esSkill)
+              .toList()
+            ..sort((a, b) => a.nombre.compareTo(b.nombre));
           final aparcados = proyectos
               .where((p) => p.estado == EstadoProyecto.aparcado)
               .toList();
@@ -58,10 +64,16 @@ class ProyectosListScreen extends ConsumerWidget {
                 MatixLayout.bottomNavGuard(context),
               ),
               children: [
-                _Seccion('Activos', '${activos.length} / 3'),
-                if (activos.isEmpty)
+                // El tope de 3 cuenta SOLO trabajo; las skills van aparte.
+                _Seccion('Activos', '${activosTrabajo.length} / 3'),
+                if (activosTrabajo.isEmpty)
                   const _Vacio('Aún no has activado ningún proyecto.'),
-                ...activos.map((p) => _ActivoCard(proyecto: p)),
+                ...activosTrabajo.map((p) => _ActivoCard(proyecto: p)),
+                if (skills.isNotEmpty) ...[
+                  _Seccion('Skills', '${skills.length}',
+                      right: 'No consumen el tope'),
+                  ...skills.map((p) => _ActivoCard(proyecto: p)),
+                ],
                 if (aparcados.isNotEmpty) ...[
                   _Seccion('Aparcados', '${aparcados.length}',
                       right: 'En pausa consciente'),
