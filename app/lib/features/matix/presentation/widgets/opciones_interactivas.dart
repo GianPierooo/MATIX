@@ -97,6 +97,23 @@ class _OpcionesInteractivasState extends State<OpcionesInteractivas> {
             ),
           ),
         ],
+        // Regla de oro: el texto libre SIEMPRE está disponible (salvo que se
+        // apague). Se lo recordamos: el composer de abajo acepta cualquier cosa.
+        if (b.permiteTexto) ...[
+          const SizedBox(height: MatixSpacing.s),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.edit_outlined,
+                  size: 13, color: MatixColors.muted),
+              const SizedBox(width: 4),
+              Text(
+                'o escribe tu respuesta abajo',
+                style: MatixText.small.copyWith(fontStyle: FontStyle.italic),
+              ),
+            ],
+          ),
+        ],
       ],
     );
   }

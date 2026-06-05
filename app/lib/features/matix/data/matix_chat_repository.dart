@@ -21,6 +21,7 @@ class BloqueOpciones {
     required this.pregunta,
     required this.opciones,
     required this.tipo,
+    this.permiteTexto = true,
   });
 
   final String pregunta;
@@ -28,6 +29,10 @@ class BloqueOpciones {
 
   /// 'seleccion_unica' | 'seleccion_multiple' | 'texto'.
   final String tipo;
+
+  /// Si el usuario puede escribir otra cosa además de tocar una opción. Default
+  /// true (regla de oro: nunca encerrarlo en los botones).
+  final bool permiteTexto;
 
   bool get esTexto => tipo == 'texto';
   bool get esMultiple => tipo == 'seleccion_multiple';
@@ -38,6 +43,7 @@ class BloqueOpciones {
             .map((e) => e.toString())
             .toList(growable: false),
         tipo: (j['tipo'] as String?) ?? 'seleccion_unica',
+        permiteTexto: j['permite_texto'] as bool? ?? true,
       );
 }
 

@@ -1297,6 +1297,16 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                             "Las opciones (2 a 6, cortas). Vacío si tipo=texto."
                         ),
                     },
+                    "permite_texto": {
+                        "type": "boolean",
+                        "description": (
+                            "Si el usuario PUEDE escribir otra cosa además de las "
+                            "opciones (default true). Déjalo en true casi siempre: "
+                            "las opciones aceleran, pero NUNCA encierres al usuario "
+                            "en los botones. Ponlo en false solo si la respuesta "
+                            "DEBE ser una de las opciones."
+                        ),
+                    },
                 },
                 "required": ["pregunta", "tipo"],
                 "additionalProperties": False,
@@ -4240,7 +4250,15 @@ async def _preguntar_con_opciones(_db: Postgrest, args: dict) -> dict[str, Any]:
             "validacion",
             "Para seleccion_unica/multiple pasa al menos 2 opciones.",
         )
-    return _ok({"pregunta": pregunta, "opciones": opciones, "tipo": tipo})
+    # El texto libre va activado salvo que se apague a propósito (regla de oro).
+    permite_texto = args.get("permite_texto")
+    permite_texto = True if permite_texto is None else bool(permite_texto)
+    return _ok({
+        "pregunta": pregunta,
+        "opciones": opciones,
+        "tipo": tipo,
+        "permite_texto": permite_texto,
+    })
 
 
 # ── Modos de Matix: activar / desactivar ────────────────────────────

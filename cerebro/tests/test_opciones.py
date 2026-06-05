@@ -17,6 +17,17 @@ async def test_handler_seleccion_unica_ok():
     assert d["pregunta"] == "¿Qué modo activo?"
     assert d["tipo"] == "seleccion_unica"
     assert d["opciones"] == ["Tesis", "Estudio", "Finanzas"]
+    # Regla de oro: el texto libre va activado por defecto.
+    assert d["permite_texto"] is True
+
+
+async def test_handler_permite_texto_se_puede_apagar():
+    r = await tools._preguntar_con_opciones(
+        None,
+        {"pregunta": "¿sí o no?", "tipo": "seleccion_unica",
+         "opciones": ["sí", "no"], "permite_texto": False},
+    )
+    assert r["ok"] and r["datos"]["permite_texto"] is False
 
 
 async def test_handler_texto_sin_opciones_ok():

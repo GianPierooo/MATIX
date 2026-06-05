@@ -25,6 +25,22 @@ void main() {
       expect(b.esTexto, isTrue);
       expect(b.opciones, isEmpty);
     });
+
+    test('permite_texto: default true y se respeta false', () {
+      final porDefecto = BloqueOpciones.fromJson({
+        'pregunta': '¿plazo?',
+        'opciones': ['Corto', 'Largo'],
+        'tipo': 'seleccion_unica',
+      });
+      expect(porDefecto.permiteTexto, isTrue); // regla de oro
+      final apagado = BloqueOpciones.fromJson({
+        'pregunta': '¿sí o no?',
+        'opciones': ['Sí', 'No'],
+        'tipo': 'seleccion_unica',
+        'permite_texto': false,
+      });
+      expect(apagado.permiteTexto, isFalse);
+    });
   });
 
   Future<void> pump(WidgetTester tester, BloqueOpciones b, List<String> out) {
@@ -90,5 +106,32 @@ void main() {
     await tester.tap(find.byIcon(Icons.send_rounded));
     await tester.pump();
     expect(out, ['mi respuesta']);
+  });
+
+  testWidgets('chips con permite_texto muestran el cue de escribir', (tester) async {
+    await pump(
+      tester,
+      const BloqueOpciones(
+        pregunta: '¿Qué plazo?',
+        opciones: ['Corto', 'Largo'],
+        tipo: 'seleccion_unica',
+      ),
+      <String>[],
+    );
+    expect(find.textContaining('escribe tu respuesta'), findsOneWidget);
+  });
+
+  testWidgets('chips con permite_texto=false NO muestran el cue', (tester) async {
+    await pump(
+      tester,
+      const BloqueOpciones(
+        pregunta: '¿Sí o no?',
+        opciones: ['Sí', 'No'],
+        tipo: 'seleccion_unica',
+        permiteTexto: false,
+      ),
+      <String>[],
+    );
+    expect(find.textContaining('escribe tu respuesta'), findsNothing);
   });
 }

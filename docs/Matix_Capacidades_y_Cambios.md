@@ -45,6 +45,14 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Preguntas con opciones tocables (elicitación), afinado: cuando ayuda, te
+  ofrezco botones para elegir (uno o varios) en vez de escribir todo —en el
+  intake (tipo de proyecto, prioridad), en el set del día (aceptar/editar/saltar)
+  y en decisiones («¿lo parqueo o lo achico?»). Regla de oro: las opciones
+  aceleran, pero SIEMPRE puedes escribir otra cosa (campo `permite_texto`, por
+  defecto activo, con un «o escribe tu respuesta abajo» visible). Una pregunta a
+  la vez, nada de encuesta. La base ya existía; sumé el texto-libre garantizado y
+  la guía de cuándo usarlo.
 - Operación: monitoreo de costo + errores + backup. Ahora llevo el gasto de API
   estimado por día y por mes (chat/visión/embeddings/voz/Whisper y web), te lo
   respondo por chat («¿cuánto gasté hoy / este mes?») y te aviso por push si

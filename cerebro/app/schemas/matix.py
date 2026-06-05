@@ -312,6 +312,9 @@ class BloqueOpciones(BaseModel):
     pregunta: str
     opciones: list[str] = Field(default_factory=list)
     tipo: Literal["seleccion_unica", "seleccion_multiple", "texto"]
+    # Regla de oro: el texto libre SIEMPRE está disponible salvo que se apague
+    # a propósito. La app muestra un «escribir otra cosa» cuando es true.
+    permite_texto: bool = True
 
 
 class AccionDispositivo(BaseModel):
