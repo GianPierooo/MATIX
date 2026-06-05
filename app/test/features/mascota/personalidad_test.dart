@@ -82,4 +82,57 @@ void main() {
       expect(a.texto, b.texto);
     });
   });
+
+  group('franjaPersonaDe (modo persona alineado a anclas, no al silencio)', () {
+    test('antes de despertar → dormido', () {
+      expect(franjaPersonaDe(3, despertar: 7, dormir: 23),
+          FranjaPersona.dormido);
+    });
+
+    test('7:42 con despertar=7 → mañana (el bug del usuario)', () {
+      // Antes salía "Modo noche" porque silencio terminaba a las 8;
+      // ahora se alinea al ancla: despertar=7 → ya es mañana.
+      expect(franjaPersonaDe(7, despertar: 7, dormir: 23),
+          FranjaPersona.manana);
+    });
+
+    test('mañana hasta el mediodía', () {
+      expect(franjaPersonaDe(10, despertar: 7, dormir: 23),
+          FranjaPersona.manana);
+    });
+
+    test('tarde entre el mediodía y las 2h previas a dormir', () {
+      expect(franjaPersonaDe(15, despertar: 7, dormir: 23),
+          FranjaPersona.tarde);
+      expect(franjaPersonaDe(20, despertar: 7, dormir: 23),
+          FranjaPersona.tarde);
+    });
+
+    test('últimas 2h antes de dormir → noche (cierre del día)', () {
+      expect(franjaPersonaDe(21, despertar: 7, dormir: 23),
+          FranjaPersona.noche);
+      expect(franjaPersonaDe(22, despertar: 7, dormir: 23),
+          FranjaPersona.noche);
+    });
+
+    test('a la hora de dormir o después → dormido', () {
+      expect(franjaPersonaDe(23, despertar: 7, dormir: 23),
+          FranjaPersona.dormido);
+      expect(franjaPersonaDe(2, despertar: 7, dormir: 23),
+          FranjaPersona.dormido);
+    });
+
+    test('anclas raras (despertar>=dormir) no encierran al usuario', () {
+      // Cae a una franja despierta razonable en vez de "dormido todo el día".
+      final p = franjaPersonaDe(10, despertar: 23, dormir: 7);
+      expect(p, isNot(FranjaPersona.dormido));
+    });
+
+    test('franjaDiaDePersona traduce a la franja del copy del saludo', () {
+      expect(franjaDiaDePersona(FranjaPersona.manana), FranjaDia.manana);
+      expect(franjaDiaDePersona(FranjaPersona.tarde), FranjaDia.tarde);
+      expect(franjaDiaDePersona(FranjaPersona.noche), FranjaDia.noche);
+      expect(franjaDiaDePersona(FranjaPersona.dormido), FranjaDia.noche);
+    });
+  });
 }

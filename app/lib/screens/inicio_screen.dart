@@ -24,6 +24,7 @@ import '../features/finanzas/providers/movimientos_providers.dart';
 import '../features/horario/presentation/plan_dia_section.dart';
 import '../features/horario/providers/horario_providers.dart';
 import '../features/mascota/presentation/presencia_matix.dart';
+import '../features/mascota/providers/mascota_providers.dart';
 import '../features/matix/data/captura_apunte_repository.dart';
 import '../features/matix/data/grabacion_voz_service.dart';
 import '../features/matix/data/matix_transcribir_repository.dart';
@@ -292,12 +293,16 @@ class _InicioScreenState extends ConsumerState<InicioScreen> {
             },
             child: ListView(
               controller: _scroll,
-              // Cubre la nav inferior + safe area + saliente del FAB.
+              // Cubre la nav inferior + safe area + saliente del FAB. Cuando la
+              // mascota está habilitada sumamos la altura típica de su tarjeta
+              // expandida (~230px) para que NO tape el último contenido al
+              // hacer scroll hasta el final — antes se comía los Pendientes.
               padding: EdgeInsets.fromLTRB(
                 0,
                 8,
                 0,
-                MatixLayout.bottomNavGuard(context),
+                MatixLayout.bottomNavGuard(context) +
+                    (ref.watch(mascotaConfigProvider).habilitada ? 230 : 0),
               ),
               children: [
                 const _BotonesRitual(),

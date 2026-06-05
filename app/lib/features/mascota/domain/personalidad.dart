@@ -13,6 +13,48 @@ FranjaDia franjaDe(int hora) {
   return FranjaDia.noche;
 }
 
+/// Modo/persona del robot, alineado a las ANCLAS del usuario (despertar/dormir
+/// del horario), no al horario de silencio de los pings. Si despiertas a las 7,
+/// a las 7:42 SIEMPRE es de día — aunque el silencio de notificaciones llegue
+/// hasta las 8.
+///
+/// - `dormido`: antes de la hora de despertar o después de la de dormir; el
+///   robot calla y solo asoma muy bajito si lo tocas.
+/// - `manana`: desde despertar hasta el mediodía.
+/// - `tarde`: desde el mediodía hasta 2h antes de la hora de dormir.
+/// - `noche`: en las últimas 2h antes de dormir; tono de cierre.
+enum FranjaPersona { dormido, manana, tarde, noche }
+
+/// Decide la franja persona a partir de la hora actual y de las anclas. PURO.
+/// `despertar` y `dormir` son horas enteras [0..24]. Robusto a configuraciones
+/// raras: si `despertar >= dormir`, se trata como "siempre despierto" (caemos
+/// a la franja por reloj sin marcar `dormido`).
+FranjaPersona franjaPersonaDe(
+  int hora, {
+  required int despertar,
+  required int dormir,
+}) {
+  // Tope inferior y superior del día activo, con guarda contra anclas inválidas.
+  final d = despertar.clamp(0, 23);
+  final n = dormir.clamp(d + 1, 24);
+  if (hora < d || hora >= n) return FranjaPersona.dormido;
+  // Las últimas 2h antes de dormir son "modo noche" (cerrando el día) aunque
+  // el silencio de pings empiece después o antes. Mínimo: la última hora.
+  final inicioNoche = (n - 2).clamp(d + 1, n);
+  if (hora >= inicioNoche) return FranjaPersona.noche;
+  if (hora < 12) return FranjaPersona.manana;
+  return FranjaPersona.tarde;
+}
+
+/// Convierte la franja persona en la `FranjaDia` que usa el copy del saludo.
+/// `dormido` → `noche` (la frase nocturna es la más adecuada si te asoma).
+FranjaDia franjaDiaDePersona(FranjaPersona p) => switch (p) {
+      FranjaPersona.manana => FranjaDia.manana,
+      FranjaPersona.tarde => FranjaDia.tarde,
+      FranjaPersona.noche => FranjaDia.noche,
+      FranjaPersona.dormido => FranjaDia.noche,
+    };
+
 /// Tipo de aparición de la mascota. El saludo y la despedida son los bordes del
 /// día; el resto son apariciones interactivas tipo mascota (la versión buena).
 enum TipoMascota {

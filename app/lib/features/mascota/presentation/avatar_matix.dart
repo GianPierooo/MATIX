@@ -84,9 +84,26 @@ class _AvatarMatixState extends State<AvatarMatix>
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
+    // Halo circular detrás del robot. Es lo que hace que se VEA en v1: sin
+    // halo, el cuerpo del robot (cardHi) tenía el mismo tono que el fondo y
+    // solo se distinguía el borde acentuado. Con el halo pleno, el robot tiene
+    // su propia "tarjeta" redonda contra cualquier fondo de pantalla.
+    return Container(
       width: widget.size,
       height: widget.size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: MatixColors.cardHi,
+        border:
+            Border.all(color: MatixColors.accent.withValues(alpha: 0.55)),
+        boxShadow: [
+          BoxShadow(
+            color: MatixColors.accent.withValues(alpha: 0.20),
+            blurRadius: 12,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
       child: AnimatedBuilder(
         animation: Listenable.merge([_ctrl, _brinco, _bob]),
         builder: (context, _) {
@@ -125,13 +142,16 @@ class _RobotPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
-    final cuerpo = Paint()..color = MatixColors.cardHi;
+    // El cuerpo del robot ahora se pinta CLARO (casi blanco) para contrastar
+    // con el halo cardHi del wrapper. Antes el cuerpo era cardHi sobre fondo
+    // cardHi/bg y el robot quedaba invisible — solo se intuía el borde.
+    final cuerpo = Paint()..color = MatixColors.text;
     final borde = Paint()
-      ..color = MatixColors.accent.withValues(alpha: 0.55)
+      ..color = MatixColors.accent.withValues(alpha: 0.75)
       ..style = PaintingStyle.stroke
       ..strokeWidth = w * 0.045;
     final acento = Paint()..color = MatixColors.accent;
-    final ojo = Paint()..color = MatixColors.accent;
+    final ojo = Paint()..color = MatixColors.bg;
 
     // Antena: línea + bolita arriba al centro.
     final cx = w / 2;
@@ -166,12 +186,12 @@ class _RobotPainter extends CustomPainter {
       canvas.drawRRect(r, ojo);
     }
 
-    // Boca: una línea corta y amable.
+    // Boca: una línea corta y amable, oscura sobre el cuerpo claro.
     canvas.drawLine(
       Offset(w * 0.40, h * 0.68),
       Offset(w * 0.60, h * 0.68),
       Paint()
-        ..color = MatixColors.muted
+        ..color = MatixColors.bg
         ..strokeWidth = w * 0.05
         ..strokeCap = StrokeCap.round,
     );

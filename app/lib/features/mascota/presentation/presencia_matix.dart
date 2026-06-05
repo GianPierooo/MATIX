@@ -7,6 +7,7 @@ import '../../../core/hub_refresh.dart';
 import '../../../core/markdown_plano.dart';
 import '../../../theme/matix_colors.dart';
 import '../../apuntes/providers/apuntes_providers.dart';
+import '../../horario/domain/plan_dia.dart';
 import '../../horario/providers/horario_providers.dart';
 import '../../matix/presentation/manos_libres_screen.dart';
 import '../../matix/providers/captura_apunte_providers.dart';
@@ -15,7 +16,6 @@ import '../../matix/providers/navegacion_matix_provider.dart';
 import '../../rollover/domain/rollover.dart';
 import '../../rollover/providers/rollover_providers.dart';
 import '../../tareas/providers/tareas_providers.dart';
-import '../domain/dosificacion.dart';
 import '../domain/personalidad.dart';
 import '../domain/presencia.dart';
 import '../providers/mascota_providers.dart';
@@ -358,22 +358,37 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
     });
 
     final ahora = DateTime.now();
-    final silencio = enSilencio(ahora.hour, cfg.silencioInicio, cfg.silencioFin);
+    // SEPARAMOS las dos cosas que estaban pegadas:
+    //   - `silencio` (cfg.silencioInicio/Fin) sigue rigiendo SOLO los pings
+    //     interruptores (proactividad). Es ortogonal a este widget.
+    //   - El modo/PERSONA del robot se alinea a las ANCLAS del usuario
+    //     (despertar/dormir del plan): si despiertas a las 7, a las 7:42 NUNCA
+    //     es "modo noche", aunque el silencio termine a las 8.
+    final despertar =
+        minDesdeHHMM(plan?.despierta ?? '07:00') ~/ 60;
+    final dormir = minDesdeHHMM(plan?.duerme ?? '23:00') ~/ 60;
+    final persona = franjaPersonaDe(
+      ahora.hour, despertar: despertar, dormir: dormir,
+    );
 
     final MensajePresencia msg;
     MensajePresencia? accionable;
-    if (silencio) {
-      // Respeta el silencio: un mensaje tranquilo, sin celebrar, rotar ni
-      // surfacear rollovers.
+    if (persona == FranjaPersona.dormido) {
+      // El usuario sigue dormido (antes de su hora de despertar) o ya cerró el
+      // día (después de la hora de dormir). El robot calla; si toca, asoma
+      // bajito.
       msg = const MensajePresencia(
         tipo: TipoPresencia.idle,
-        texto: 'Modo noche. Acá ando bajito si me necesitas.',
-        acciones: [AccionPresencia.hablemos, AccionPresencia.verMiDia],
+        texto: 'Acá ando bajito, descansa.',
+        acciones: [AccionPresencia.hablemos],
       );
     } else if (_celebrando) {
       msg = felicitacionPresencia(ctx, semilla: ahora.minute);
     } else if (_recienEntra) {
-      final s = saludo(franjaDe(ahora.hour), ctx, semilla: ahora.day + ahora.hour);
+      // Saludo alineado a la PERSONA: a las 7:42 (con despertar=7) dice
+      // "buen día", no la frase nocturna que salía antes por el silencio.
+      final s = saludo(franjaDiaDePersona(persona), ctx,
+          semilla: ahora.day + ahora.hour);
       msg = MensajePresencia(
         tipo: TipoPresencia.saludo,
         texto: s.texto,
@@ -410,35 +425,37 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
     }
 
     final bottomGap = MediaQuery.viewPaddingOf(context).bottom + 86;
+    final dormido = persona == FranjaPersona.dormido;
 
     return Align(
       alignment: Alignment.bottomLeft,
       child: Padding(
         padding: EdgeInsets.only(left: 12, right: 12, bottom: bottomGap),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (!_minimizado)
-              _Burbuja(
+        child: _minimizado || dormido
+            // Modo colapsado / dormido: solo el robot, suelto. Tocar = expandir
+            // (restaurar). El robot dormido aún expande si lo tocas, para no
+            // perder la salida.
+            ? _RobotFlotante(
+                celebrando: _celebrando,
+                minimizado: true,
+                onTap: () => setState(() => _minimizado = false),
+                onLongPress: () => _menu(accionable),
+              )
+            // Modo expandido: UNA tarjeta única que envuelve avatar + texto +
+            // acciones. Antes el robot vivía fuera de la burbuja y se veía
+            // cortado (dos cajas separadas); ahora forman una sola pieza.
+            : _TarjetaPresencia(
                 msg: msg,
+                celebrando: _celebrando,
                 trabajando: _trabajando,
                 onAccion: (a) => _accion(a, msg),
                 onMinimizar: () => setState(() => _minimizado = true),
+                onAvatarTap: () => setState(() => _minimizado = true),
+                onAvatarLongPress: () => _menu(accionable),
                 onAnotar: _capturaRapida,
                 onDictar: _dictar,
                 onHablar: () => _irAlChat('Hola, ¿cómo vamos?'),
               ),
-            const SizedBox(height: 6),
-            // El robot: tocar = expandir/colapsar (restaurar); mantener = menú.
-            _RobotFlotante(
-              celebrando: _celebrando,
-              minimizado: _minimizado,
-              onTap: () => setState(() => _minimizado = !_minimizado),
-              onLongPress: () => _menu(accionable),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -465,58 +482,57 @@ class _RobotFlotante extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       behavior: HitTestBehavior.opaque,
-      child: Container(
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: MatixColors.accent.withValues(alpha: 0.30),
-              blurRadius: 18,
-              spreadRadius: 1,
-            ),
-          ],
-        ),
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            AvatarMatix(size: 52, celebrando: celebrando),
-            // Puntito "tócame para reabrir" cuando está colapsado.
-            if (minimizado)
-              Positioned(
-                top: -1,
-                right: -1,
-                child: Container(
-                  width: 13,
-                  height: 13,
-                  decoration: BoxDecoration(
-                    color: MatixColors.accent,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: MatixColors.bg, width: 2),
-                  ),
+      // El halo y el borde ya los trae AvatarMatix (su Container interno) —
+      // antes había un BoxShadow extra acá que duplicaba el efecto.
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          AvatarMatix(size: 56, celebrando: celebrando),
+          if (minimizado)
+            Positioned(
+              top: -1,
+              right: -1,
+              child: Container(
+                width: 13,
+                height: 13,
+                decoration: BoxDecoration(
+                  color: MatixColors.accent,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: MatixColors.bg, width: 2),
                 ),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
 }
 
-class _Burbuja extends StatelessWidget {
-  const _Burbuja({
+/// Tarjeta UNIFICADA del robot expandido: avatar + texto + acciones + barra de
+/// captura en una sola pieza, con sombra completa. Antes vivían como dos cajas
+/// separadas (burbuja flotando sobre el robot suelto): la burbuja se veía
+/// cortada y el robot quedaba afuera. Acá todo es una sola tarjeta cerrada.
+class _TarjetaPresencia extends StatelessWidget {
+  const _TarjetaPresencia({
     required this.msg,
+    required this.celebrando,
     required this.trabajando,
     required this.onAccion,
     required this.onMinimizar,
+    required this.onAvatarTap,
+    required this.onAvatarLongPress,
     required this.onAnotar,
     required this.onDictar,
     required this.onHablar,
   });
 
   final MensajePresencia msg;
+  final bool celebrando;
   final bool trabajando;
   final void Function(AccionPresencia) onAccion;
   final VoidCallback onMinimizar;
+  final VoidCallback onAvatarTap;
+  final VoidCallback onAvatarLongPress;
   final VoidCallback onAnotar;
   final VoidCallback onDictar;
   final VoidCallback onHablar;
@@ -532,17 +548,17 @@ class _Burbuja extends StatelessWidget {
       ),
       child: Container(
         key: ValueKey(msg.texto),
-        constraints: BoxConstraints(maxWidth: ancho * 0.82),
-        padding: const EdgeInsets.fromLTRB(14, 11, 8, 11),
+        constraints: BoxConstraints(maxWidth: ancho * 0.86),
+        padding: const EdgeInsets.fromLTRB(12, 12, 10, 10),
         decoration: BoxDecoration(
           color: MatixColors.cardHi,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           border: Border.all(color: MatixColors.accent.withValues(alpha: 0.35)),
           boxShadow: const [
             BoxShadow(
-              color: Color(0x55000000),
-              blurRadius: 22,
-              offset: Offset(0, 8),
+              color: Color(0x66000000),
+              blurRadius: 24,
+              offset: Offset(0, 10),
             ),
           ],
         ),
@@ -553,14 +569,26 @@ class _Burbuja extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Avatar INTEGRADO en la tarjeta (no flotando aparte). Tap =
+                // minimizar; long-press = menú con acciones del momento.
+                GestureDetector(
+                  onTap: onAvatarTap,
+                  onLongPress: onAvatarLongPress,
+                  behavior: HitTestBehavior.opaque,
+                  child: AvatarMatix(size: 44, celebrando: celebrando),
+                ),
+                const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    limpiarMarkdown(msg.texto),
-                    style: const TextStyle(
-                      fontSize: 13.5,
-                      color: MatixColors.text,
-                      height: 1.35,
-                      fontWeight: FontWeight.w500,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      limpiarMarkdown(msg.texto),
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        color: MatixColors.text,
+                        height: 1.35,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ),
@@ -576,9 +604,9 @@ class _Burbuja extends StatelessWidget {
               ],
             ),
             if (msg.acciones.isNotEmpty) ...[
-              const SizedBox(height: 9),
+              const SizedBox(height: 10),
               Padding(
-                padding: const EdgeInsets.only(right: 6),
+                padding: const EdgeInsets.only(left: 54, right: 4),
                 child: Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -594,21 +622,27 @@ class _Burbuja extends StatelessWidget {
                 ),
               ),
             ],
-            // Barra fija: captura rápida (escribir/dictar) y atajo al chat.
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             const Divider(height: 1, color: MatixColors.hairline),
             const SizedBox(height: 4),
-            Row(
-              children: [
-                _MiniAccion(
-                    icono: Icons.edit_note, etiqueta: 'Anotar', onTap: onAnotar),
-                _MiniAccion(
-                    icono: Icons.mic_none, etiqueta: 'Dictar', onTap: onDictar),
-                _MiniAccion(
-                    icono: Icons.forum_outlined,
-                    etiqueta: 'Hablar',
-                    onTap: onHablar),
-              ],
+            Padding(
+              padding: const EdgeInsets.only(left: 50),
+              child: Row(
+                children: [
+                  _MiniAccion(
+                      icono: Icons.edit_note,
+                      etiqueta: 'Anotar',
+                      onTap: onAnotar),
+                  _MiniAccion(
+                      icono: Icons.mic_none,
+                      etiqueta: 'Dictar',
+                      onTap: onDictar),
+                  _MiniAccion(
+                      icono: Icons.forum_outlined,
+                      etiqueta: 'Hablar',
+                      onTap: onHablar),
+                ],
+              ),
             ),
           ],
         ),
