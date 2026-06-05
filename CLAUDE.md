@@ -12,6 +12,34 @@ son obligatorias.
 
 ---
 
+## 0. REGLAS DE SIEMPRE (LÉELAS EN CADA CAMBIO)
+
+Estas reglas rigen TODO cambio, sin que el usuario tenga que repetirlas:
+
+1. **Idioma**: español, tú peruano (nunca voseo: nada de "vos tenés"),
+   incluido el copy de la app. Tono de pana, cálido, sin sonar a robot.
+2. **Salida de Matix sin markdown**: nada de asteriscos ni markdown crudo en
+   lo que se muestra. Mantener el strip que ya existe (`limpiarMarkdown` en
+   `app/lib/core/markdown_plano.dart`, aplicado en el display); no
+   reintroducir render de markdown.
+3. **Tiempo en America/Lima**: todas las horas y fechas se calculan y muestran
+   en la zona de Lima.
+4. **Antes de commitear**: tests y `flutter analyze` en verde. Si NO puedes
+   correrlos localmente (p. ej. falta el toolchain de Flutter), dilo explícito
+   y NO afirmes que están en verde — reporta qué pudiste y qué no.
+5. **Commit y push a `main`** al terminar cada cambio. SIN footer de
+   co-autoría (nada de `Co-Authored-By`). Mensaje claro tipo
+   `feat(...)` / `fix(...)` / `docs(...)`.
+6. **Migraciones de Supabase**: las aplicas TÚ vía el helper CLI con el token
+   gitignored (ver §10), commiteas el `.sql`, y preguntas SOLO antes de algo
+   destructivo (DROP/DELETE/TRUNCATE/ALTER que pierde datos).
+7. **Seguridad**: nunca claves ni datos personales en el código, el repo ni
+   los logs (ver §7).
+8. **Reusa lo que ya existe; no dupliques.** Cuando necesites aclarar algo,
+   una sola pregunta a la vez.
+
+---
+
 ## 1. QUÉ ES MATIX
 
 Matix es un asistente personal y centro de mando de la vida del usuario, de
