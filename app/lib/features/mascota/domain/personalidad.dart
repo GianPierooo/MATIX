@@ -34,14 +34,20 @@ FranjaPersona franjaPersonaDe(
   required int despertar,
   required int dormir,
 }) {
-  // Tope inferior y superior del día activo, con guarda contra anclas inválidas.
   final d = despertar.clamp(0, 23);
-  final n = dormir.clamp(d + 1, 24);
-  if (hora < d || hora >= n) return FranjaPersona.dormido;
-  // Las últimas 2h antes de dormir son "modo noche" (cerrando el día) aunque
-  // el silencio de pings empiece después o antes. Mínimo: la última hora.
-  final inicioNoche = (n - 2).clamp(d + 1, n);
-  if (hora >= inicioNoche) return FranjaPersona.noche;
+  final n = dormir.clamp(0, 24);
+  if (d < n) {
+    // Config normal (despierta < duerme). Fuera de [despertar, dormir) =
+    // dormido; las últimas 2h antes de dormir = noche (cerrando el día).
+    if (hora < d || hora >= n) return FranjaPersona.dormido;
+    final inicioNoche = (n - 2).clamp(d + 1, n);
+    if (hora >= inicioNoche) return FranjaPersona.noche;
+  } else {
+    // Anclas inválidas (despierta >= duerme): NO encerramos al usuario en
+    // "dormido" todo el día — caemos a la franja por reloj, con la noche
+    // tarde-noche por defecto.
+    if (hora >= 21 || hora < 5) return FranjaPersona.noche;
+  }
   if (hora < 12) return FranjaPersona.manana;
   return FranjaPersona.tarde;
 }

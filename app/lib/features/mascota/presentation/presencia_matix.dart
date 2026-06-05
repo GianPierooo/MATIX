@@ -544,7 +544,7 @@ class _TarjetaPresencia extends StatelessWidget {
       duration: const Duration(milliseconds: 240),
       transitionBuilder: (child, anim) => FadeTransition(
         opacity: anim,
-        child: SizeTransition(sizeFactor: anim, axisAlignment: -1, child: child),
+        child: SizeTransition(sizeFactor: anim, child: child),
       ),
       child: Container(
         key: ValueKey(msg.texto),

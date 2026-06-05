@@ -24,13 +24,16 @@ Estas reglas rigen TODO cambio, sin que el usuario tenga que repetirlas:
    reintroducir render de markdown.
 3. **Tiempo en America/Lima**: todas las horas y fechas se calculan y muestran
    en la zona de Lima.
-4. **Antes de commitear**: tests y `flutter analyze` en verde. Si NO puedes
-   correrlos localmente (p. ej. falta el toolchain de Flutter), dilo explícito
-   y NO afirmes que están en verde — reporta qué pudiste y qué no. Desde
-   2026-06-05 el CI enforza este gate en cada push: `flutter analyze` +
-   `flutter test` (app) y los tests PUROS del cerebro (`uv` + `pytest`). Si el
-   gate falla, el APK NO se construye ni publica (ver `.github/workflows/
-   release.yml` y `docs/ESTADO.md`).
+4. **Antes de commitear**: tests y `flutter analyze` en verde. Flutter 3.44.1
+   está instalado en `C:\Users\gianp\flutter` (en PATH): corre
+   `flutter analyze --no-fatal-infos` y `flutter test` en `app/` ANTES de
+   commitear (ya no hay excusa de "no puedo correrlos"). Si por lo que sea no
+   pudieras, dilo explícito y NO afirmes que están en verde. El CI enforza el
+   mismo gate en cada push: `flutter analyze --no-fatal-infos` + `flutter test`
+   (app) y los tests PUROS del cerebro (`uv` + `pytest`). Es fatal en errores y
+   warnings (bugs reales) pero tolera los `info` de deprecación del canal
+   stable. Si el gate falla, el APK NO se construye ni publica (ver
+   `.github/workflows/release.yml` y `docs/ESTADO.md`).
 5. **Commit y push a `main`** al terminar cada cambio. SIN footer de
    co-autoría (nada de `Co-Authored-By`). Mensaje claro tipo
    `feat(...)` / `fix(...)` / `docs(...)`.

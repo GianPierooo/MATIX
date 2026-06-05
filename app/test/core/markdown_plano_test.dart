@@ -66,11 +66,18 @@ void main() {
     });
 
     test('es idempotente', () {
-      const crudo = '**Hola** _causa_, usa `código` y ## título';
+      // El título va al INICIO de línea (markdown solo trata `#` como título
+      // ahí; un `#` a mitad de texto es texto normal y se respeta).
+      const crudo = '## Título\n**Hola** _causa_, usa `código`';
       final una = limpiarMarkdown(crudo);
       expect(limpiarMarkdown(una), una);
       expect(una.contains('*'), isFalse);
       expect(una.contains('#'), isFalse);
+    });
+
+    test('un # a mitad de texto NO se toca (no es título)', () {
+      // No estripamos `#` arbitrarios: "issue #42" o "canal #general" son texto.
+      expect(limpiarMarkdown('mira el #42 ya'), 'mira el #42 ya');
     });
 
     test('negrita sin cerrar: no deja asteriscos sueltos', () {

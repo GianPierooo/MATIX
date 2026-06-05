@@ -81,7 +81,11 @@ jobs:
         run: flutter pub get
       - name: Flutter analyze
         working-directory: app
-        run: flutter analyze
+        # Fatal en errores y WARNINGS (bugs reales) pero NO en los `info` de
+        # deprecación: el canal `stable` de Flutter introduce avisos de
+        # deprecación con cada release y, fatales, romperían el gate sin que
+        # nadie haya tocado nada. El gate sigue siendo real (bloquea bugs).
+        run: flutter analyze --no-fatal-infos
       - name: Flutter test
         working-directory: app
         run: flutter test
