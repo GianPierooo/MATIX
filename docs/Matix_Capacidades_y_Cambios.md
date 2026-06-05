@@ -45,6 +45,18 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Matix ahora es una presencia flotante viva abajo en Inicio (en vez de la
+  tarjeta estática de arriba). El robot vive en la parte baja con una burbuja que
+  SIEMPRE muestra lo más relevante del momento y se actualiza sola: saludo al
+  entrar, qué toca ahora, qué sigue, "tienes un rato libre, ¿le das a X?",
+  pendientes/atrasos sin culpa, o un idle tranquilo por franja del día. Lee el
+  plan del día + el contexto + el reloj. Es tocable: hacer (cierra el bloque),
+  saltar, hablar (abre el chat con contexto) o ver el día. Tiene vida: parpadeo
+  e idle sutil y un brinco al cerrar un hito (felicitación). Se puede minimizar
+  tocando el robot. Importante: la presencia es ambiental (se refresca sola, no
+  interrumpe); los avisos reales siguen dosificados por la proactividad y su
+  dial, así que un robot siempre-al-día no es un robot que bombardea. Y "Ver mi
+  día" ahora sí lleva al bloque "TU DÍA".
 - Matix con cara y personalidad (mascota). El robot Matix te saluda al abrir la
   app desde una tarjeta cálida en Inicio (template + contexto: franja del día y
   un dato rápido, sin llamar al modelo), se despide cortito al salir, y aparece

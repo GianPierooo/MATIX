@@ -23,7 +23,7 @@ import '../features/finanzas/presentation/formato_finanzas.dart';
 import '../features/finanzas/providers/movimientos_providers.dart';
 import '../features/horario/presentation/plan_dia_section.dart';
 import '../features/horario/providers/horario_providers.dart';
-import '../features/mascota/presentation/saludo_mascota_card.dart';
+import '../features/mascota/presentation/presencia_matix.dart';
 import '../features/matix/data/captura_apunte_repository.dart';
 import '../features/matix/data/grabacion_voz_service.dart';
 import '../features/matix/data/matix_transcribir_repository.dart';
@@ -197,11 +197,38 @@ ProximoUni? proximoUni(
 // Pantalla
 // ══════════════════════════════════════════════════════════════════
 
-class InicioScreen extends ConsumerWidget {
+class InicioScreen extends ConsumerStatefulWidget {
   const InicioScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<InicioScreen> createState() => _InicioScreenState();
+}
+
+class _InicioScreenState extends ConsumerState<InicioScreen> {
+  final ScrollController _scroll = ScrollController();
+  final GlobalKey _planKey = GlobalKey();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// Lleva al bloque "TU DÍA" del Inicio (lo usa la presencia: "Ver mi día").
+  void _verMiDia() {
+    final c = _planKey.currentContext;
+    if (c != null) {
+      Scrollable.ensureVisible(
+        c,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeOut,
+        alignment: 0.05,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final ahora = DateTime.now();
     return Scaffold(
       appBar: AppBar(
@@ -247,41 +274,47 @@ class InicioScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: RefreshIndicator(
-        color: MatixColors.accent,
-        onRefresh: () async {
-          ref.invalidate(proyectosListProvider);
-          ref.invalidate(tareasProvider);
-          ref.invalidate(eventosProvider);
-          ref.invalidate(evaluacionesListProvider);
-          ref.invalidate(apuntesListProvider);
-          ref.invalidate(sesionesClaseProvider);
-          ref.invalidate(cursosListProvider);
-          ref.invalidate(movimientosListProvider);
-          ref.read(replanActivoProvider.notifier).state = false;
-          ref.invalidate(planDiaProvider);
-        },
-        child: ListView(
-          // Cubre la nav inferior + safe area + saliente del FAB.
-          padding: EdgeInsets.fromLTRB(
-            0,
-            8,
-            0,
-            MatixLayout.bottomNavGuard(context),
+      body: Stack(
+        children: [
+          RefreshIndicator(
+            color: MatixColors.accent,
+            onRefresh: () async {
+              ref.invalidate(proyectosListProvider);
+              ref.invalidate(tareasProvider);
+              ref.invalidate(eventosProvider);
+              ref.invalidate(evaluacionesListProvider);
+              ref.invalidate(apuntesListProvider);
+              ref.invalidate(sesionesClaseProvider);
+              ref.invalidate(cursosListProvider);
+              ref.invalidate(movimientosListProvider);
+              ref.read(replanActivoProvider.notifier).state = false;
+              ref.invalidate(planDiaProvider);
+            },
+            child: ListView(
+              controller: _scroll,
+              // Cubre la nav inferior + safe area + saliente del FAB.
+              padding: EdgeInsets.fromLTRB(
+                0,
+                8,
+                0,
+                MatixLayout.bottomNavGuard(context),
+              ),
+              children: [
+                const _BotonesRitual(),
+                const _CapturaApunte(),
+                KeyedSubtree(key: _planKey, child: const PlanDiaSection()),
+                const _BloqueHoy(),
+                const _BloqueFinanzas(),
+                const _BloqueApuntesRecientes(),
+                const _BloqueReflote(),
+                const _BloqueProyectosActivos(),
+                const _BloqueUniversidad(),
+              ],
+            ),
           ),
-          children: const [
-            SaludoMascotaCard(),
-            _BotonesRitual(),
-            _CapturaApunte(),
-            PlanDiaSection(),
-            _BloqueHoy(),
-            _BloqueFinanzas(),
-            _BloqueApuntesRecientes(),
-            _BloqueReflote(),
-            _BloqueProyectosActivos(),
-            _BloqueUniversidad(),
-          ],
-        ),
+          // Presencia flotante: el robot vivo, siempre al día, abajo en Inicio.
+          PresenciaMatix(onVerMiDia: _verMiDia),
+        ],
       ),
     );
   }

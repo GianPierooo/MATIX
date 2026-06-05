@@ -22,7 +22,6 @@ import 'features/matix/data/captura_apunte_repository.dart';
 import 'features/matix/presentation/manos_libres_screen.dart';
 import 'features/matix/providers/captura_apunte_providers.dart';
 import 'features/matix/providers/navegacion_matix_provider.dart';
-import 'features/mascota/providers/mascota_providers.dart';
 import 'features/proyectos/presentation/detalle_proyecto_screen.dart';
 import 'features/push/application/push_service.dart';
 import 'features/wakeword/data/wakeword_log.dart';
@@ -186,9 +185,6 @@ class _MatixAppState extends ConsumerState<MatixApp>
       //   `resumed` espurio: eso era lo que lo mataba a los 0 s.
       // - "segundo plano" OFF → pipeline in-app.
       unawaited(wake.alFrente());
-      // La mascota quizás aparece al volver al frente (dosificada: respeta
-      // silencio, frecuencia y baja si la ignoras).
-      unawaited(ref.read(mascotaControllerProvider.notifier).quizasAparecer());
     } else if (estado == AppLifecycleState.paused ||
         estado == AppLifecycleState.detached) {
       // A segundo plano. Con "segundo plano" ON el FGS YA está corriendo y

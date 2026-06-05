@@ -1,25 +1,37 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../../theme/matix_colors.dart';
 
 /// El robot Matix v1: simple, dibujado a mano (sin assets), con algo de vida
-/// (parpadeo sutil). El arte es reemplazable después por un diseño custom: basta
-/// cambiar este widget. Se usa en la tarjeta de saludo y en las burbujas.
+/// (parpadeo sutil + un brinco al celebrar). El arte es reemplazable después por
+/// un diseño custom: basta cambiar este widget. Se usa en la presencia flotante
+/// y en las burbujas.
 class AvatarMatix extends StatefulWidget {
-  const AvatarMatix({super.key, this.size = 44, this.animar = true});
+  const AvatarMatix({
+    super.key,
+    this.size = 44,
+    this.animar = true,
+    this.celebrando = false,
+  });
 
   final double size;
 
   /// Si `false`, no corre el parpadeo (para tests o listas largas).
   final bool animar;
 
+  /// Cuando pasa a `true`, da un brinco corto (reacción al cerrar un hito).
+  final bool celebrando;
+
   @override
   State<AvatarMatix> createState() => _AvatarMatixState();
 }
 
 class _AvatarMatixState extends State<AvatarMatix>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _ctrl;
+  late final AnimationController _brinco;
 
   @override
   void initState() {
@@ -29,12 +41,24 @@ class _AvatarMatixState extends State<AvatarMatix>
       vsync: this,
       duration: const Duration(milliseconds: 3600),
     );
+    _brinco = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 620),
+    );
     if (widget.animar) _ctrl.repeat();
+    if (widget.celebrando) _brinco.forward(from: 0);
+  }
+
+  @override
+  void didUpdateWidget(AvatarMatix old) {
+    super.didUpdateWidget(old);
+    if (widget.celebrando && !old.celebrando) _brinco.forward(from: 0);
   }
 
   @override
   void dispose() {
     _ctrl.dispose();
+    _brinco.dispose();
     super.dispose();
   }
 
@@ -53,12 +77,24 @@ class _AvatarMatixState extends State<AvatarMatix>
       width: widget.size,
       height: widget.size,
       child: AnimatedBuilder(
-        animation: _ctrl,
-        builder: (context, _) => CustomPaint(
-          painter: _RobotPainter(
-            apertura: widget.animar ? _apertura(_ctrl.value) : 1,
-          ),
-        ),
+        animation: Listenable.merge([_ctrl, _brinco]),
+        builder: (context, _) {
+          // Brinco: sube y baja una vez (sin(pi·t)) con una pizca de giro.
+          final b = _brinco.isAnimating || _brinco.value > 0
+              ? math.sin(math.pi * _brinco.value)
+              : 0.0;
+          return Transform.translate(
+            offset: Offset(0, -widget.size * 0.12 * b),
+            child: Transform.rotate(
+              angle: 0.12 * b,
+              child: CustomPaint(
+                painter: _RobotPainter(
+                  apertura: widget.animar ? _apertura(_ctrl.value) : 1,
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
