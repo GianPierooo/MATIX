@@ -41,6 +41,19 @@ class _FakeReproductor implements ReproductorAudio {
 http.Client _mockMp3() =>
     MockClient((req) async => http.Response.bytes([1, 2, 3], 200));
 
+/// Devuelve los códigos de la lista en orden (repite el último). Cuenta los
+/// hits para verificar reintentos.
+http.Client _mockSecuencia(List<int> codigos, {void Function()? alPedir}) {
+  var i = 0;
+  return MockClient((req) async {
+    alPedir?.call();
+    final code = i < codigos.length ? codigos[i] : codigos.last;
+    i++;
+    if (code == 200) return http.Response.bytes([1, 2, 3], 200);
+    return http.Response('boom', code);
+  });
+}
+
 Future<void> _tick() => Future<void>.delayed(const Duration(milliseconds: 10));
 
 void main() {
@@ -81,5 +94,44 @@ void main() {
     await tts.detener();
     expect(rep.detenerCount, greaterThanOrEqualTo(1)); // audio cortado
     await fut; // la espera de hablar se resolvió (no queda colgada)
+  });
+
+  test('hablar reintenta ante un 502 transitorio y termina sonando', () async {
+    final rep = _FakeReproductor();
+    var pedidos = 0;
+    final tts = TtsService(
+      inner: _mockSecuencia([502, 200], alPedir: () => pedidos++),
+      reproductor: rep,
+    );
+    final fut = tts.hablar('hola');
+    // Backoff de 250ms tras el primer 502 + segunda descarga OK.
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    expect(pedidos, 2); // reintentó una vez
+    expect(rep.reproducirCount, 1); // y reprodujo
+    rep.sonar();
+    rep.completar();
+    await fut;
+  });
+
+  test('narrar reproduce en segundo plano sin esperar el fin', () async {
+    final rep = _FakeReproductor();
+    final tts = TtsService(inner: _mockMp3(), reproductor: rep);
+    tts.narrar('hola'); // no se await-ea
+    await _tick(); // descarga + reproducir
+    expect(rep.reproducirCount, 1);
+    // No necesita completar() para "terminar": es fire-and-forget.
+  });
+
+  test('narrar NUNCA lanza y avisa onFallo si la voz no sale (502 persistente)',
+      () async {
+    final rep = _FakeReproductor();
+    final tts = TtsService(inner: _mockSecuencia([502]), reproductor: rep);
+    var fallo = false;
+    // No lanza, aunque el TTS devuelva 502 siempre.
+    tts.narrar('hola', onFallo: () => fallo = true);
+    // 3 intentos con backoff 250ms + 500ms.
+    await Future<void>.delayed(const Duration(milliseconds: 950));
+    expect(fallo, isTrue);
+    expect(rep.reproducirCount, 0); // nunca sonó
   });
 }

@@ -38,6 +38,9 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
   bool _activa = false;
   _Fase _fase = _Fase.iniciando;
   String? _error;
+  // La voz falló al menos una vez en esta sesión (502/timeout tras reintentos).
+  // La cámara sigue narrando en TEXTO; solo lo avisamos honesto.
+  bool _sinVoz = false;
 
   // Estado del muestreo / costo.
   DateTime? _inicioSesion;
@@ -116,11 +119,21 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
         _fase = _Fase.observando;
         _inicioSesion = DateTime.now();
       });
-      await _tts.hablar('Listo, te voy contando lo que veo.');
+      // Saludo de apertura en SEGUNDO PLANO (no bloqueante, nunca lanza): antes
+      // un TTS 502 acá caía en el catch y mataba la cámara con "No pude abrir la
+      // cámara". Ahora la cámara abre aunque la voz falle.
+      _tts.narrar(
+        'Listo, te voy contando lo que veo.',
+        onFallo: _avisarSinVoz,
+      );
       unawaited(_loop());
     } catch (e) {
       _fallar('No pude abrir la cámara: $e');
     }
+  }
+
+  void _avisarSinVoz() {
+    if (mounted && !_sinVoz) setState(() => _sinVoz = true);
   }
 
   Future<void> _loop() async {
@@ -190,8 +203,10 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
       _estaticos = 0;
       _narracionPrevia = narracion;
       _caracteresTts += narracion.length;
+      // El TEXTO se muestra YA; la voz va en segundo plano y nunca bloquea el
+      // loop ni lo tumba. Si la voz falla, seguimos narrando en texto.
       if (mounted) setState(() => _narracionActual = narracion);
-      await _tts.hablar(narracion);
+      _tts.narrar(narracion, onFallo: _avisarSinVoz);
     }
     if (mounted && _activa) setState(() => _fase = _Fase.observando);
   }
@@ -231,9 +246,7 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
             'No veía cambios, así que cerré para no gastar de más.',
           null => 'Listo, cerré la sesión.',
         };
-    try {
-      await _tts.hablar(txt);
-    } catch (_) {}
+    _tts.narrar(txt);
   }
 
   void _fallar(String msg) {
@@ -292,6 +305,10 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
                   )
                 else if (_narracionActual.isNotEmpty)
                   _Narracion(_narracionActual),
+                if (_activa && _sinVoz) ...[
+                  const SizedBox(height: 8),
+                  const _AvisoSinVoz(),
+                ],
                 const SizedBox(height: 16),
                 _Controles(
                   activa: _activa,
@@ -401,6 +418,33 @@ class _Narracion extends StatelessWidget {
           height: 1.3,
           shadows: [Shadow(color: Colors.black, blurRadius: 8)],
         ),
+      ),
+    );
+  }
+}
+
+/// Aviso discreto cuando la voz no salió: la cámara sigue narrando en texto.
+/// Honesto, sin alarmar — NO es "no pude abrir la cámara".
+class _AvisoSinVoz extends StatelessWidget {
+  const _AvisoSinVoz();
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: const [
+          Icon(Icons.volume_off_rounded, color: Colors.white70, size: 16),
+          SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              'Voz no disponible ahora; sigo contándote en texto.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70, fontSize: 12.5),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -611,14 +611,16 @@ async def narrar_frame(body: NarrarFrameRequest) -> dict:
             img, narracion_previa=body.narracion_previa
         )
     except RuntimeError as e:
+        # Config (sin API key): la cámara no puede narrar. Honesto y raro.
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
         ) from e
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"El modelo de visión falló: {e}",
-        ) from e
+    except Exception:  # noqa: BLE001
+        # La visión falló tras reintentos (502/timeout pasajero). DEGRADAMOS a
+        # narración vacía (200) en vez de 502: la cámara NUNCA debe morir por un
+        # frame; este se salta y el siguiente lo intenta de nuevo.
+        logger.warning("narrar-frame: visión falló tras reintentos; narro vacío")
+        return {"narracion": ""}
     return {"narracion": narracion}
 
 

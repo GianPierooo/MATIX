@@ -21,6 +21,7 @@ descalibrado dispare herramientas en bucle.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Any
@@ -105,7 +106,17 @@ async def conversar(
     `tablas_cambiadas` son listas vacías.
     """
     fijo = system_prompt_fijo()
-    contexto = await contexto_vivo(db)
+
+    # Lecturas de contexto INDEPENDIENTES en paralelo (antes eran 4 awaits
+    # secuenciales repartidos por la función → sumaban round-trips a la BD). Son
+    # independientes entre sí; gather las dispara juntas y baja la latencia del
+    # armado del turno. Si alguna falla, gather propaga igual que antes.
+    contexto, bloque_mem, modo, seleccion = await asyncio.gather(
+        contexto_vivo(db),
+        memoria.bloque_memoria(db),
+        modos.modo_activo(db),
+        modelos_llm.seleccion_guardada(db),
+    )
 
     # Conversación actual (sesión por inactividad). Se resuelve al ARRANCAR para
     # que `buscar_en_historial` pueda EXCLUIRLA del recall durante el loop. Solo
@@ -140,7 +151,6 @@ async def conversar(
     # Memoria personal (Capa Memoria): el bloque compacto "lo que sé de ti"
     # con los hechos esenciales del usuario, junto al contexto vivo. Si no
     # hay nada, no inyecta nada. Lo extenso se recupera con `buscar_memoria`.
-    bloque_mem = await memoria.bloque_memoria(db)
     if bloque_mem:
         mensajes.append({"role": "system", "content": bloque_mem})
 
@@ -150,7 +160,6 @@ async def conversar(
     # ARRANCAR el turno es el que se inyecta; si el modelo lo cambia con
     # `activar_modo`/`desactivar_modo`, aplica desde el próximo turno (y ya
     # avisó al usuario).
-    modo = await modos.modo_activo(db)
     if modo:
         contenido_modo = modos.cargar_modo(modo)
         if contenido_modo:
@@ -206,7 +215,6 @@ async def conversar(
     # Se decide acá, una vez, así que el turno entero —incluido su loop de
     # tools— se queda en el modelo elegido; el ruteo solo cambia entre turnos,
     # que es exactamente donde la reconstrucción de historial lo soporta.
-    seleccion = await modelos_llm.seleccion_guardada(db)
     auto = seleccion == modelos_llm.AUTO
     if auto:
         barato, fuerte = await modelos_llm.par_barato_fuerte(db)

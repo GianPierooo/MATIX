@@ -441,16 +441,23 @@ class ManosLibresNotifier extends AutoDisposeNotifier<EstadoManosLibres> {
     // pasa a "hablando" (con la onda) recién cuando SUENA de verdad (onInicio),
     // así el visual va junto al audio y no antes. Al terminar (o al cortar con
     // detener), `reproduciendo` vuelve a false y la onda para con el sonido.
-    await _tts.hablar(
-      respuesta,
-      onInicio: () {
-        if (_saliendo) return;
-        state = state.copyWith(
-          fase: FaseManosLibres.hablando,
-          reproduciendo: true,
-        );
-      },
-    );
+    // La voz va en su propio intento: si el TTS falla (502/timeout, ya con
+    // reintentos), NO tumbamos el modo manos libres — el texto ya se mostró en
+    // el chat. Degradamos: saltamos el audio y seguimos escuchando.
+    try {
+      await _tts.hablar(
+        respuesta,
+        onInicio: () {
+          if (_saliendo) return;
+          state = state.copyWith(
+            fase: FaseManosLibres.hablando,
+            reproduciendo: true,
+          );
+        },
+      );
+    } catch (_) {
+      // Sin voz este turno; el texto quedó. Seguimos el bucle.
+    }
     state = state.copyWith(reproduciendo: false);
     if (_saliendo) throw _AbortoUsuario();
 

@@ -141,6 +141,39 @@ class TtsService implements TtsBase {
     await _completer!.future;
   }
 
+  /// Narra en SEGUNDO PLANO: descarga + reproduce sin bloquear al caller y sin
+  /// lanzar NUNCA. Si el TTS falla (502/timeout, ya con reintentos), se queda
+  /// en silencio — el texto ya está en pantalla. Para la cámara en vivo: la voz
+  /// jamás debe bloquear el loop ni tumbar la sesión. Corta lo previo: la última
+  /// narración manda.
+  /// [onFallo] se llama si la voz no salió (tras reintentos). El caller puede
+  /// mostrar un aviso honesto ("voz no disponible, sigo en texto") sin que esto
+  /// rompa nada.
+  void narrar(String texto, {void Function()? onFallo}) {
+    final t = texto.trim();
+    if (t.isEmpty) return;
+    unawaited(_narrarSeguro(t, onFallo));
+  }
+
+  Future<void> _narrarSeguro(String t, void Function()? onFallo) async {
+    try {
+      if (_completer != null && !_completer!.isCompleted) {
+        _completer!.complete();
+        _completer = null;
+        await _rep.detener();
+      }
+      _onInicio = null;
+      _inicioNotificado = false;
+      final mp3 = await _descargar(t);
+      _completer = Completer<void>();
+      await _rep.reproducir(mp3);
+      // NO esperamos el fin del audio: el caller (cámara) sigue su ritmo.
+    } catch (_) {
+      // Silencio total: el texto ya está; un fallo de voz no rompe nada.
+      onFallo?.call();
+    }
+  }
+
   @override
   Future<void> detener() async {
     await _rep.detener();
@@ -165,7 +198,35 @@ class TtsService implements TtsBase {
 
   // ── internos ──────────────────────────────────────────────────────
 
+  /// Descarga el mp3 con REINTENTOS y backoff ante fallos transitorios
+  /// (502/503/504/timeout/red). Antes un solo 502 pasajero de OpenAI tumbaba la
+  /// voz; ahora reintenta hasta 3 veces (250ms, 500ms) y solo entonces relanza,
+  /// para que el caller degrade (texto sin voz). Errores legítimos (400/401) no
+  /// se reintentan: se relanzan al toque.
+  static const _maxIntentos = 3;
+
   Future<List<int>> _descargar(String texto) async {
+    for (var intento = 1;; intento++) {
+      try {
+        return await _descargarUnaVez(texto);
+      } on MatixApiException catch (e) {
+        if (!_esTransitorio(e.statusCode) || intento >= _maxIntentos) rethrow;
+      } on TimeoutException {
+        if (intento >= _maxIntentos) rethrow;
+      } catch (_) {
+        // Errores de red (SocketException, handshake…): transitorios.
+        if (intento >= _maxIntentos) rethrow;
+      }
+      await Future<void>.delayed(
+        Duration(milliseconds: 250 * (1 << (intento - 1))),
+      );
+    }
+  }
+
+  bool _esTransitorio(int code) =>
+      code == 408 || code == 429 || code == 502 || code == 503 || code == 504;
+
+  Future<List<int>> _descargarUnaVez(String texto) async {
     final uri = Uri.parse('${MatixConfig.apiUrl}/api/v1/matix/voz');
     final headers = <String, String>{
       'Content-Type': 'application/json',

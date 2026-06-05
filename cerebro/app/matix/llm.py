@@ -20,10 +20,12 @@ Las API keys se leen SOLO de variables de entorno (`OPENAI_API_KEY`,
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import date
-from typing import Any
+from typing import Any, TypeVar
 
 from openai import AsyncOpenAI
 
@@ -66,6 +68,38 @@ def _es_error_de_proveedor(e: Exception) -> bool:
         "ConnectError",
         "ReadTimeout",
     }
+
+
+_T = TypeVar("_T")
+
+
+async def _con_reintentos(
+    hacer: Callable[[], Awaitable[_T]],
+    *,
+    intentos: int = 3,
+    base_delay: float = 0.4,
+    etiqueta: str = "llm",
+) -> _T:
+    """Ejecuta `hacer()` reintentando SOLO ante errores TRANSITORIOS de proveedor
+    (timeout / 5xx / 429), con backoff exponencial (base_delay·2^i). Tras agotar
+    los intentos, relanza el último error. Los errores legítimos (400/401/422…)
+    se relanzan de inmediato (no son transitorios). Sirve para utilidades como
+    el TTS y la narración de cámara, que antes no reintentaban y morían ante un
+    502 pasajero de OpenAI."""
+    for i in range(intentos):
+        try:
+            return await hacer()
+        except Exception as e:  # noqa: BLE001
+            if not _es_error_de_proveedor(e) or i == intentos - 1:
+                raise
+            logger.warning(
+                "%s: error transitorio (%s); reintento %d/%d",
+                etiqueta, type(e).__name__, i + 1, intentos - 1,
+            )
+            await asyncio.sleep(base_delay * (2 ** i))
+    # Inalcanzable (el loop siempre retorna o relanza), pero deja el tipo claro.
+    raise RuntimeError("reintentos agotados")  # pragma: no cover
+
 
 _openai_client: AsyncOpenAI | None = None
 _anthropic_client: Any = None
@@ -1290,16 +1324,23 @@ async def hablar(
     medidor (cobra por caracteres del input).
     """
     client = _get_openai_client()
-    resp = await client.audio.speech.create(
-        model=model,
-        voice=voz,
-        input=texto,
-        response_format=formato,
-    )
+
+    async def _pedir() -> bytes:
+        resp = await client.audio.speech.create(
+            model=model,
+            voice=voz,
+            input=texto,
+            response_format=formato,
+        )
+        # La SDK devuelve un HttpxBinaryResponseContent — .read() devuelve
+        # los bytes completos.
+        return await resp.aread()
+
+    # Reintenta ante 502/503/timeout pasajeros de OpenAI (antes un solo 502
+    # tumbaba la voz). Si agota, relanza y el caller degrada (texto sin voz).
+    audio = await _con_reintentos(_pedir, etiqueta="tts")
     medidor.registrar_tts(len(texto))
-    # La SDK devuelve un HttpxBinaryResponseContent — .read() devuelve
-    # los bytes completos.
-    return await resp.aread()
+    return audio
 
 
 # ── Cámara en vivo: narración corta de un frame (visión, gpt-4o-mini) ─────────
@@ -1328,21 +1369,26 @@ async def narrar_frame(
         if not previa
         else f"Narración previa: «{previa}». Di qué cambió o qué ves ahora."
     )
-    resp = await client.chat.completions.create(
-        model="gpt-4o-mini",
-        max_tokens=40,
-        messages=[
-            {"role": "system", "content": _NARRACION_SYSTEM},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": pedido},
-                    {"type": "image_url",
-                     "image_url": {"url": imagen_data_url, "detail": "low"}},
-                ],
-            },
-        ],
-    )
+    async def _pedir():
+        return await client.chat.completions.create(
+            model="gpt-4o-mini",
+            max_tokens=40,
+            messages=[
+                {"role": "system", "content": _NARRACION_SYSTEM},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": pedido},
+                        {"type": "image_url",
+                         "image_url": {"url": imagen_data_url, "detail": "low"}},
+                    ],
+                },
+            ],
+        )
+
+    # Reintenta ante errores transitorios; si agota, relanza y el router degrada
+    # a narración vacía (la cámara sigue, sin frase para este frame).
+    resp = await _con_reintentos(_pedir, etiqueta="narrar_frame")
     _registrar_chat_openai(resp.usage, "gpt-4o-mini")
     out = (resp.choices[0].message.content or "").strip()
     # Normaliza el "sin cambios" (con o sin signos) a vacío.
