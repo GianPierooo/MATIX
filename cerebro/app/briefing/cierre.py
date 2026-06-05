@@ -129,6 +129,36 @@ async def armar_cierre(db: Postgrest) -> dict[str, Any]:
         cierre_frase=cierre_frase,
     )
 
+    # Rollover de lo no cumplido: en el cierre revisamos lo que quedó y
+    # proponemos cuándo retomarlo (al siguiente hueco), tocable. Nunca en
+    # silencio. Best-effort: si falla, el cierre sale igual.
+    try:
+        from ..matix import rollover
+
+        roll = await rollover.proponer_rollover(db, hasta_fin_de_hoy=True)
+    except Exception:  # noqa: BLE001
+        roll = {"proposals": [], "sobrecarga": rollover_sobrecarga_vacia()}
+
+    # El cierre, hablado, también menciona lo no cumplido: nunca muere callado.
+    # La acción tocable (mover/soltar) la resuelve el robot en Inicio.
+    props = roll.get("proposals") or []
+    sob = roll.get("sobrecarga") or {}
+    if sob.get("sobrecargado") and sob.get("mensaje"):
+        texto_para_voz += " " + sob["mensaje"]
+    elif props:
+        primero = props[0]
+        cuando = (primero.get("propuesta") or {}).get("cuando")
+        if cuando:
+            texto_para_voz += (
+                f" Quedó {primero['titulo']} sin hacer; te propongo retomarlo "
+                f"{cuando}. Lo confirmas con un toque en Inicio."
+            )
+        else:
+            texto_para_voz += (
+                f" Quedó {primero['titulo']} sin hacer; cuando quieras lo "
+                "reacomodamos."
+            )
+
     return {
         "fecha": hoy.isoformat(),
         "dia_semana": _dia_semana_es(ahora),
@@ -140,6 +170,15 @@ async def armar_cierre(db: Postgrest) -> dict[str, Any]:
         "cierre_frase": cierre_frase,
         "resumen_corto": resumen_corto,
         "texto_para_voz": texto_para_voz,
+        "rollover": roll,
+    }
+
+
+def rollover_sobrecarga_vacia() -> dict[str, Any]:
+    """Sobrecarga 'sin nada' para el fallback del cierre si el rollover falla."""
+    return {
+        "sobrecargado": False, "n": 0, "peor_titulo": None,
+        "peor_veces": 0, "mensaje": None, "recomendacion": None,
     }
 
 

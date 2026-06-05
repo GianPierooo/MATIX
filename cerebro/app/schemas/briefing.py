@@ -69,11 +69,52 @@ class EventoManana(BaseModel):
     todo_el_dia: bool = False
 
 
+# ─── Rollover de lo no cumplido (Capa 8) ─────────────────────────────
+
+
+class PropuestaHuecoRead(BaseModel):
+    """El hueco propuesto para retomar una tarea no cumplida."""
+
+    fecha: str
+    inicio: str
+    fin: str
+    cuando: str
+
+
+class RolloverItemRead(BaseModel):
+    """Una tarea no cumplida con su propuesta de reprogramación."""
+
+    tarea_id: str
+    titulo: str
+    veces_reprogramada: int = 0
+    vencio_en: str | None = None
+    propuesta: PropuestaHuecoRead | None = None
+
+
+class SobrecargaRead(BaseModel):
+    """Guardrail honesto: cuánto se arrastra y si ya toca re-escopar."""
+
+    sobrecargado: bool = False
+    n: int = 0
+    peor_titulo: str | None = None
+    peor_veces: int = 0
+    mensaje: str | None = None
+    recomendacion: str | None = None
+
+
+class RolloverRead(BaseModel):
+    """Propuestas de reprogramación + flag de sobrecarga."""
+
+    proposals: list[RolloverItemRead] = []
+    sobrecarga: SobrecargaRead | None = None
+
+
 class CierreHoyRead(BaseModel):
     """Cierre del día. Mismo contrato que el briefing en cuanto a
     `resumen_corto` (body de notificación) y `texto_para_voz` (TTS),
     pero con secciones de repaso nocturno: lo hecho, lo que quedó,
-    lo de mañana, y una frase para soltar."""
+    lo de mañana, una frase para soltar, y el rollover de lo no
+    cumplido (propuestas de reprogramación, tocables en la app)."""
 
     fecha: str
     dia_semana: str
@@ -85,6 +126,7 @@ class CierreHoyRead(BaseModel):
     cierre_frase: str
     resumen_corto: str
     texto_para_voz: str
+    rollover: RolloverRead | None = None
 
 
 # ─── Repaso semanal (Capa 8 · Repaso) ────────────────────────────────

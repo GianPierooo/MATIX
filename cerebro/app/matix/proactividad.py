@@ -305,6 +305,36 @@ async def _candidatos(
     out: list[dict[str, Any]] = []
     fecha = local.date()
 
+    # ── Rollover: lo no cumplido (cuando algo se pasó de su hora) ──────────────
+    # No lo deja morir callado: nudgea a revisar lo que quedó sin hacer. La
+    # propuesta tocable (acepto / otro día / lo suelto) la sirve /rollover y la
+    # surfacea el robot; acá solo gatillamos el aviso dosificado. Si hay
+    # sobrecarga, el cuerpo lleva el mensaje honesto (no más "te lo muevo").
+    try:
+        from . import rollover
+
+        tareas_nc = await db.list(
+            "tareas",
+            raw_filters={"eliminado_en": "is.null", "completada": "is.false"},
+            limit=500,
+        )
+        no_cumplidas = rollover.tareas_no_cumplidas(tareas_nc, ahora)
+        if no_cumplidas:
+            sob = rollover.evaluar_sobrecarga([
+                {"titulo": t.get("titulo"),
+                 "veces_reprogramada": t.get("veces_reprogramada")}
+                for t in no_cumplidas
+            ])
+            tt, cuerpo = rollover.texto_aviso_rollover(len(no_cumplidas), sob)
+            out.append({
+                "tipo": "rollover",
+                "clave": clave_dedup("rollover", fecha.isoformat()),
+                "titulo": tt, "cuerpo": cuerpo, "payload": "rollover",
+                "urgencia": 3, "oportunidad": 2, "relevancia": 3,
+            })
+    except Exception:  # noqa: BLE001
+        logger.exception("proactividad: gatillo rollover falló")
+
     # ── Deadline (anticipado, zona media; <24h lo maneja nudges) ──────────────
     try:
         horizonte = int(par.get("deadline_horizonte_h", 0))

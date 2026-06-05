@@ -319,9 +319,9 @@ class _MatixAppState extends ConsumerState<MatixApp>
       _navigatorKey.currentState?.push(
         MaterialPageRoute(builder: (_) => const RepasoSemanalScreen()),
       );
-    } else if (payload == 'hoy' || payload == 'set_dia') {
-      // Proactividad (pre-libre / hueco) y el set del día abren Inicio, donde
-      // el plan "Hoy" ofrece las sugerencias tocables (sin abrir el chat).
+    } else if (payload == 'hoy' || payload == 'set_dia' || payload == 'rollover') {
+      // Proactividad (pre-libre / hueco), el set del día y el rollover abren
+      // Inicio, donde el robot ofrece lo tocable (mover/soltar) sin abrir chat.
       ref.read(objetivoNavegacionProvider.notifier).state = SeccionMatix.inicio;
     } else if (payload != null && payload.startsWith('evento:')) {
       unawaited(_abrirEvento(payload.substring('evento:'.length)));

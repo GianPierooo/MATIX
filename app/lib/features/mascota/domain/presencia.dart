@@ -15,6 +15,7 @@ enum TipoPresencia {
   libre,
   pendientes,
   felicitacion,
+  rollover,
   idle,
 }
 
@@ -27,6 +28,11 @@ enum AccionPresencia {
   hablemos,
   verMiDia,
   seguimos,
+  // Rollover de lo no cumplido (Capa 8): mover al hueco propuesto, a otro día,
+  // o soltarlo sin culpa.
+  aceptarRollover,
+  otroDia,
+  soltar,
 }
 
 extension AccionPresenciaX on AccionPresencia {
@@ -38,6 +44,9 @@ extension AccionPresenciaX on AccionPresencia {
         AccionPresencia.hablemos => 'Hablemos',
         AccionPresencia.verMiDia => 'Ver mi día',
         AccionPresencia.seguimos => 'Seguimos',
+        AccionPresencia.aceptarRollover => 'Acepto',
+        AccionPresencia.otroDia => 'Otro día',
+        AccionPresencia.soltar => 'Lo suelto',
       };
 }
 

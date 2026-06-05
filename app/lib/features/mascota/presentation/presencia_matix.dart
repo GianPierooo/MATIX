@@ -11,6 +11,8 @@ import '../../matix/presentation/manos_libres_screen.dart';
 import '../../matix/providers/captura_apunte_providers.dart';
 import '../../matix/providers/matix_chat_providers.dart';
 import '../../matix/providers/navegacion_matix_provider.dart';
+import '../../rollover/domain/rollover.dart';
+import '../../rollover/providers/rollover_providers.dart';
 import '../../tareas/providers/tareas_providers.dart';
 import '../domain/dosificacion.dart';
 import '../domain/personalidad.dart';
@@ -111,6 +113,12 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
       case AccionPresencia.reprogramar:
         await _irAlChat(
             'Reprograma lo que se me pasó de fecha; muévelo a hoy si se puede.');
+      case AccionPresencia.aceptarRollover:
+        await _decidirRollover(m.tareaId, DecisionRollover.aceptar);
+      case AccionPresencia.otroDia:
+        await _decidirRollover(m.tareaId, DecisionRollover.otroDia);
+      case AccionPresencia.soltar:
+        await _decidirRollover(m.tareaId, DecisionRollover.soltar);
       case AccionPresencia.seguimos:
         setState(() => _celebrando = false);
     }
@@ -122,9 +130,31 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
         TipoPresencia.libre => '¿Qué hago con este rato libre?',
         TipoPresencia.pendientes => '¿Por dónde retomo lo pendiente?',
         TipoPresencia.felicitacion => '¿Qué sigue?',
+        TipoPresencia.rollover => '¿Cómo reacomodo lo que quedó pendiente?',
         TipoPresencia.saludo => 'Hola, ¿cómo vamos?',
         TipoPresencia.idle => 'Hola, ¿cómo vamos?',
       };
+
+  /// Aplica la decisión de rollover sobre la tarea no cumplida y refresca.
+  Future<void> _decidirRollover(String? tareaId, DecisionRollover d) async {
+    if (tareaId == null || _trabajando) return;
+    setState(() => _trabajando = true);
+    try {
+      await ref.read(rolloverRepositoryProvider).decidir(tareaId, d);
+      ref.invalidate(rolloverProvider);
+      ref.invalidate(planDiaProvider);
+      ref.invalidate(tareasProvider);
+      _aviso(switch (d) {
+        DecisionRollover.aceptar => 'Listo, lo reagendé.',
+        DecisionRollover.otroDia => 'Lo moví a otro día.',
+        DecisionRollover.soltar => 'Lo solté, sin culpa.',
+      });
+    } catch (e) {
+      _aviso('No pude moverlo: $e');
+    } finally {
+      if (mounted) setState(() => _trabajando = false);
+    }
+  }
 
   /// Navega al chat de Matix y manda una semilla (reusa Capa 2: chat/voz).
   Future<void> _irAlChat(String seed) async {
@@ -145,6 +175,9 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
           .completar(tareaId: m.tareaId, nodoId: m.nodoId);
       ref.invalidate(planDiaProvider);
       ref.invalidate(tareasProvider);
+      // Cerrar algo temprano abre huecos: recomputa el rollover (scheduling
+      // dinámico, no solo mostrar el tiempo libre).
+      ref.invalidate(rolloverProvider);
       _aviso('Listo, lo marqué. Bien ahí.');
     } catch (e) {
       _aviso('No pude marcarlo: $e');
@@ -318,6 +351,7 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
 
     final ctx = ref.watch(contextoMascotaProvider);
     final plan = ref.watch(planDiaProvider).valueOrNull;
+    final rollover = ref.watch(rolloverProvider).valueOrNull;
 
     // Celebra al detectar que cerraste algo (hechasHoy sube).
     ref.listen<ContextoMascota>(contextoMascotaProvider, (prev, next) {
@@ -330,7 +364,8 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
     final MensajePresencia msg;
     MensajePresencia? accionable;
     if (silencio) {
-      // Respeta el silencio: un mensaje tranquilo, sin celebrar ni rotar.
+      // Respeta el silencio: un mensaje tranquilo, sin celebrar, rotar ni
+      // surfacear rollovers.
       msg = const MensajePresencia(
         tipo: TipoPresencia.idle,
         texto: 'Modo noche. Acá ando bajito si me necesitas.',
@@ -346,6 +381,30 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
         acciones: const [AccionPresencia.hablemos, AccionPresencia.verMiDia],
       );
       accionable = accionableActual(plan, ctx, ahora);
+    } else if (rollover != null && rollover.sobrecarga.sobrecargado) {
+      // Guardrail honesto: ya no es de mover de día, toca re-escopar/bajar carga.
+      msg = MensajePresencia(
+        tipo: TipoPresencia.rollover,
+        texto: rollover.sobrecarga.mensaje ??
+            'Estás arrastrando varias cosas. Bajemos la carga juntos.',
+        acciones: const [AccionPresencia.hablemos, AccionPresencia.verMiDia],
+      );
+    } else if (rollover != null && rollover.proposals.isNotEmpty) {
+      // Lo no cumplido NO muere callado: se propone moverlo, tocable.
+      final p = rollover.proposals.first;
+      final cuando = p.propuesta?.cuando;
+      msg = MensajePresencia(
+        tipo: TipoPresencia.rollover,
+        texto: cuando != null && cuando.isNotEmpty
+            ? 'Quedó «${p.titulo}» sin hacer. ¿Lo muevo a $cuando?'
+            : 'Quedó «${p.titulo}» sin hacer. ¿Lo reacomodamos?',
+        acciones: const [
+          AccionPresencia.aceptarRollover,
+          AccionPresencia.otroDia,
+          AccionPresencia.soltar,
+        ],
+        tareaId: p.tareaId,
+      );
     } else {
       msg = mensajePresencia(plan, ctx, ahora, rotacion: _rotacion);
       accionable = accionableActual(plan, ctx, ahora);
