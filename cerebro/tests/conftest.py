@@ -126,6 +126,28 @@ def pytest_report_header(config: object) -> str:  # noqa: ARG001
     return f"supabase para tests: {settings.supabase_url} (.env.test · MATIX_ENV=test)"
 
 
+# Módulos de integración que construyen `Postgrest()` DIRECTO (no vía la fixture
+# `_fresh_db`, que sí hace skip). Sin esto, en modo solo-puros corren contra un
+# Supabase falso y fallan. Hablan con la BD de verdad: necesitan cerebro/.env.test.
+_MODULOS_INTEGRACION_DIRECTA = {"test_google_push", "test_rituales_voz"}
+
+
+def pytest_collection_modifyitems(config: object, items: list) -> None:  # noqa: ARG001
+    """En modo solo-puros, salta los tests de integración que crean `Postgrest()`
+    directo (la fixture `_fresh_db` ya cubre el resto). Así el gate del CI corre
+    SOLO lógica pura, igual que `pytest` local sin `.env.test`."""
+    if not _SOLO_PUROS:
+        return
+    marca = pytest.mark.skip(
+        reason="integración (Postgrest directo): requiere cerebro/.env.test"
+    )
+    for item in items:
+        modulo = getattr(item, "module", None)
+        nombre = getattr(modulo, "__name__", "").rsplit(".", 1)[-1]
+        if nombre in _MODULOS_INTEGRACION_DIRECTA:
+            item.add_marker(marca)
+
+
 @pytest_asyncio.fixture
 async def _fresh_db() -> AsyncIterator[Postgrest]:
     if _SOLO_PUROS:

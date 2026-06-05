@@ -266,9 +266,17 @@ def _a_anthropic(messages: list[dict]) -> tuple[str, list[dict]]:
             continue
         _flush()
         if rol == "assistant":
+            # Si el assistant YA viene con `content` en bloques (el `raw` de un
+            # turno Anthropic previo, re-inyectado por el loop de tools), pásalo
+            # TAL CUAL: reconstruirlo perdía los tool_use y rompía el pairing con
+            # los tool_result del siguiente turno (multi-turno con Claude).
+            contenido_raw = m.get("content")
+            if isinstance(contenido_raw, list):
+                out.append({"role": "assistant", "content": contenido_raw})
+                continue
             texto = m.get("contenido")
             if not isinstance(texto, str):
-                texto = m.get("content") if isinstance(m.get("content"), str) else ""
+                texto = contenido_raw if isinstance(contenido_raw, str) else ""
             bloques: list[dict[str, Any]] = []
             if texto and texto.strip():
                 bloques.append({"type": "text", "text": texto})

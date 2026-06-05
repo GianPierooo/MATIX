@@ -162,8 +162,10 @@ async def test_anthropic_con_tools_parsea_tool_use(monkeypatch):
     )
     assert out["tipo"] == "tool_calls"
     assert out["tool_calls"][0] == {"id": "tu1", "nombre": "crear_tarea", "args": {"titulo": "x"}}
-    # El system salió aparte y se mandó tool_choice traducido.
-    assert cap["system"] == "s"
+    # El system salió aparte. Va envuelto con cache_control (prompt caching de
+    # Anthropic): el texto está dentro del bloque.
+    assert cap["system"][0]["text"] == "s"
+    assert cap["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert cap["tool_choice"] == {"type": "auto"}
     # `raw` re-inyectable como assistant con bloques.
     assert out["raw"]["role"] == "assistant"
