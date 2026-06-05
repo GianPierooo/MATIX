@@ -24,13 +24,18 @@ Estas reglas rigen TODO cambio, sin que el usuario tenga que repetirlas:
    reintroducir render de markdown.
 3. **Tiempo en America/Lima**: todas las horas y fechas se calculan y muestran
    en la zona de Lima.
-4. **Antes de commitear**: tests y `flutter analyze` en verde. Flutter 3.44.1
-   está instalado en `C:\Users\gianp\flutter` (en PATH): corre
-   `flutter analyze --no-fatal-infos` y `flutter test` en `app/` ANTES de
-   commitear (ya no hay excusa de "no puedo correrlos"). Si por lo que sea no
-   pudieras, dilo explícito y NO afirmes que están en verde. El CI enforza el
-   mismo gate en cada push: `flutter analyze --no-fatal-infos` + `flutter test`
-   (app) y los tests PUROS del cerebro (`uv` + `pytest`). Es fatal en errores y
+4. **Antes de commitear**: tests y `flutter analyze` en verde. El toolchain está
+   instalado local — NO hay excusa de "no puedo correrlos". Corre AMBOS gates
+   ANTES de commitear:
+   - App: `flutter analyze --no-fatal-infos` + `flutter test` en `app/`
+     (Flutter 3.44.1 en `C:\Users\gianp\flutter`, en PATH).
+   - Cerebro (tests PUROS): desde `cerebro/`, con uv en `C:\Users\gianp\.local\
+     bin`: `$env:Path = "C:\Users\gianp\.local\bin;$env:Path"; uv sync;
+     $env:SUPABASE_URL="https://ci.invalid"; uv run pytest -q`. Sin
+     `cerebro/.env.test` el conftest corre en modo SOLO-PUROS (integración
+     omitida; no toca Supabase), igual que el CI.
+   Si por lo que sea no pudieras, dilo explícito y NO afirmes que están en
+   verde. El CI enforza el mismo gate en cada push; es fatal en errores y
    warnings (bugs reales) pero tolera los `info` de deprecación del canal
    stable. Si el gate falla, el APK NO se construye ni publica (ver
    `.github/workflows/release.yml` y `docs/ESTADO.md`).
