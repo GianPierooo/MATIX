@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/hub_refresh.dart';
 import '../../../theme/matix_colors.dart';
 import '../../universidad/providers/universidad_providers.dart';
 import '../domain/plan_dia.dart';
@@ -57,7 +58,10 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
         await ref
             .read(horarioRepositoryProvider)
             .completar(tareaId: b.tareaId, nodoId: b.nodoId);
-        ref.invalidate(planDiaProvider);
+        // Es la MISMA tarea que vive en /tareas y en el rollover: refrescamos
+        // las tres vistas (antes solo el plan, así que la pestaña Tareas seguía
+        // mostrando la tarea como pendiente).
+        invalidarHub(ref);
       } else {
         // Skill u otro sin estado en el cerebro: lo cerramos en la vista.
         setState(() => _ocultos.add(b.clave));
@@ -75,7 +79,9 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
     try {
       if (b.setItemId != null) {
         await ref.read(horarioRepositoryProvider).saltar(b.setItemId!);
-        ref.invalidate(planDiaProvider);
+        // Saltar también cambia el rollover (este item ya no se va a arrastrar
+        // como "no cumplido"); refrescamos todo el hub.
+        invalidarHub(ref);
       } else {
         setState(() => _ocultos.add(b.clave));
       }

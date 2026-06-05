@@ -106,13 +106,26 @@ async def actualizar_tarea(
     # a un nodo marca ese nodo hecho/pendiente, para que el % de avance suba/baje
     # de verdad. Best-effort: si no es tarea de un plan, no toca nada.
     if "completada" in payload and payload["completada"] != actual.get("completada"):
+        nuevo_estado = "hecho" if payload["completada"] else "pendiente"
         try:
             from ..matix import arbol_proyecto
 
             await arbol_proyecto.marcar_por_tarea(
-                db,
-                tarea_id=str(tarea_id),
-                estado="hecho" if payload["completada"] else "pendiente",
+                db, tarea_id=str(tarea_id), estado=nuevo_estado,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        # Sincroniza el SET DEL DÍA: una tarea es UNA entidad — completarla por
+        # acá (pestaña Tareas) debe reflejarse en el item del set, igual que
+        # cuando se completa por `horario.completar_bloque`. Antes solo se
+        # sincronizaba por el camino del bloque; eso dejaba el item del set como
+        # 'aceptado' y el rollover del día siguiente lo arrastraba como si nada.
+        # Best-effort: si la tarea no estaba en el set, no toca nada.
+        try:
+            from ..matix import planificador_diario
+
+            await planificador_diario.marcar_item_por_tarea(
+                db, tarea_id=str(tarea_id), estado=nuevo_estado,
             )
         except Exception:  # noqa: BLE001
             pass

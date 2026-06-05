@@ -97,6 +97,18 @@ class Tarea {
   /// contadores (Urgencia-1) y los nudges (Urgencia-2).
   DateTime? get plazoEfectivo => bloqueFin ?? venceEn;
 
+  /// `true` si la tarea está AGENDADA en una hora concreta (tiene bloque del
+  /// plan del día). Es distinto de tener `venceEn` (plazo de entrega): una
+  /// tarea agendada se ve como bloque en "Tu día" y en la pestaña Tareas se
+  /// muestra con el chip de hora del bloque.
+  bool get estaAgendada => bloqueInicio != null;
+
+  /// `true` si está en el BACKLOG: sin plazo real, sin bloque agendado, y
+  /// no completada. Antes morían en silencio; ahora se ven como "Sin fecha"
+  /// y el planificador las ofrece en huecos cuando hay espacio.
+  bool get esBacklog =>
+      !completada && venceEn == null && bloqueInicio == null;
+
   /// `true` si tiene fecha de vencimiento y ya pasó (y no está completada).
   bool get estaVencida =>
       !completada &&

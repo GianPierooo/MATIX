@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/hub_refresh.dart';
 import '../../../core/markdown_plano.dart';
 import '../../../theme/matix_colors.dart';
 import '../../apuntes/providers/apuntes_providers.dart';
@@ -173,11 +174,9 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
       await ref
           .read(horarioRepositoryProvider)
           .completar(tareaId: m.tareaId, nodoId: m.nodoId);
-      ref.invalidate(planDiaProvider);
-      ref.invalidate(tareasProvider);
-      // Cerrar algo temprano abre huecos: recomputa el rollover (scheduling
-      // dinámico, no solo mostrar el tiempo libre).
-      ref.invalidate(rolloverProvider);
+      // Una tarea = UNA entidad: refrescamos Tareas + plan + rollover en bloque
+      // (cerrar algo temprano abre huecos → el rollover se recomputa).
+      invalidarHub(ref);
       _aviso('Listo, lo marqué. Bien ahí.');
     } catch (e) {
       _aviso('No pude marcarlo: $e');
@@ -195,7 +194,7 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
     setState(() => _trabajando = true);
     try {
       await ref.read(horarioRepositoryProvider).saltar(m.setItemId!);
-      ref.invalidate(planDiaProvider);
+      invalidarHub(ref);
       _aviso('Lo salté por hoy, sin culpa.');
     } catch (e) {
       _aviso('No pude saltarlo: $e');

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../api/matix_client.dart';
+import '../../../core/hub_refresh.dart';
 import '../../../core/undo_snackbar.dart';
 import '../../../theme/matix_colors.dart';
 import '../../../theme/matix_spacing.dart';
@@ -228,7 +229,10 @@ class _ListaPlana extends ConsumerWidget {
           ),
           onToggleCompletada: (v) async {
             await repo.marcarCompletada(t.id, completada: v);
-            ref.invalidate(tareasProvider);
+            // Una tarea es UNA entidad: completarla acá tiene que reflejarse
+            // también en "Tu día" y en el rollover (el bloque desaparece, no
+            // queda como pendiente arrastrado al día siguiente).
+            invalidarHub(ref);
             // Solo ofrecemos deshacer al completar (la mayoría de
             // los toques son éste). Al "des-completar" manualmente,
             // el usuario ya está deshaciendo algo: no metemos un
@@ -239,7 +243,7 @@ class _ListaPlana extends ConsumerWidget {
                 mensaje: '«${t.titulo}» completada',
                 onUndo: () async {
                   await repo.marcarCompletada(t.id, completada: false);
-                  ref.invalidate(tareasProvider);
+                  invalidarHub(ref);
                 },
               );
             }

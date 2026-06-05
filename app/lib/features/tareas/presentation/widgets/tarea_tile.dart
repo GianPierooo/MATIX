@@ -164,14 +164,40 @@ class _VenceLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Tarea AGENDADA (tiene bloque del plan del día): el chip muestra la hora
+    // del bloque con icono distinto — el usuario ve que esta tarea está en su
+    // "Tu día". Antes solo se mostraba `venceEn`, así que una tarea agendada
+    // pero sin vencimiento aparecía como "—".
+    if (tarea.estaAgendada) {
+      final local = tarea.bloqueInicio!.toLocal();
+      final texto = _etiquetaFecha(local, agendada: true);
+      return Row(
+        children: [
+          const Icon(Icons.event_available,
+              size: 12, color: MatixColors.accent),
+          const SizedBox(width: 4),
+          Text(
+            texto,
+            style: const TextStyle(
+              fontSize: 12,
+              color: MatixColors.accent,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      );
+    }
+
     final v = tarea.venceEn;
     if (v == null) {
+      // Backlog: la copy es HONESTA — la tarea existe, está sin fecha. El
+      // planificador puede ofrecerla cuando haya hueco (no muere callada).
       return const Row(
         children: [
-          Icon(Icons.schedule, size: 12, color: MatixColors.muted),
+          Icon(Icons.inbox_outlined, size: 12, color: MatixColors.muted),
           SizedBox(width: 4),
           Text(
-            '—',
+            'Sin fecha',
             style: TextStyle(
               fontSize: 12,
               color: MatixColors.muted,
@@ -181,26 +207,12 @@ class _VenceLabel extends StatelessWidget {
         ],
       );
     }
+
     final local = v.toLocal();
-    final ahora = DateTime.now();
-    final hoy = DateTime(ahora.year, ahora.month, ahora.day);
-    final dia = DateTime(local.year, local.month, local.day);
-    final diff = dia.difference(hoy).inDays;
-    String texto;
-    if (diff == 0) {
-      texto = 'Hoy · ${DateFormat.Hm().format(local)}';
-    } else if (diff == 1) {
-      texto = 'Mañana · ${DateFormat.Hm().format(local)}';
-    } else if (diff > 1 && diff < 7) {
-      texto =
-          '${DateFormat.E('es').format(local).toUpperCase()} · ${DateFormat.Hm().format(local)}';
-    } else {
-      texto = DateFormat('d MMM · HH:mm', 'es').format(local);
-    }
-    // Escala de color por cercanía (tranquilo → ámbar → rojo), donde el
-    // usuario ya mira sus tareas. Sin cuenta regresiva viva acá para no
-    // poner un timer por fila; el contador vivo está en "Hoy" y en el
-    // detalle.
+    final texto = _etiquetaFecha(local, agendada: false);
+    // Escala de color por cercanía (tranquilo → ámbar → rojo). Sin cuenta
+    // regresiva viva acá para no poner un timer por fila; el contador vivo
+    // está en "Hoy" y en el detalle.
     final color = colorUrgencia(nivelUrgencia(v, DateTime.now()));
     return Row(
       children: [
@@ -216,6 +228,21 @@ class _VenceLabel extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  /// Formato consistente "Hoy · 14:30" / "Mañana · 09:00" / "MIÉ · 10:00" /
+  /// "12 jun · 15:00", para venceEn y para el bloque agendado.
+  String _etiquetaFecha(DateTime local, {required bool agendada}) {
+    final ahora = DateTime.now();
+    final hoy = DateTime(ahora.year, ahora.month, ahora.day);
+    final dia = DateTime(local.year, local.month, local.day);
+    final diff = dia.difference(hoy).inDays;
+    if (diff == 0) return 'Hoy · ${DateFormat.Hm().format(local)}';
+    if (diff == 1) return 'Mañana · ${DateFormat.Hm().format(local)}';
+    if (diff > 1 && diff < 7) {
+      return '${DateFormat.E('es').format(local).toUpperCase()} · ${DateFormat.Hm().format(local)}';
+    }
+    return DateFormat('d MMM · HH:mm', 'es').format(local);
   }
 }
 

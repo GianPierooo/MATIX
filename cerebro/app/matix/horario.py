@@ -219,6 +219,38 @@ def colocar(
     return {"bloques": bloques, "fuera": fuera}
 
 
+def items_backlog(
+    tareas: list[dict[str, Any]],
+    *,
+    set_tarea_ids: set[str],
+    dur_tarea_min: int,
+    tope: int = 3,
+) -> list[dict[str, Any]]:
+    """BACKLOG VIVO (puro y testeable): tareas SIN fecha y SIN bloque que no
+    están en el set ni completadas. Antes morían invisibles al plan; ahora se
+    ofrecen como tarea ligera (no son trabajo profundo, no van al pico), con
+    tope para no ahogar el día. No tocan tareas ya agendadas. PURO."""
+    out: list[dict[str, Any]] = []
+    for t in tareas:
+        if len(out) >= tope:
+            break
+        if t.get("completada") or t.get("id") in set_tarea_ids:
+            continue
+        if t.get("bloque_inicio") or t.get("vence_en"):
+            continue
+        out.append({
+            "titulo": t.get("titulo") or "Tarea",
+            "tipo": "tarea",
+            "dur": int(dur_tarea_min),
+            # Prioridad/orden ALTOS = al final → solo entra si sobra espacio,
+            # después del set, las de hoy y las skills.
+            "prioridad": 9, "orden": 300,
+            "tarea_id": t.get("id"),
+            "backlog": True,
+        })
+    return out
+
+
 def _norm(s: Any) -> str:
     """Normaliza un título para comparar sin tropezar con tildes/mayúsculas/
     espacios (p. ej. 'Calistenia' vs 'calistenia '). PURO."""
@@ -451,6 +483,14 @@ async def _items_a_colocar(
                 "dur": int(cfg["dur_tarea_min"]), "prioridad": 5, "orden": 100,
                 "tarea_id": t.get("id"),
             })
+
+    # BACKLOG VIVO: tareas SIN fecha y SIN bloque entran como tarea ligera (no
+    # son trabajo profundo: no van al pico), con tope para no ahogar el día. La
+    # lógica vive en `items_backlog` para testearla sin BD.
+    items.extend(items_backlog(
+        tareas, set_tarea_ids=set_tarea_ids,
+        dur_tarea_min=int(cfg["dur_tarea_min"]),
+    ))
 
     # Skills activas: slot chico opcional cada una (lo más ligero, va al final).
     # Si la skill YA tiene su rutina como compromiso fijo del día (p. ej.
