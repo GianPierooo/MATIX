@@ -21,6 +21,8 @@ import 'features/eventos/providers/eventos_providers.dart';
 import 'features/matix/data/captura_apunte_repository.dart';
 import 'features/matix/presentation/manos_libres_screen.dart';
 import 'features/matix/providers/captura_apunte_providers.dart';
+import 'features/matix/providers/navegacion_matix_provider.dart';
+import 'features/proyectos/presentation/detalle_proyecto_screen.dart';
 import 'features/push/application/push_service.dart';
 import 'features/wakeword/data/wakeword_log.dart';
 import 'features/wakeword/providers/wakeword_providers.dart';
@@ -317,6 +319,10 @@ class _MatixAppState extends ConsumerState<MatixApp>
       _navigatorKey.currentState?.push(
         MaterialPageRoute(builder: (_) => const RepasoSemanalScreen()),
       );
+    } else if (payload == 'hoy' || payload == 'set_dia') {
+      // Proactividad (pre-libre / hueco) y el set del día abren Inicio, donde
+      // el plan "Hoy" ofrece las sugerencias tocables (sin abrir el chat).
+      ref.read(objetivoNavegacionProvider.notifier).state = SeccionMatix.inicio;
     } else if (payload != null && payload.startsWith('evento:')) {
       unawaited(_abrirEvento(payload.substring('evento:'.length)));
     } else if (payload != null && payload.startsWith('tarea:')) {
@@ -324,6 +330,16 @@ class _MatixAppState extends ConsumerState<MatixApp>
         MaterialPageRoute(
           builder: (_) => NuevaTareaScreen(
             tareaId: payload.substring('tarea:'.length),
+          ),
+        ),
+      );
+    } else if (payload != null && payload.startsWith('proyecto:')) {
+      // Proactividad (reposición): abre el proyecto, con su próxima acción y la
+      // descomposición lista para arrancar.
+      _navigatorKey.currentState?.push(
+        MaterialPageRoute(
+          builder: (_) => DetalleProyectoScreen(
+            proyectoId: payload.substring('proyecto:'.length),
           ),
         ),
       );

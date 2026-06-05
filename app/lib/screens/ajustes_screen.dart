@@ -23,6 +23,8 @@ import '../features/memoria/presentation/sobre_mi_screen.dart';
 import '../features/modelos/presentation/modelo_screen.dart';
 import '../features/nudges/providers/nudges_providers.dart';
 import '../features/papelera/presentation/papelera_screen.dart';
+import '../features/proactividad/domain/nivel_proactividad.dart';
+import '../features/proactividad/providers/proactividad_providers.dart';
 import '../features/planificador/application/plan_dia_controller.dart';
 import '../features/planificador/domain/disponibilidad.dart';
 import '../features/push/data/push_repository.dart';
@@ -343,6 +345,9 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
             subtitle: 'Push REAL desde el cerebro. Este SÍ debería llegar '
                 'aunque el OEM mate la app.',
           ),
+
+          const _Seccion('Proactividad'),
+          const _ProactividadTile(),
 
           const _Seccion('Nudges de urgencia'),
           const _NudgesTile(),
@@ -1583,6 +1588,137 @@ class _FilaDisponibilidad extends ConsumerWidget {
                   style: TextStyle(fontSize: 12.5, color: MatixColors.muted)),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Dial del motor de proactividad (Capa 8): maestro on/off + nivel
+/// (suave/equilibrado/exigente). Vive en el cerebro; el scheduler lo respeta
+/// cada minuto. Arranca EXIGENTE (proactivo y encima), fácil de bajar si
+/// satura. Los frenos (tope diario, silencio, dedup, anti-fatiga) son firmes
+/// en el código: este dial sube/baja la intensidad, nunca apaga la contención.
+class _ProactividadTile extends ConsumerWidget {
+  const _ProactividadTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cfg = ref.watch(proactividadConfigProvider);
+    final ctrl = ref.read(proactividadConfigProvider.notifier);
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
+      decoration: BoxDecoration(
+        color: MatixColors.card,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Matix se adelanta',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: MatixColors.text,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Te avisa por iniciativa propia: ratos libres, reposición '
+                      'de tareas y plazos que se vienen. Apágalo si no quieres '
+                      'ninguno.',
+                      style: TextStyle(fontSize: 12, color: MatixColors.muted),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Switch(
+                value: cfg.activo,
+                onChanged: ctrl.cambiarActivo,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Opacity(
+            opacity: cfg.activo ? 1 : 0.4,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    for (final n in NivelProactividad.values) ...[
+                      Expanded(
+                        child: _NivelChip(
+                          label: n.etiqueta,
+                          activo: cfg.nivel == n,
+                          enabled: cfg.activo,
+                          onTap: () => ctrl.cambiarNivel(n),
+                        ),
+                      ),
+                      if (n != NivelProactividad.values.last)
+                        const SizedBox(width: 8),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  cfg.nivel.descripcion,
+                  style: const TextStyle(fontSize: 12, color: MatixColors.muted),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Chip de selección de nivel (mismo lenguaje visual que las opciones de Matix).
+class _NivelChip extends StatelessWidget {
+  const _NivelChip({
+    required this.label,
+    required this.activo,
+    required this.enabled,
+    required this.onTap,
+  });
+  final String label;
+  final bool activo;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: activo
+          ? MatixColors.accent
+          : MatixColors.accent.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(99),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(99),
+        onTap: enabled ? onTap : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: activo ? Colors.white : MatixColors.accent,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

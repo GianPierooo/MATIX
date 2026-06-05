@@ -670,6 +670,7 @@ def iniciar(db: Postgrest) -> None:
             costos,
             evolucion_proyecto,
             planificador_diario,
+            proactividad,
         )
 
         await correr_job("recordatorios", revisar_y_enviar(db))
@@ -691,6 +692,9 @@ def iniciar(db: Postgrest) -> None:
         await correr_job("evolucion.hitos", evolucion_proyecto.revisar_hitos(db))
         await correr_job("evolucion.hitos_pct", evolucion_proyecto.revisar_hitos_pct(db))
         await correr_job("evolucion.estancamiento", evolucion_proyecto.revisar_estancamiento(db))
+        # Motor de proactividad (Capa 8): un aviso anticipatorio a la vez, con
+        # frenos firmes (tope, silencio, dedup, ritmo).
+        await correr_job("proactividad", proactividad.revisar_proactividad(db))
         # Operación: monitoreo de costo (cada minuto) y backup diario (crítico).
         await correr_job("costos.snapshot", costos.snapshot_y_alertar(db))
         ok_backup = await correr_job("backup", backup.revisar_backup(db))

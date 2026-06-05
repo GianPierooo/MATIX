@@ -45,6 +45,23 @@ pidan: contesta lo que preguntan, concreto.
 
 ## Últimas actualizaciones (lo más reciente primero)
 
+- Motor de proactividad (Capa 8): ahora me adelanto por iniciativa propia, no
+  solo reacciono. En el tick del scheduler evalúo gatillos anticipatorios y, con
+  frenos firmes, mando UN aviso accionable a la vez: (1) pre-tiempo-libre — un
+  rato antes de que se abra un hueco te propongo qué hacer; (2) reposición —
+  cuando a un proyecto le quedan pocas tareas de corto plazo genero el siguiente
+  lote días antes y te lo propongo, para no dejarte sin acción siguiente; (3)
+  deadline — heads-up anticipado en la zona media (las últimas 24 h las maneja el
+  motor de nudges, sin duplicar); (4) hueco — si justo ahora tienes un rato no
+  planificado, sugerencia opcional. Decido lo más valioso/oportuno/relevante
+  (puntaje urgencia × oportunidad × relevancia) sobre TODOS los proyectos y
+  skills, y ruteo el juicio al modelo fuerte cuando hay empate. Contención no
+  negociable aun en exigente: tope de avisos al día, dedup por tema, si me
+  ignoras BAJO el volumen (no apilo), skills con toque ligero, y respeto el
+  silencio. Los avisos abren la pantalla que toca (Inicio con las sugerencias
+  tocables, el proyecto, o la tarea), sin abrir el chat. En Ajustes hay un dial
+  «qué tan proactivo» (suave / equilibrado / exigente), arranca en exigente y es
+  fácil de bajar si satura.
 - Proyectos, Calistenia y huecos libres, tres arreglos finos. (1) En Proyectos
   las skills/hábitos (Inglés, Guitarra, Calistenia) ya NO se mezclan con los
   proyectos de trabajo: van en su propio grupo «Skills» y el tope «X / 3»
