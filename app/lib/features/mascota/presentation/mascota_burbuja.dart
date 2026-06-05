@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/markdown_plano.dart';
 import '../../../theme/matix_colors.dart';
 import '../domain/personalidad.dart';
 import '../providers/mascota_providers.dart';
@@ -86,7 +87,7 @@ class _Burbuja extends StatelessWidget {
                     child: Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
-                        msg.texto,
+                        limpiarMarkdown(msg.texto),
                         style: const TextStyle(
                           fontSize: 13.5,
                           color: MatixColors.text,

@@ -33,6 +33,8 @@ class ContextoMascota {
     this.hechasHoy = 0,
     this.proyectosActivos = 0,
     this.proyectosEnRiesgo = 0,
+    this.proyectoFoco,
+    this.proyectoSinSiguiente,
   });
 
   final int tareasHoy;
@@ -40,6 +42,14 @@ class ContextoMascota {
   final int hechasHoy;
   final int proyectosActivos;
   final int proyectosEnRiesgo;
+
+  /// Nombre del proyecto activo top (el de mayor prioridad), para mensajes que
+  /// invitan a empujar lo importante. `null` si no hay proyectos activos.
+  final String? proyectoFoco;
+
+  /// Nombre de un proyecto activo SIN acción siguiente definida: candidato a
+  /// "ponle su siguiente paso". `null` si todos la tienen.
+  final String? proyectoSinSiguiente;
 
   static const vacio = ContextoMascota();
 }

@@ -114,4 +114,89 @@ void main() {
       expect(m.texto.contains('*'), isFalse);
     });
   });
+
+  group('poolPresencia (variedad ambiental)', () {
+    test('nunca vacío y sin asteriscos en ninguna frase', () {
+      final pool = poolPresencia(null, ContextoMascota.vacio, nueve);
+      expect(pool, isNotEmpty);
+      for (final m in pool) {
+        expect(m.texto, isNotEmpty);
+        expect(m.texto.contains('*'), isFalse);
+      }
+    });
+
+    test('incluye siempre aliento, dato y un idle por franja', () {
+      // Sin plan ni señales: el pool es puramente ambiental, con varias
+      // opciones para rotar (no una sola repetida).
+      final pool = poolPresencia(null, ContextoMascota.vacio, nueve);
+      expect(pool.length, greaterThanOrEqualTo(3));
+    });
+
+    test('atraso ofrece reprogramar (esto venció, ¿lo muevo?)', () {
+      final pool = poolPresencia(null, const ContextoMascota(vencidas: 1), nueve);
+      final venc = pool.firstWhere(
+          (m) => m.acciones.contains(AccionPresencia.reprogramar));
+      expect(venc.texto, contains('1'));
+      expect(venc.texto.contains('*'), isFalse);
+    });
+
+    test('proyecto sin acción siguiente aparece en el pool', () {
+      final pool = poolPresencia(
+        null,
+        const ContextoMascota(
+            proyectosActivos: 1, proyectoSinSiguiente: 'OneXotic'),
+        nueve,
+      );
+      expect(pool.any((m) => m.texto.contains('OneXotic')), isTrue);
+    });
+  });
+
+  group('mensajePresencia con rotación', () {
+    test('rotación recorre el pool (cambia de mensaje)', () {
+      const ctx = ContextoMascota(vencidas: 1, tareasHoy: 2);
+      final textos = <String>{
+        for (var r = 0; r < 6; r++)
+          mensajePresencia(null, ctx, nueve, rotacion: r).texto,
+      };
+      // Con varios candidatos relevantes, la rotación produce variedad real.
+      expect(textos.length, greaterThan(1));
+    });
+
+    test('rotación 0 sigue dando el más relevante (compatibilidad)', () {
+      final plan = _plan([
+        _bloque(
+          inicio: '08:30',
+          fin: '10:00',
+          titulo: 'OneXotic: landing',
+          tareaId: 't1',
+          setItemId: 's1',
+        ),
+      ]);
+      final m = mensajePresencia(plan, ContextoMascota.vacio, nueve);
+      expect(m.tipo, TipoPresencia.ahora);
+      expect(m.acciones.first, AccionPresencia.hecho);
+    });
+  });
+
+  group('accionableActual', () {
+    test('encuentra el bloque accionable de ahora', () {
+      final plan = _plan([
+        _bloque(
+          inicio: '08:30',
+          fin: '10:00',
+          titulo: 'OneXotic: landing',
+          tareaId: 't1',
+          setItemId: 's1',
+        ),
+      ]);
+      final m = accionableActual(plan, ContextoMascota.vacio, nueve);
+      expect(m, isNotNull);
+      expect(m!.tareaId, 't1');
+    });
+
+    test('sin nada accionable → null', () {
+      final m = accionableActual(null, ContextoMascota.vacio, nueve);
+      expect(m, isNull);
+    });
+  });
 }

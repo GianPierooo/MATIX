@@ -19,12 +19,22 @@ enum TipoPresencia {
 }
 
 /// Acciones tocables que puede ofrecer la burbuja. Se mapean a chips + conducta.
-enum AccionPresencia { hecho, saltar, hablemos, verMiDia, seguimos }
+enum AccionPresencia {
+  hecho,
+  posponer,
+  saltar,
+  reprogramar,
+  hablemos,
+  verMiDia,
+  seguimos,
+}
 
 extension AccionPresenciaX on AccionPresencia {
   String get etiqueta => switch (this) {
         AccionPresencia.hecho => 'Hecho',
+        AccionPresencia.posponer => 'Posponer',
         AccionPresencia.saltar => 'Saltar',
+        AccionPresencia.reprogramar => 'Reprogramar',
         AccionPresencia.hablemos => 'Hablemos',
         AccionPresencia.verMiDia => 'Ver mi día',
         AccionPresencia.seguimos => 'Seguimos',
@@ -79,44 +89,55 @@ String _dur(int min) {
 }
 
 const _acInfo = [AccionPresencia.verMiDia, AccionPresencia.hablemos];
+const _acHablar = [AccionPresencia.hablemos, AccionPresencia.verMiDia];
 
-/// El corazón de la presencia: dado el plan, el contexto y la hora, devuelve el
-/// mensaje ambiental más relevante AHORA. Orden de prioridad: lo que pasa ahora
-/// → un rato libre inminente → lo que sigue → pendientes/atrasos → idle por
-/// franja. PURO y testeable.
-MensajePresencia mensajePresencia(
+/// Rota dentro de un pool de frases por la semilla (variedad sin repetir).
+String _rot(List<String> pool, int s) => pool[s.abs() % pool.length];
+
+/// Construye el POOL de mensajes relevantes AHORA, en orden de prioridad. El
+/// primero (índice 0) es siempre el más relevante; los siguientes dan variedad
+/// ambiental para que la burbuja rote y no repita. La `semilla` rota las frases.
+/// Siempre devuelve al menos un mensaje (el idle por franja). PURO y testeable.
+List<MensajePresencia> poolPresencia(
   PlanDia? plan,
   ContextoMascota ctx,
-  DateTime ahora,
-) {
+  DateTime ahora, {
+  int semilla = 0,
+}) {
+  final out = <MensajePresencia>[];
   final ahoraMin = ahora.hour * 60 + ahora.minute;
   final bloques = plan?.bloques ?? const <BloquePlan>[];
 
-  // 1) Lo que toca AHORA mismo.
+  // 1) Lo que toca AHORA mismo (accionable si es tentativo).
   final actual = bloqueActual(bloques, ahoraMin);
   if (actual != null && actual.tentativo) {
     final ctxName = actual.proyecto ?? actual.skill;
-    return MensajePresencia(
+    out.add(MensajePresencia(
       tipo: TipoPresencia.ahora,
       texto: ctxName != null
-          ? 'Ahora toca: ${actual.titulo} ($ctxName). ¿Le entras?'
-          : 'Ahora toca: ${actual.titulo}. ¿Le entras?',
+          ? _rot([
+              'Ahora toca: ${actual.titulo} ($ctxName). ¿Le entras?',
+              '${actual.titulo} es lo de ahora ($ctxName). ¿Le metemos?',
+            ], semilla)
+          : _rot([
+              'Ahora toca: ${actual.titulo}. ¿Le entras?',
+              '${actual.titulo} es lo de ahora. ¿Arrancamos?',
+            ], semilla),
       acciones: const [
         AccionPresencia.hecho,
+        AccionPresencia.posponer,
         AccionPresencia.saltar,
-        AccionPresencia.hablemos,
       ],
       tareaId: actual.tareaId,
       nodoId: actual.nodoId,
       setItemId: actual.setItemId,
-    );
-  }
-  if (actual != null) {
-    return MensajePresencia(
+    ));
+  } else if (actual != null) {
+    out.add(MensajePresencia(
       tipo: TipoPresencia.ahora,
       texto: 'Estás en ${actual.titulo}. Cuando salgas, seguimos.',
       acciones: _acInfo,
-    );
+    ));
   }
 
   // 2) Un rato libre: aprovechable con una sugerencia del plan.
@@ -125,64 +146,167 @@ MensajePresencia mensajePresencia(
     final s = plan.sugerencias.first;
     final libre = siguiente != null ? siguiente.inicioMin - ahoraMin : null;
     final libreTxt = (libre != null && libre > 0) ? _dur(libre) : null;
-    return MensajePresencia(
+    out.add(MensajePresencia(
       tipo: TipoPresencia.libre,
       texto: libreTxt != null
-          ? 'Tienes $libreTxt libre. ¿Le das a ${s.titulo}?'
+          ? _rot([
+              'Tienes $libreTxt libre. ¿Le das a ${s.titulo}?',
+              '$libreTxt para ti. Buen rato para ${s.titulo}.',
+            ], semilla)
           : '¿Aprovechas un rato para ${s.titulo}?',
       acciones: _acInfo,
-    );
+    ));
   }
 
   // 3) Lo que sigue, si está cerca.
   if (siguiente != null) {
     final falta = siguiente.inicioMin - ahoraMin;
     if (falta <= 60) {
-      return MensajePresencia(
+      out.add(MensajePresencia(
         tipo: TipoPresencia.siguiente,
         texto: 'En ${_dur(falta)}: ${siguiente.titulo}.',
         acciones: _acInfo,
-      );
+      ));
     }
   }
 
-  // 4) Pendientes / atrasos, sin culpa.
+  // 4) Atrasos: "esto venció, ¿lo muevo?" (sin culpa, con reprogramar).
   if (ctx.vencidas > 0) {
-    return MensajePresencia(
+    out.add(MensajePresencia(
       tipo: TipoPresencia.pendientes,
-      texto: 'Tienes ${ctx.vencidas} que se pasó de fecha. ¿La vemos sin drama?',
-      acciones: _acInfo,
-    );
-  }
-  if (ctx.proyectosEnRiesgo > 0) {
-    return const MensajePresencia(
-      tipo: TipoPresencia.pendientes,
-      texto: 'Un proyecto está medio quieto. ¿Le damos un toque?',
-      acciones: _acInfo,
-    );
-  }
-  if (ctx.tareasHoy > 0) {
-    return MensajePresencia(
-      tipo: TipoPresencia.ahora,
-      texto: 'Para hoy tienes ${ctx.tareasHoy}. Vamos con calma y las sacamos.',
-      acciones: _acInfo,
-    );
+      texto: _rot([
+        'Tienes ${ctx.vencidas} que se pasó de fecha. ¿La vemos sin drama?',
+        'Algo venció (${ctx.vencidas}). ¿Lo muevo a hoy?',
+      ], semilla),
+      acciones: const [AccionPresencia.reprogramar, AccionPresencia.hablemos],
+    ));
   }
 
-  // 5) Idle por franja del día (vivo pero tranquilo).
-  final franja = franjaDe(ahora.hour);
-  final texto = switch (franja) {
-    FranjaDia.manana => 'Buen día. Acá ando para arrancar contigo.',
-    FranjaDia.tarde => 'Acá ando. ¿En qué te ayudo?',
-    FranjaDia.noche => ctx.hechasHoy > 0
-        ? 'Buen día de trabajo. Cuando quieras, a descansar.'
-        : 'Día suave. Acá si me necesitas.',
-  };
-  return MensajePresencia(
+  // 5) Proyecto activo sin acción siguiente: invita a definirla.
+  if (ctx.proyectoSinSiguiente != null) {
+    out.add(MensajePresencia(
+      tipo: TipoPresencia.pendientes,
+      texto: _rot([
+        'A ${ctx.proyectoSinSiguiente} le falta su siguiente paso. ¿Se lo ponemos?',
+        '${ctx.proyectoSinSiguiente} no tiene acción siguiente. ¿La definimos?',
+      ], semilla),
+      acciones: _acInfo,
+    ));
+  }
+
+  // 6) Proyecto en riesgo (quieto).
+  if (ctx.proyectosEnRiesgo > 0) {
+    out.add(MensajePresencia(
+      tipo: TipoPresencia.pendientes,
+      texto: _rot([
+        'Un proyecto está medio quieto. ¿Le damos un toque?',
+        'Hay un proyecto esperándote. Un pasito chico y revive.',
+      ], semilla),
+      acciones: _acInfo,
+    ));
+  }
+
+  // 7) Tu proyecto foco, cuando el día está liviano: empuja lo importante.
+  if (ctx.proyectoFoco != null && ctx.tareasHoy == 0 && ctx.vencidas == 0) {
+    out.add(MensajePresencia(
+      tipo: TipoPresencia.ahora,
+      texto: _rot([
+        '${ctx.proyectoFoco} es tu prioridad. ¿Un pasito hoy?',
+        'Si quieres avanzar, ${ctx.proyectoFoco} te espera.',
+      ], semilla),
+      acciones: _acInfo,
+    ));
+  }
+
+  // 8) Carga de hoy.
+  if (ctx.tareasHoy > 0) {
+    out.add(MensajePresencia(
+      tipo: TipoPresencia.ahora,
+      texto: _rot([
+        'Para hoy tienes ${ctx.tareasHoy}. Vamos con calma y las sacamos.',
+        'Hoy hay ${ctx.tareasHoy} en la mira. Tú marcas el ritmo.',
+      ], semilla),
+      acciones: _acInfo,
+    ));
+  }
+
+  // 9) Aliento ambiental (siempre disponible, da variedad).
+  out.add(MensajePresencia(
     tipo: TipoPresencia.idle,
-    texto: texto,
-    acciones: const [AccionPresencia.hablemos, AccionPresencia.verMiDia],
-  );
+    texto: _rot([
+      'Vas bien, en serio. Un paso a la vez.',
+      'Acá ando contigo. Lo que necesites, me dices.',
+      'Tranqui, que vamos avanzando. Confío en ti.',
+    ], semilla),
+    acciones: _acHablar,
+  ));
+
+  // 10) Dato/empujoncito de captura (variedad ambiental).
+  out.add(MensajePresencia(
+    tipo: TipoPresencia.idle,
+    texto: _rot([
+      'Tip: lo que anotas al toque no se te pierde. Yo me encargo.',
+      '¿Algo en la cabeza? Dímelo y lo guardo.',
+      'Registrar rápido es media batalla ganada.',
+    ], semilla),
+    acciones: _acHablar,
+  ));
+
+  // 11) Idle por franja del día (siempre presente: asegura pool no vacío).
+  final franja = franjaDe(ahora.hour);
+  final txt = switch (franja) {
+    FranjaDia.manana => _rot([
+        'Buen día. Acá ando para arrancar contigo.',
+        'Arrancamos el día. ¿Por dónde empezamos?',
+      ], semilla),
+    FranjaDia.tarde => _rot([
+        'Acá ando. ¿En qué te ayudo?',
+        'Sigue la tarde. ¿Le entramos a algo?',
+      ], semilla),
+    FranjaDia.noche => ctx.hechasHoy > 0
+        ? _rot([
+            'Buen día de trabajo. Cuando quieras, a descansar.',
+            'Cerraste cosas hoy. Bien ahí, causa.',
+          ], semilla)
+        : _rot([
+            'Día suave. Acá si me necesitas.',
+            'Noche tranquila. Acá ando.',
+          ], semilla),
+  };
+  out.add(MensajePresencia(
+    tipo: TipoPresencia.idle,
+    texto: txt,
+    acciones: _acHablar,
+  ));
+
+  return out;
+}
+
+/// El corazón de la presencia: dado el plan, el contexto y la hora, devuelve UN
+/// mensaje del pool. `rotacion` avanza por el pool (variedad ambiental que cambia
+/// sola); en 0 entrega el más relevante. PURO y testeable.
+MensajePresencia mensajePresencia(
+  PlanDia? plan,
+  ContextoMascota ctx,
+  DateTime ahora, {
+  int rotacion = 0,
+}) {
+  final pool = poolPresencia(plan, ctx, ahora, semilla: rotacion);
+  return pool[rotacion.abs() % pool.length];
+}
+
+/// El mensaje ACCIONABLE de ahora (el que apunta a una tarea/bloque concreto),
+/// si lo hay. Lo usa el menú del robot para ofrecer Hacer/Posponer/Saltar aunque
+/// la burbuja esté rotando en un mensaje ambiental. PURO.
+MensajePresencia? accionableActual(
+  PlanDia? plan,
+  ContextoMascota ctx,
+  DateTime ahora,
+) {
+  for (final m in poolPresencia(plan, ctx, ahora)) {
+    if (m.tareaId != null || m.nodoId != null || m.setItemId != null) return m;
+  }
+  return null;
 }
 
 /// Mensaje de celebración cuando cierras algo (lo dispara la presencia un ratito

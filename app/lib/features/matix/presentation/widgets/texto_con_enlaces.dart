@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../core/markdown_plano.dart';
 import '../../../../theme/matix_colors.dart';
 
 /// Un trozo de texto: plano, o un enlace (cuando [url] no es nulo).
@@ -114,7 +115,9 @@ class _TextoConEnlacesState extends State<TextoConEnlaces> {
     _recognizers.clear();
 
     final base = widget.style ?? const TextStyle();
-    final segmentos = parsearEnlaces(widget.texto);
+    // Red de seguridad: limpiamos cualquier markdown crudo del modelo antes de
+    // pintar (preserva los enlaces, que se vuelven tocables abajo).
+    final segmentos = parsearEnlaces(limpiarMarkdown(widget.texto));
     final spans = <InlineSpan>[];
     for (final s in segmentos) {
       if (!s.esEnlace) {

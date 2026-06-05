@@ -3,21 +3,33 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/markdown_plano.dart';
 import '../../../theme/matix_colors.dart';
+import '../../apuntes/providers/apuntes_providers.dart';
 import '../../horario/providers/horario_providers.dart';
+import '../../matix/presentation/manos_libres_screen.dart';
+import '../../matix/providers/captura_apunte_providers.dart';
 import '../../matix/providers/matix_chat_providers.dart';
 import '../../matix/providers/navegacion_matix_provider.dart';
 import '../../tareas/providers/tareas_providers.dart';
+import '../domain/dosificacion.dart';
 import '../domain/personalidad.dart';
 import '../domain/presencia.dart';
 import '../providers/mascota_providers.dart';
 import 'avatar_matix.dart';
 
-/// La presencia flotante de Matix: un robot vivo abajo en Inicio con una burbuja
-/// que SIEMPRE muestra lo más relevante del momento (lee el plan del día + el
-/// contexto + el reloj y se actualiza sola). Ambiental, no interrumpe; los pings
-/// reales los dosifica la proactividad. Tocable: hacer / saltar / hablar / ver
-/// el día. Minimizable. Si la mascota está apagada en Ajustes, no aparece.
+/// La presencia flotante de Matix: un robot-compañero vivo abajo en Inicio.
+///
+/// - Colapsado: solo el robot (flota, parpadea). Tocarlo reabre el mensaje.
+/// - Expandido: robot + burbuja con el mensaje del momento + acciones tocables,
+///   más una barra para anotar, dictar o ir al chat.
+///
+/// La burbuja ROTA sola entre mensajes según el plan, el contexto y la hora
+/// (saludo, qué toca, qué sigue, rato libre, atrasos, aliento, dato, celebración)
+/// para sentirse vivo sin repetir. Es ambiental: no interrumpe; los pings reales
+/// los dosifica la proactividad. Respeta el silencio (22:00–08:00) bajando a un
+/// mensaje tranquilo y sin rotar. Si la mascota está apagada en Ajustes, no
+/// aparece.
 class PresenciaMatix extends ConsumerStatefulWidget {
   const PresenciaMatix({super.key, required this.onVerMiDia});
 
@@ -30,19 +42,25 @@ class PresenciaMatix extends ConsumerStatefulWidget {
 
 class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
   Timer? _tick;
+  Timer? _rota;
   Timer? _saludoTimer;
   Timer? _celebraTimer;
   bool _minimizado = false;
   bool _recienEntra = true;
   bool _celebrando = false;
   bool _trabajando = false;
+  int _rotacion = 0;
 
   @override
   void initState() {
     super.initState();
-    // Se actualiza sola con el reloj (lo relevante cambia con la hora).
+    // Se actualiza con el reloj (lo relevante cambia con la hora).
     _tick = Timer.periodic(const Duration(seconds: 60), (_) {
       if (mounted) setState(() {});
+    });
+    // Rota el mensaje ambiental cada ~40 s para que la burbuja "cambie sola".
+    _rota = Timer.periodic(const Duration(seconds: 40), (_) {
+      if (mounted) setState(() => _rotacion++);
     });
     // El saludo dura un ratito al entrar y luego cede a lo ambiental.
     _saludoTimer = Timer(const Duration(seconds: 7), () {
@@ -53,6 +71,7 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
   @override
   void dispose() {
     _tick?.cancel();
+    _rota?.cancel();
     _saludoTimer?.cancel();
     _celebraTimer?.cancel();
     super.dispose();
@@ -82,15 +101,18 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
         setState(() => _minimizado = false);
         widget.onVerMiDia();
       case AccionPresencia.hablemos:
-        ref.read(objetivoNavegacionProvider.notifier).state =
-            SeccionMatix.matix;
-        await ref.read(chatMatixProvider.notifier).enviar(_seed(m.tipo));
-      case AccionPresencia.seguimos:
-        setState(() => _celebrando = false);
+        await _irAlChat(_seed(m.tipo));
       case AccionPresencia.hecho:
         await _completar(m);
+      case AccionPresencia.posponer:
+        await _irAlChat('Pospón lo de ahora un rato y reacomoda mi día, porfa.');
       case AccionPresencia.saltar:
         await _saltar(m);
+      case AccionPresencia.reprogramar:
+        await _irAlChat(
+            'Reprograma lo que se me pasó de fecha; muévelo a hoy si se puede.');
+      case AccionPresencia.seguimos:
+        setState(() => _celebrando = false);
     }
   }
 
@@ -103,6 +125,12 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
         TipoPresencia.saludo => 'Hola, ¿cómo vamos?',
         TipoPresencia.idle => 'Hola, ¿cómo vamos?',
       };
+
+  /// Navega al chat de Matix y manda una semilla (reusa Capa 2: chat/voz).
+  Future<void> _irAlChat(String seed) async {
+    ref.read(objetivoNavegacionProvider.notifier).state = SeccionMatix.matix;
+    await ref.read(chatMatixProvider.notifier).enviar(seed);
+  }
 
   Future<void> _completar(MensajePresencia m) async {
     if (m.tareaId == null && m.nodoId == null) {
@@ -143,6 +171,146 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
     }
   }
 
+  /// Captura rápida por escrito: reusa el mismo flujo clasificado que el resto
+  /// del hub (Matix decide dónde guardarlo). No abre el chat.
+  Future<void> _capturaRapida() async {
+    final ctrl = TextEditingController();
+    final texto = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: MatixColors.card,
+        title: const Text('Captura rápida',
+            style: TextStyle(color: MatixColors.text, fontSize: 16)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLines: 3,
+          minLines: 1,
+          style: const TextStyle(color: MatixColors.text),
+          textInputAction: TextInputAction.send,
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+          decoration: const InputDecoration(
+            hintText: 'Anota algo…',
+            hintStyle: TextStyle(color: MatixColors.muted),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar',
+                style: TextStyle(color: MatixColors.muted)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('Guardar',
+                style: TextStyle(color: MatixColors.accent)),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (texto == null || texto.trim().isEmpty || !mounted) return;
+    try {
+      final apunte =
+          await ref.read(capturaApunteRepoProvider).capturar(texto.trim());
+      ref.invalidate(apuntesListProvider);
+      _aviso(apunte.destinoLabel);
+    } catch (e) {
+      _aviso('No pude guardar: $e');
+    }
+  }
+
+  /// Dictar: abre el modo manos libres (voz) de Matix.
+  void _dictar() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const ManosLibresScreen()),
+    );
+  }
+
+  /// Menú del robot (long-press): todas las acciones en un solo lugar. Si hay
+  /// algo accionable ahora, ofrece hacer/posponer/saltar/reprogramar; siempre
+  /// ofrece captura rápida, dictar y hablar con Matix.
+  Future<void> _menu(MensajePresencia? accionable) async {
+    final opcion = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: MatixColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            if (accionable != null) ...[
+              ListTile(
+                leading: const Icon(Icons.check_circle_outline,
+                    color: MatixColors.accent),
+                title: const Text('Hacer ahora'),
+                onTap: () => Navigator.pop(ctx, 'hacer'),
+              ),
+              ListTile(
+                leading:
+                    const Icon(Icons.schedule, color: MatixColors.accent),
+                title: const Text('Posponer un rato'),
+                onTap: () => Navigator.pop(ctx, 'posponer'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.skip_next, color: MatixColors.accent),
+                title: const Text('Saltar por hoy'),
+                onTap: () => Navigator.pop(ctx, 'saltar'),
+              ),
+              ListTile(
+                leading:
+                    const Icon(Icons.event_repeat, color: MatixColors.accent),
+                title: const Text('Reprogramar'),
+                onTap: () => Navigator.pop(ctx, 'reprogramar'),
+              ),
+              const Divider(color: MatixColors.hairline, height: 8),
+            ],
+            ListTile(
+              leading: const Icon(Icons.edit_note, color: MatixColors.accent),
+              title: const Text('Captura rápida'),
+              subtitle: const Text('Anota algo y yo lo guardo'),
+              onTap: () => Navigator.pop(ctx, 'anotar'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.mic_none, color: MatixColors.accent),
+              title: const Text('Dictar'),
+              subtitle: const Text('Manos libres con Matix'),
+              onTap: () => Navigator.pop(ctx, 'dictar'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.forum_outlined,
+                  color: MatixColors.accent),
+              title: const Text('Hablar con Matix'),
+              onTap: () => Navigator.pop(ctx, 'hablar'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (opcion == null || !mounted) return;
+    switch (opcion) {
+      case 'hacer':
+        if (accionable != null) await _completar(accionable);
+      case 'posponer':
+        await _irAlChat('Pospón lo de ahora un rato y reacomoda mi día, porfa.');
+      case 'saltar':
+        if (accionable != null) await _saltar(accionable);
+      case 'reprogramar':
+        await _irAlChat(
+            'Reprograma lo que se me pasó de fecha; muévelo a hoy si se puede.');
+      case 'anotar':
+        await _capturaRapida();
+      case 'dictar':
+        _dictar();
+      case 'hablar':
+        await _irAlChat('Hola, ¿cómo vamos?');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cfg = ref.watch(mascotaConfigProvider);
@@ -157,8 +325,18 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
     });
 
     final ahora = DateTime.now();
+    final silencio = enSilencio(ahora.hour, cfg.silencioInicio, cfg.silencioFin);
+
     final MensajePresencia msg;
-    if (_celebrando) {
+    MensajePresencia? accionable;
+    if (silencio) {
+      // Respeta el silencio: un mensaje tranquilo, sin celebrar ni rotar.
+      msg = const MensajePresencia(
+        tipo: TipoPresencia.idle,
+        texto: 'Modo noche. Acá ando bajito si me necesitas.',
+        acciones: [AccionPresencia.hablemos, AccionPresencia.verMiDia],
+      );
+    } else if (_celebrando) {
       msg = felicitacionPresencia(ctx, semilla: ahora.minute);
     } else if (_recienEntra) {
       final s = saludo(franjaDe(ahora.hour), ctx, semilla: ahora.day + ahora.hour);
@@ -167,8 +345,10 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
         texto: s.texto,
         acciones: const [AccionPresencia.hablemos, AccionPresencia.verMiDia],
       );
+      accionable = accionableActual(plan, ctx, ahora);
     } else {
-      msg = mensajePresencia(plan, ctx, ahora);
+      msg = mensajePresencia(plan, ctx, ahora, rotacion: _rotacion);
+      accionable = accionableActual(plan, ctx, ahora);
     }
 
     final bottomGap = MediaQuery.viewPaddingOf(context).bottom + 86;
@@ -187,25 +367,76 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
                 trabajando: _trabajando,
                 onAccion: (a) => _accion(a, msg),
                 onMinimizar: () => setState(() => _minimizado = true),
+                onAnotar: _capturaRapida,
+                onDictar: _dictar,
+                onHablar: () => _irAlChat('Hola, ¿cómo vamos?'),
               ),
             const SizedBox(height: 6),
-            // El robot: tocarlo expande/colapsa la burbuja.
-            GestureDetector(
+            // El robot: tocar = expandir/colapsar (restaurar); mantener = menú.
+            _RobotFlotante(
+              celebrando: _celebrando,
+              minimizado: _minimizado,
               onTap: () => setState(() => _minimizado = !_minimizado),
-              child: Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: MatixColors.accent.withValues(alpha: 0.30),
-                      blurRadius: 18,
-                      spreadRadius: 1,
-                    ),
-                  ],
-                ),
-                child: AvatarMatix(size: 52, celebrando: _celebrando),
-              ),
+              onLongPress: () => _menu(accionable),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// El robot colapsable. Cuando está minimizado lleva un puntito de aviso para
+/// señalar que es tocable (reabre el mensaje). Mantener presionado abre el menú.
+class _RobotFlotante extends StatelessWidget {
+  const _RobotFlotante({
+    required this.celebrando,
+    required this.minimizado,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  final bool celebrando;
+  final bool minimizado;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: MatixColors.accent.withValues(alpha: 0.30),
+              blurRadius: 18,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            AvatarMatix(size: 52, celebrando: celebrando),
+            // Puntito "tócame para reabrir" cuando está colapsado.
+            if (minimizado)
+              Positioned(
+                top: -1,
+                right: -1,
+                child: Container(
+                  width: 13,
+                  height: 13,
+                  decoration: BoxDecoration(
+                    color: MatixColors.accent,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: MatixColors.bg, width: 2),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -219,12 +450,18 @@ class _Burbuja extends StatelessWidget {
     required this.trabajando,
     required this.onAccion,
     required this.onMinimizar,
+    required this.onAnotar,
+    required this.onDictar,
+    required this.onHablar,
   });
 
   final MensajePresencia msg;
   final bool trabajando;
   final void Function(AccionPresencia) onAccion;
   final VoidCallback onMinimizar;
+  final VoidCallback onAnotar;
+  final VoidCallback onDictar;
+  final VoidCallback onHablar;
 
   @override
   Widget build(BuildContext context) {
@@ -260,7 +497,7 @@ class _Burbuja extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    msg.texto,
+                    limpiarMarkdown(msg.texto),
                     style: const TextStyle(
                       fontSize: 13.5,
                       color: MatixColors.text,
@@ -299,6 +536,59 @@ class _Burbuja extends StatelessWidget {
                 ),
               ),
             ],
+            // Barra fija: captura rápida (escribir/dictar) y atajo al chat.
+            const SizedBox(height: 8),
+            const Divider(height: 1, color: MatixColors.hairline),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                _MiniAccion(
+                    icono: Icons.edit_note, etiqueta: 'Anotar', onTap: onAnotar),
+                _MiniAccion(
+                    icono: Icons.mic_none, etiqueta: 'Dictar', onTap: onDictar),
+                _MiniAccion(
+                    icono: Icons.forum_outlined,
+                    etiqueta: 'Hablar',
+                    onTap: onHablar),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniAccion extends StatelessWidget {
+  const _MiniAccion({
+    required this.icono,
+    required this.etiqueta,
+    required this.onTap,
+  });
+  final IconData icono;
+  final String etiqueta;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icono, size: 16, color: MatixColors.accent),
+            const SizedBox(width: 5),
+            Text(
+              etiqueta,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: MatixColors.accent,
+              ),
+            ),
           ],
         ),
       ),

@@ -32,6 +32,7 @@ class _AvatarMatixState extends State<AvatarMatix>
     with TickerProviderStateMixin {
   late final AnimationController _ctrl;
   late final AnimationController _brinco;
+  late final AnimationController _bob;
 
   @override
   void initState() {
@@ -45,7 +46,16 @@ class _AvatarMatixState extends State<AvatarMatix>
       vsync: this,
       duration: const Duration(milliseconds: 620),
     );
-    if (widget.animar) _ctrl.repeat();
+    // Flotación lenta y sutil: el robot "levita" un par de píxeles, vivo en
+    // reposo (más presencia de compañero, no un ícono estático).
+    _bob = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2600),
+    );
+    if (widget.animar) {
+      _ctrl.repeat();
+      _bob.repeat();
+    }
     if (widget.celebrando) _brinco.forward(from: 0);
   }
 
@@ -59,6 +69,7 @@ class _AvatarMatixState extends State<AvatarMatix>
   void dispose() {
     _ctrl.dispose();
     _brinco.dispose();
+    _bob.dispose();
     super.dispose();
   }
 
@@ -77,14 +88,18 @@ class _AvatarMatixState extends State<AvatarMatix>
       width: widget.size,
       height: widget.size,
       child: AnimatedBuilder(
-        animation: Listenable.merge([_ctrl, _brinco]),
+        animation: Listenable.merge([_ctrl, _brinco, _bob]),
         builder: (context, _) {
           // Brinco: sube y baja una vez (sin(pi·t)) con una pizca de giro.
           final b = _brinco.isAnimating || _brinco.value > 0
               ? math.sin(math.pi * _brinco.value)
               : 0.0;
+          // Flotación de reposo: oscila suave (±1.5% del tamaño).
+          final flot = widget.animar
+              ? math.sin(2 * math.pi * _bob.value) * widget.size * 0.015
+              : 0.0;
           return Transform.translate(
-            offset: Offset(0, -widget.size * 0.12 * b),
+            offset: Offset(0, flot - widget.size * 0.12 * b),
             child: Transform.rotate(
               angle: 0.12 * b,
               child: CustomPaint(

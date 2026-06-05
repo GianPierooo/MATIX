@@ -29,8 +29,17 @@ final contextoMascotaProvider = Provider<ContextoMascota>((ref) {
   final vencidas = pendientes.where((t) => t.estaVencida).length;
   final hechasHoy =
       tareas.where((t) => t.completada && esHoy(t.completadaEn)).length;
-  final activos = proyectos.where((p) => p.esActivo && !p.esSkill).toList();
+  final activos = proyectos.where((p) => p.esActivo && !p.esSkill).toList()
+    ..sort((a, b) => (a.prioridad ?? 99).compareTo(b.prioridad ?? 99));
   final enRiesgo = activos.where((p) => p.enRiesgo).length;
+  final foco = activos.isEmpty ? null : activos.first.nombre;
+  String? sinSiguiente;
+  for (final p in activos) {
+    if (p.tareaSiguienteId == null) {
+      sinSiguiente = p.nombre;
+      break;
+    }
+  }
 
   return ContextoMascota(
     tareasHoy: tareasHoy,
@@ -38,6 +47,8 @@ final contextoMascotaProvider = Provider<ContextoMascota>((ref) {
     hechasHoy: hechasHoy,
     proyectosActivos: activos.length,
     proyectosEnRiesgo: enRiesgo,
+    proyectoFoco: foco,
+    proyectoSinSiguiente: sinSiguiente,
   );
 });
 
