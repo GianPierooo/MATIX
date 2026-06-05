@@ -12,6 +12,7 @@ class WakeWordPrefs {
   static const _kActivo = 'wakeword_activo';
   static const _kUmbral = 'wakeword_umbral';
   static const _kBgActivo = 'wakeword_bg_activo';
+  static const _kOverlayVoz = 'wakeword_overlay_voz';
 
   /// Apagada por defecto: el usuario la enciende a propósito desde Ajustes
   /// (y ahí se le pide el permiso de micrófono).
@@ -48,5 +49,19 @@ class WakeWordPrefs {
   Future<void> fijarBgActivo(bool v) async {
     final p = await SharedPreferences.getInstance();
     await p.setBool(_kBgActivo, v);
+  }
+
+  /// Responder con OVERLAY flotante cuando "Oye Matix" se dispara con otra app
+  /// adelante (en vez de abrir Matix a pantalla completa). Opt-in: necesita el
+  /// permiso "mostrar sobre otras apps". Apagado por defecto (degrada a
+  /// fullscreen, el comportamiento clásico).
+  Future<bool> overlayVoz() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getBool(_kOverlayVoz) ?? false;
+  }
+
+  Future<void> fijarOverlayVoz(bool v) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_kOverlayVoz, v);
   }
 }

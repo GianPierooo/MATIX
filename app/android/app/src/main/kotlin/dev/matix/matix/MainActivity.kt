@@ -97,6 +97,46 @@ class MainActivity : FlutterActivity() {
                         result.success(aperturaWakePendiente)
                         aperturaWakePendiente = false
                     }
+                    // OVERLAY del wake word: burbuja flotante encima de otra app
+                    // (no la mata). La inteligencia (STT/chat/TTS) la corre Dart;
+                    // acá solo pintamos el estado y rebotamos los toques.
+                    "overlayMostrar" -> {
+                        val ok = VozOverlay.mostrar(
+                            this,
+                            call.argument<String>("estado") ?: "",
+                            onAbrir = {
+                                runOnUiThread { channelWake?.invokeMethod("onOverlayAbrir", null) }
+                            },
+                            onCerrar = {
+                                runOnUiThread { channelWake?.invokeMethod("onOverlayCerrar", null) }
+                            },
+                        )
+                        result.success(ok)
+                    }
+                    "overlayActualizar" -> {
+                        VozOverlay.actualizar(call.argument<String>("estado") ?: "")
+                        result.success(true)
+                    }
+                    "overlayOcultar" -> {
+                        VozOverlay.ocultar(this)
+                        result.success(true)
+                    }
+                    // Manda Matix al fondo (el juego vuelve al frente con la
+                    // burbuja encima). Lo usa el overlay tras tomar el turno por
+                    // wake: el FGS trajo la app al frente, la devolvemos atrás.
+                    "enviarAlFondo" -> {
+                        moveTaskToBack(true)
+                        result.success(true)
+                    }
+                    // Trae Matix al frente (el overlay tocó "Abrir" → pantalla
+                    // completa). singleTop reusa la instancia viva.
+                    "traerAlFrente" -> {
+                        val i = Intent(this, MainActivity::class.java).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        }
+                        startActivity(i)
+                        result.success(true)
+                    }
                     else -> result.notImplemented()
                 }
             }

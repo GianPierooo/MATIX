@@ -14,9 +14,14 @@ import 'wakeword_modelo.dart';
 class WakeWordBgService {
   WakeWordBgService() {
     _canal.setMethodCallHandler((call) async {
-      if (call.method == 'onWakeWordBackground') {
-        wlog('bg: la app volvió al frente por detección');
-        _alAbrir?.call();
+      switch (call.method) {
+        case 'onWakeWordBackground':
+          wlog('bg: la app volvió al frente por detección');
+          _alAbrir?.call();
+        case 'onOverlayAbrir':
+          _alOverlayAbrir?.call();
+        case 'onOverlayCerrar':
+          _alOverlayCerrar?.call();
       }
       return null;
     });
@@ -24,10 +29,62 @@ class WakeWordBgService {
 
   static const _canal = MethodChannel('dev.matix.matix/wakeword_bg');
   void Function()? _alAbrir;
+  void Function()? _alOverlayAbrir;
+  void Function()? _alOverlayCerrar;
 
   /// Qué hacer cuando el wake word de fondo trae la app al frente (abrir manos
   /// libres). Lo fija el root de la app.
   void registrarAlAbrir(void Function() cb) => _alAbrir = cb;
+
+  /// Toques del overlay flotante: "Abrir" (expandir a Matix completo) y "Cerrar"
+  /// (terminar la sesión). Los fija el controlador del overlay.
+  void registrarOverlay({
+    required void Function() alAbrir,
+    required void Function() alCerrar,
+  }) {
+    _alOverlayAbrir = alAbrir;
+    _alOverlayCerrar = alCerrar;
+  }
+
+  /// Muestra la burbuja flotante del wake (overlay) con un estado inicial.
+  /// Devuelve false si no hay permiso "mostrar sobre otras apps" (degrada).
+  Future<bool> overlayMostrar(String estado) async {
+    try {
+      return (await _canal
+              .invokeMethod<bool>('overlayMostrar', {'estado': estado})) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Cambia el texto de estado del overlay (escuchando/pensando/hablando).
+  Future<void> overlayActualizar(String estado) async {
+    try {
+      await _canal.invokeMethod('overlayActualizar', {'estado': estado});
+    } catch (_) {}
+  }
+
+  /// Quita la burbuja.
+  Future<void> overlayOcultar() async {
+    try {
+      await _canal.invokeMethod('overlayOcultar');
+    } catch (_) {}
+  }
+
+  /// Manda Matix al fondo (el juego vuelve al frente, la burbuja queda encima).
+  Future<void> enviarAlFondo() async {
+    try {
+      await _canal.invokeMethod('enviarAlFondo');
+    } catch (_) {}
+  }
+
+  /// Trae Matix al frente (el overlay tocó "Abrir" → pantalla completa).
+  Future<void> traerAlFrente() async {
+    try {
+      await _canal.invokeMethod('traerAlFrente');
+    } catch (_) {}
+  }
 
   Future<void> iniciar({
     required double umbral,

@@ -947,6 +947,7 @@ class _WakeWordTile extends ConsumerStatefulWidget {
 class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
   bool _activo = false;
   bool _bgActivo = false;
+  bool _overlayVoz = false;
   bool _cargando = true;
   double _umbral = 0.30;
 
@@ -962,14 +963,39 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
     final v = await notifier.estaActivo();
     final u = await notifier.umbral();
     final bg = await prefs.bgActivo();
+    final ov = await prefs.overlayVoz();
     if (mounted) {
       setState(() {
         _activo = v;
         _umbral = u;
         _bgActivo = bg;
+        _overlayVoz = ov;
         _cargando = false;
       });
     }
+  }
+
+  Future<void> _cambiarOverlay(bool v) async {
+    setState(() => _overlayVoz = v);
+    final bg = ref.read(wakeWordBgServiceProvider);
+    if (v && !await bg.puedeOverlay()) {
+      // Explica y pide el permiso "mostrar sobre otras apps". Si no lo concede,
+      // el wake degrada a pantalla completa (lo decide la lógica al disparar).
+      await bg.pedirOverlay();
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(
+            duration: Duration(seconds: 7),
+            content: Text(
+              'Concede "mostrar sobre otras apps" para que Matix te responda '
+              'en una ventanita encima del juego. Sin el permiso, abro Matix '
+              'completo (como hasta ahora).',
+            ),
+          ));
+      }
+    }
+    await ref.read(wakeWordPrefsProvider).fijarOverlayVoz(v);
   }
 
   Future<void> _cambiar(bool v) async {
@@ -1161,6 +1187,32 @@ class _WakeWordTileState extends ConsumerState<_WakeWordTile> {
                   Switch(
                     value: _bgActivo,
                     onChanged: _cargando ? null : _cambiarBg,
+                  ),
+                ],
+              ),
+            ),
+          // Toggle: responder con OVERLAY flotante encima de otra app (en vez
+          // de abrir Matix completo). Solo con "segundo plano" activo (es ahí
+          // donde el wake puede dispararse con otra app adelante).
+          if (!_cargando && _bgActivo)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(2, 0, 0, 2),
+              child: Row(
+                children: [
+                  const Icon(Icons.picture_in_picture_alt_outlined,
+                      color: MatixColors.muted, size: 18),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Responder en ventanita flotante\n(sobre el juego, sin '
+                      'abrir Matix completo · necesita "mostrar sobre otras '
+                      'apps")',
+                      style: TextStyle(fontSize: 12, color: MatixColors.muted),
+                    ),
+                  ),
+                  Switch(
+                    value: _overlayVoz,
+                    onChanged: _cargando ? null : _cambiarOverlay,
                   ),
                 ],
               ),

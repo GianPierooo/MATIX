@@ -21,10 +21,13 @@ import 'features/eventos/providers/eventos_providers.dart';
 import 'features/matix/data/captura_apunte_repository.dart';
 import 'features/matix/presentation/manos_libres_screen.dart';
 import 'features/matix/providers/captura_apunte_providers.dart';
+import 'features/matix/providers/manos_libres_providers.dart';
 import 'features/matix/providers/navegacion_matix_provider.dart';
 import 'features/proyectos/presentation/detalle_proyecto_screen.dart';
 import 'features/push/application/push_service.dart';
 import 'features/wakeword/data/wakeword_log.dart';
+import 'features/wakeword/data/wakeword_prefs.dart';
+import 'features/wakeword/domain/voz_overlay.dart';
 import 'features/wakeword/providers/wakeword_providers.dart';
 import 'features/tareas/presentation/nueva_tarea_screen.dart';
 import 'screens/home_shell.dart';
@@ -89,6 +92,11 @@ class _MatixAppState extends ConsumerState<MatixApp>
   /// decir "oye matix" varias veces seguidas. Se pone en true (síncrono) al
   /// empujarla y vuelve a false cuando se cierra (`.then` del push).
   bool _manosLibresEnStack = false;
+
+  /// ¿Hay una sesión de voz corriendo en el OVERLAY flotante (sin pantalla
+  /// completa)? Evita duplicar y permite cerrar/relé de estado.
+  bool _overlayActivo = false;
+  ProviderSubscription<EstadoManosLibres>? _overlaySub;
 
   @override
   void initState() {
@@ -160,8 +168,13 @@ class _MatixAppState extends ConsumerState<MatixApp>
       // controller (motor in-app vs nativo según "segundo plano"); aquí solo
       // cableamos la apertura por detección.
       final bg = ref.read(wakeWordBgServiceProvider);
-      bg.registrarAlAbrir(_abrirManosLibresPorWakeWord);
+      // Wake en SEGUNDO PLANO (otra app adelante): decide overlay vs fullscreen.
+      bg.registrarAlAbrir(_alWakeEnBackground);
+      // Toques de la burbuja: "Abrir" → Matix completo; "Cerrar" → terminar.
+      bg.registrarOverlay(alAbrir: _expandirOverlay, alCerrar: _cerrarOverlay);
       unawaited(() async {
+        // La app la LANZÓ el wake (estaba cerrada) → fullscreen (no hay engine
+        // vivo para overlay; degrada al comportamiento clásico).
         if (await bg.consumirApertura()) {
           _abrirManosLibresPorWakeWord();
         }
@@ -222,6 +235,88 @@ class _MatixAppState extends ConsumerState<MatixApp>
           ),
         )
         .then((_) => _manosLibresEnStack = false);
+  }
+
+  /// Wake disparado con la app VIVA en background (otra app adelante). Decide:
+  /// overlay flotante (si está habilitado + permitido) o fullscreen clásico.
+  Future<void> _alWakeEnBackground() async {
+    if (_overlayActivo || ref.read(modoVozActivoProvider)) return;
+    final bg = ref.read(wakeWordBgServiceProvider);
+    final prefs = WakeWordPrefs();
+    final habilitado = await prefs.overlayVoz();
+    final permitido = habilitado ? await bg.puedeOverlay() : false;
+    final superficie = superficieParaWake(
+      overlayHabilitado: habilitado,
+      overlayPermitido: permitido,
+      appEnPrimerPlano: false, // vino del path background
+    );
+    if (superficie == SuperficieWake.fullscreen) {
+      _abrirManosLibresPorWakeWord(); // comportamiento clásico
+      return;
+    }
+    await _iniciarOverlay();
+  }
+
+  /// Muestra la burbuja, manda Matix al fondo y corre el turno de voz HEADLESS
+  /// (reusa la pipeline de manos libres, sin pantalla completa). Releva la fase
+  /// a la burbuja y la cierra al terminar.
+  Future<void> _iniciarOverlay() async {
+    final bg = ref.read(wakeWordBgServiceProvider);
+    final ok = await bg.overlayMostrar('escuchando');
+    if (!ok) {
+      // Sin permiso de overlay (degradación honesta): abrir fullscreen.
+      _abrirManosLibresPorWakeWord();
+      return;
+    }
+    _overlayActivo = true;
+    await bg.enviarAlFondo(); // Matix atrás; el juego vuelve con la burbuja
+    // Relé de fase y cierre automático al terminar (inactivo/error).
+    _overlaySub = ref.listenManual<EstadoManosLibres>(
+      manosLibresProvider,
+      (prev, next) {
+        if (!_overlayActivo) return;
+        unawaited(bg.overlayActualizar(next.fase.name));
+        if (next.fase == FaseManosLibres.inactivo ||
+            next.fase == FaseManosLibres.error) {
+          _cerrarOverlay();
+        }
+      },
+    );
+    await ref.read(manosLibresProvider.notifier).entrarPorWakeWord();
+  }
+
+  /// "Cerrar" (toque en la burbuja o fin de turno): termina la sesión y baja la
+  /// burbuja. No persistente.
+  void _cerrarOverlay() {
+    if (!_overlayActivo) return;
+    _overlayActivo = false; // guarda la re-entrada del listener (salir→inactivo)
+    // salir() ANTES de cerrar la suscripción: así actúa sobre el notifier vivo
+    // (la sub lo mantiene). Tras cerrar, autoDispose lo limpia.
+    unawaited(ref.read(manosLibresProvider.notifier).salir());
+    _overlaySub?.close();
+    _overlaySub = null;
+    unawaited(ref.read(wakeWordBgServiceProvider).overlayOcultar());
+  }
+
+  /// "Abrir" (toque en la burbuja): expande a Matix completo. La sesión sigue
+  /// viva en el notifier; traemos la app al frente y mostramos la pantalla.
+  void _expandirOverlay() {
+    if (!_overlayActivo) return;
+    _overlayActivo = false;
+    _overlaySub?.close();
+    _overlaySub = null;
+    final bg = ref.read(wakeWordBgServiceProvider);
+    unawaited(bg.overlayOcultar());
+    unawaited(bg.traerAlFrente());
+    final nav = _navigatorKey.currentState;
+    if (nav != null && !_manosLibresEnStack) {
+      _manosLibresEnStack = true;
+      nav
+          .push(MaterialPageRoute(
+            builder: (_) => const ManosLibresScreen(porWakeWord: true),
+          ))
+          .then((_) => _manosLibresEnStack = false);
+    }
   }
 
   /// Si la app arrancó porque el usuario compartió texto/URL a Matix
