@@ -259,6 +259,20 @@ def _norm(s: Any) -> str:
     return t.translate(tildes)
 
 
+def es_continuo_intercalado(modalidad: Any) -> bool:
+    """`True` si el proyecto trabaja en modalidad CONTINUO INTERCALADO: sus
+    tareas pelean por huecos profundos del día junto con las otras (lo que el
+    planificador ya hace en `colocar()`), SIN slot fijo dedicado. Es la
+    modalidad default de Matix: si la columna `proyectos.modalidad` viene NULL
+    o vacía, también se considera continuo intercalado.
+    Sirve para que el planificador, cuando vea otra modalidad en el futuro
+    (`slot_fijo`), pueda ramificar SIN romper proyectos viejos. PURA."""
+    if modalidad is None:
+        return True
+    m = str(modalidad).strip().lower()
+    return m == "" or m == "continuo_intercalado"
+
+
 def anclas_fijas(
     anclas: list[dict[str, Any]],
     *,
@@ -475,10 +489,15 @@ async def _items_a_colocar(
         })
 
     # Ids de proyectos de TRABAJO (no skills): sus tareas son trabajo PROFUNDO
-    # (van al pico), no slots chicos.
+    # (van al pico), no slots chicos. Además filtramos por MODALIDAD: solo
+    # entran los `continuo_intercalado` (o sin modalidad, que es el default
+    # histórico de Matix). Los que en el futuro lleven `slot_fijo` se manejarán
+    # como ancla; los `esporadico` no obligan al planificador a colocarlos.
     ids_trabajo = {
         p["id"] for p in proyectos
-        if p.get("estado") == "activo" and not creacion_proyecto.es_skill(p)
+        if p.get("estado") == "activo"
+        and not creacion_proyecto.es_skill(p)
+        and es_continuo_intercalado(p.get("modalidad"))
     }
     nombre_proy = {p["id"]: p.get("nombre") for p in proyectos}
 

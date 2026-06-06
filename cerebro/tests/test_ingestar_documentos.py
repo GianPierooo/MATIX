@@ -33,3 +33,13 @@ def test_trocear():
     assert len(piezas) == 3
     # No se pierde ni se duplica contenido.
     assert sum(len(p) for p in piezas) == 250
+
+
+def test_bloque_override_pasa_por_slug():
+    """`--bloque 4` debe quedar como 'bloque_4' tras normalización (no '4')."""
+    # El override entra al mismo normalizador que el filename.
+    assert ing.slug_bloque("4") == "4"
+    assert ing.slug_bloque("Bloque 4") == "bloque_4"
+    # Y nombres de filename con sufijo siguen funcionando para el camino
+    # normal (cuando no se pasa override).
+    assert ing.slug_bloque("bloque_4_placeholder") == "bloque_4_placeholder"

@@ -33,6 +33,11 @@ class ProyectoCreate(BaseModel):
     # Skill/hábito (inglés, guitarra…): NO consume el tope de 3 activos y se
     # dosifica ligero. Default false = proyecto de trabajo normal.
     es_skill: bool = False
+    # Capacidad estimada y modalidad de trabajo (migración 0039). Opcionales:
+    # NULL = el planificador asume comportamiento default (continuo intercalado).
+    horas_semana_estimadas: int | None = Field(default=None, ge=0, le=168)
+    modalidad: str | None = None
+    nota_interna: str | None = None
 
 
 class ProyectoUpdate(BaseModel):
@@ -53,6 +58,9 @@ class ProyectoUpdate(BaseModel):
     bloque_protegido: dict[str, Any] | None = None
     color: str | None = None
     es_skill: bool | None = None
+    horas_semana_estimadas: int | None = Field(default=None, ge=0, le=168)
+    modalidad: str | None = None
+    nota_interna: str | None = None
 
 
 class ProyectoRead(BaseModel):
@@ -73,5 +81,9 @@ class ProyectoRead(BaseModel):
     # % de avance (0..100) calculado desde el árbol del proyecto, o null si no
     # tiene plan todavía. Lo calcula el cerebro al vuelo; la app pinta la barra.
     avance: int | None = None
+    # Capacidad y modalidad (migración 0039). Nullable para proyectos viejos.
+    horas_semana_estimadas: int | None = None
+    modalidad: str | None = None
+    nota_interna: str | None = None
 
     model_config = ConfigDict(from_attributes=True)

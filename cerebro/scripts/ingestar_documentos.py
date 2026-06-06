@@ -161,6 +161,12 @@ def main() -> int:
     )
     parser.add_argument("carpeta", help="Carpeta del skill (ej. .../calistenia).")
     parser.add_argument("--skill", help="Skill/track (default: nombre de la carpeta).")
+    # Override del slug de bloque cuando solo se procesa UN archivo. Útil cuando
+    # el filename trae sufijos ("bloque_4_placeholder.md") pero queremos taggear
+    # con un slug limpio ("bloque_4"). Solo aplica si la carpeta tiene 1 archivo
+    # ingestable; con varios, los slugs siguen viniendo del filename de cada uno.
+    parser.add_argument("--bloque", help="Override del slug del bloque (solo "
+                        "con carpeta de 1 archivo).")
     parser.add_argument("--api-url", default=os.environ.get("MATIX_API_URL"))
     parser.add_argument("--api-key", default=os.environ.get("MATIX_API_KEY"))
     parser.add_argument("--max-chars", type=int, default=18000)
@@ -208,9 +214,22 @@ def main() -> int:
         + "\n"
     )
 
+    # Si se pasó `--bloque` y hay UN solo archivo, lo usamos como override del
+    # slug. Con varios archivos lo ignoramos (sería ambiguo) y avisamos.
+    bloque_override: str | None = None
+    if args.bloque:
+        if len(archivos) == 1:
+            bloque_override = slug_bloque(args.bloque)
+        else:
+            print(
+                "  [!] --bloque ignorado: la carpeta tiene varios archivos; "
+                "cada uno mantiene su slug por nombre.\n",
+                file=sys.stderr,
+            )
+
     ok = fallidos = vacios = piezas_total = 0
     for i, ruta in enumerate(archivos, start=1):
-        bloque = slug_bloque(ruta.stem)
+        bloque = bloque_override or slug_bloque(ruta.stem)
         print(f"  [{i}/{len(archivos)}] {ruta.name} -> bloque '{bloque}'", end=" ", flush=True)
         try:
             texto = extraer_texto(ruta).strip()
