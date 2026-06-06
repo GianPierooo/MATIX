@@ -18,10 +18,10 @@ Estas reglas rigen TODO cambio, sin que el usuario tenga que repetirlas:
 
 1. **Idioma**: español, tú peruano (nunca voseo: nada de "vos tenés"),
    incluido el copy de la app. Tono de pana, cálido, sin sonar a robot.
-2. **Salida de Matix sin markdown**: nada de asteriscos ni markdown crudo en
-   lo que se muestra. Mantener el strip que ya existe (`limpiarMarkdown` en
-   `app/lib/core/markdown_plano.dart`, aplicado en el display); no
-   reintroducir render de markdown.
+2. **Salida de Matix sin markdown ni emojis**: nada de asteriscos, markdown
+   crudo ni emojis en lo que se le muestra al usuario. Mantener el strip que ya
+   existe (`limpiarMarkdown` en `app/lib/core/markdown_plano.dart`, aplicado en
+   el chokepoint del display); no reintroducir render de markdown.
 3. **Tiempo en America/Lima**: todas las horas y fechas se calculan y muestran
    en la zona de Lima.
 4. **Antes de commitear**: tests y `flutter analyze` en verde. El toolchain está
@@ -56,6 +56,79 @@ Estas reglas rigen TODO cambio, sin que el usuario tenga que repetirlas:
    (system prompt): el dueño NO depende de un advisor externo para saber el
    estado de su proyecto — se lo pregunta al chat. No es bloqueante, pero sí
    parte del flujo estándar del cierre del prompt, igual que el commit.
+
+---
+
+## 0.1 OPERACIÓN — ENTORNO, CREDENCIALES Y FLUJO
+
+Operativa consolidada para que el agente NO pida credenciales ni se interrumpa
+por cosas ya resueltas. (Las reglas de seguridad de fondo están en §7; esto es
+el "cómo" práctico.)
+
+### Entornos (todo en PRODUCCIÓN)
+
+- **Backend (cerebro)**: Railway — `https://matix-production.up.railway.app`.
+  La URL pública NO es secreta (va protegida con `X-Matix-Key`).
+- **Base de datos**: Supabase — proyecto `jtxlkwhgqeubvgfwmwcd`. El ref NO es
+  secreto (aparece en URLs).
+- Las **claves de runtime** viven en variables de entorno de Railway y en el
+  dashboard de Supabase, **no** en el entorno local. No las busques en local
+  para "el server"; ahí solo están las que necesitan los scripts/migraciones.
+
+### Credenciales para operaciones LOCALES del agente
+
+Para lo que el agente corre en local y necesita tokens (migraciones vía Supabase
+CLI/helper, scripts de mantenimiento, ingesta a la biblioteca):
+
+- **`tools/.env.prod.local`** (GITIGNORED) → `MATIX_API_KEY`, `MATIX_API_URL`,
+  `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_REF`.
+- **`cerebro/.env`** (GITIGNORED) → claves de OpenAI, Anthropic, Tavily,
+  ElevenLabs, FCM, etc. para scripts que corren el cerebro localmente.
+
+Reglas de manejo:
+
+- **NUNCA pedir interactivamente** al usuario un token, API key o credencial.
+  Léelos de esos dos archivos.
+- Si algo genuinamente **no está** en esos archivos, NO pauses ni inventes:
+  termina lo que puedas y repórtalo claro al final, p. ej. *"falta
+  `SUPABASE_ACCESS_TOKEN` en `tools/.env.prod.local`; esta operación queda
+  pendiente hasta que se añada"*.
+- **NUNCA imprimir, loggear, commitear ni mencionar el VALOR** de una
+  credencial. Solo el **nombre** de la variable.
+- **Operaciones que tocan producción** y son destructivas o sensibles (DROP/
+  DELETE/TRUNCATE/ALTER que pierde datos, rotación de secretos, deploys
+  forzados): **preguntar antes** de ejecutar. Lectura, migraciones ADITIVAS
+  (`… if not exists`) y código no destructivo: **proceder** sin preguntar.
+
+### Flujo PREVIO a cualquier cambio
+
+1. Revisar el último run de **GitHub Actions** de `main` y confirmar que los
+   commits previos están sanos (analyze + tests verdes). Si no hay forma de
+   leer la API de Actions desde la máquina (sin `gh`/token), el proxy válido es
+   re-correr los gates exactos del CI localmente (§0.4) sobre el HEAD actual.
+2. Si el run anterior **falló**, diagnosticar y resolver ANTES de apilar
+   cambios nuevos encima.
+3. `git pull origin main` antes de empezar a editar.
+
+### Sesiones y máquinas
+
+- Cada sesión de Claude Code corre en una **máquina específica**; el contexto
+  vive en el **repo** (`CLAUDE.md`, `docs/ESTADO.md`, `docs/CHECKLIST_1.0.md`),
+  NO en el historial de sesión. No asumas que una sesión recuerda a otra.
+- El repo debe vivir **fuera de OneDrive** (recomendado `C:\dev\MATIX` en
+  Windows). OneDrive sincronizando `.git` corrompe el estado.
+- **Commit + push al final** de cada cambio significativo (también §0 regla 5
+  y §10).
+
+### Honestidad sobre el toolchain
+
+- Si falta Flutter, Dart, Android SDK, Supabase CLI, `uv` o cualquier
+  herramienta para correr un test o build, **decirlo explícito** en el reporte.
+  NUNCA afirmar "tests verdes" o "build OK" sin haberlos corrido de verdad.
+- Si `flutter analyze`/`flutter test` (o el `pytest` del cerebro) no se pueden
+  correr localmente, marcar esa parte como **"no verificado localmente, el CI
+  lo cubre"** y seguir — no bloquear el avance por eso, pero tampoco mentir
+  sobre el verde.
 
 ---
 
@@ -306,3 +379,8 @@ construido de forma profesional y sostenible en el tiempo.
 - **Operaciones DESTRUCTIVAS o que pierden datos** (`DROP`, `DELETE`,
   `TRUNCATE`, `ALTER` que borra/trunca columnas) se CONFIRMAN con el
   usuario ANTES de aplicarlas.
+- **Numeración correlativa**: el nombre es `00NN_xxx.sql` con `NN`
+  consecutivo. NO hardcodees el número aquí (envejece): mira el último
+  archivo de `supabase/migrations/` y usa el siguiente. Al momento de
+  consolidar esto, el último en el repo era `0039_proyectos_modalidad.sql`
+  (así que la próxima sería `0040_*`).
