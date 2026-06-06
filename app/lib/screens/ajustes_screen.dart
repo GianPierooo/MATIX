@@ -268,6 +268,37 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
             subtitle: _pingResultado,
           ),
 
+          const _Seccion('PC (agente local)'),
+          Consumer(
+            builder: (context, ref, _) {
+              final estado = ref.watch(pcConectadaProvider);
+              return estado.when(
+                data: (conectada) => _Fila(
+                  label: 'PC',
+                  value: conectada ? 'conectada' : 'desconectada',
+                  valueColor:
+                      conectada ? MatixColors.green : MatixColors.red,
+                ),
+                loading: () => const _Fila(
+                  label: 'PC',
+                  value: 'comprobando…',
+                  valueColor: MatixColors.muted,
+                ),
+                error: (_, _) => const _Fila(
+                  label: 'PC',
+                  value: 'desconectada',
+                  valueColor: MatixColors.red,
+                ),
+              );
+            },
+          ),
+          _Accion(
+            label: 'Recomprobar PC',
+            icon: Icons.computer,
+            onTap: () => ref.invalidate(pcConectadaProvider),
+            subtitle: 'El agente debe estar corriendo en tu compu.',
+          ),
+
           const _Seccion('Hub'),
           _Accion(
             label: 'Papelera',

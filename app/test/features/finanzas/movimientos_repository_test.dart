@@ -41,6 +41,9 @@ class _FakeClient implements MatixClient {
   }
 
   @override
+  Future<bool> pcConectada() async => false;
+
+  @override
   Future<Map<String, dynamic>> getOne(String path) async {
     calls.add('GET $path');
     return _fila();

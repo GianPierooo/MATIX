@@ -44,7 +44,7 @@ SOLO-BACKEND (existe en el cerebro, sin pantalla propia en la app).
 - Embeddings (RAG): OpenAI `text-embedding-3-small` (apuntes + biblioteca).
 - Búsqueda web: Tavily. Push: Firebase Cloud Messaging (FCM).
 
-### Cerebro — tools del chat (83)
+### Cerebro — tools del chat (84)
 
 Hub básico: crear_tarea, crear_tareas (lote), editar_tarea, completar_tarea,
 reabrir_tarea, eliminar_tarea(conf), marcar_accion_siguiente_hecha, crear_evento,
@@ -70,7 +70,32 @@ configurar_planificacion. · Horario: plan_de_hoy, replanificar_dia,
 configurar_horario. · Automatizaciones: crear/listar/eliminar_automatizacion. ·
 Teléfono: redactar_mensaje (SMS/correo), iniciar_llamada, crear_evento_telefono,
 abrir_en_telefono, leer_galeria (Fase 1) · leer_pantalla (C.0) · escribir_whatsapp
-(C.1). (conf) = pide confirmación por ser destructiva.
+(C.1). · PC (agente local · Capa 6 · 6.0a): pc_listar_carpeta (lista nombres de
+archivos/carpetas en carpetas permitidas de la PC, vía agente local sobre
+WebSocket/TLS; nunca contenido). (conf) = pide confirmación por ser destructiva.
+
+### Capa 6 — Agente de PC (6.0a · cimiento)
+
+Daemon local `agente_pc/` (Python) que corre en la PC del usuario y abre una
+conexión SALIENTE persistente al cerebro (WebSocket sobre TLS, reconexión por
+backoff). La PC siempre inicia; el cerebro nunca inicia hacia la PC; no se abren
+puertos. Autenticación por secreto compartido `AGENTE_PC_TOKEN` (header
+`X-Agente-PC-Token`, distinto de la API key de la app) + verificación de host
+por TLS (CA estándar, sin pinning). Framework de acciones TIPADO (registry con
+nivel de riesgo segura/consecuente/prohibida, extensible); 6.0a registra UNA
+acción SEGURA: `listar_carpeta` (solo nombres, nunca contenido). Rails de
+seguridad: allowlist de carpetas (default Documentos/Escritorio/Descargas,
+editable), denylist dura que GANA sobre la allowlist (.ssh, .env, llaves, .git,
+AppData/perfiles de navegador, carpetas de sistema), sin shell arbitrario, audit
+log local (`agente_pc/audit.log`), kill switch (Ctrl+C/SIGTERM), anti-inyección
+(lo que vuelve del agente se trata como DATO, nunca como instrucciones), y rechazo
+a correr elevado (admin/root). Lado cerebro: canal singleton
+(`app/agente/canal.py`) + WebSocket `/api/v1/agente/ws` + GET
+`/api/v1/agente/estado`; tool `pc_listar_carpeta`. Si la PC no está conectada,
+responde "tu PC no está conectada" sin colgarse. App: indicador "PC: conectada /
+desconectada" en Ajustes → Conexión. Detalle completo y guía de uso en
+`docs/Capa6_Agente_PC.md`. NO lee/mueve/escribe archivos todavía (eso es
+post-6.0a, con confirmación explícita).
 
 ### Cerebro — endpoints REST (~126 rutas, prefijo /api/v1)
 (Nota 2026-06-04: se retiró el router /tracks, legacy; ver «Consolidación» abajo.)

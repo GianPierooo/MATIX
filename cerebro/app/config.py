@@ -9,6 +9,12 @@ class Settings(BaseSettings):
     matix_api_key: str = ""
     matix_env: str = "dev"
 
+    # Agente local de la PC (Capa 6 · 6.0a). Secreto compartido DISTINTO de
+    # matix_api_key: el agente lo presenta en el header X-Agente-PC-Token al
+    # abrir el WebSocket. Si está vacío, el endpoint del agente rechaza toda
+    # conexión (no hay agente sin secreto). En Railway va como AGENTE_PC_TOKEN.
+    agente_pc_token: str = ""
+
     # LLM del CHAT — intercambiable por env (default OpenAI). Toda la
     # lógica de proveedor vive en `app/matix/llm.py`; ningún otro módulo
     # sabe del proveedor.

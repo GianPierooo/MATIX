@@ -29,6 +29,7 @@ from slowapi.util import get_remote_address
 from .config import settings
 from .db import db
 from .routers import (
+    agente,
     apuntes,
     briefing,
     categorias,
@@ -174,6 +175,7 @@ def health() -> dict[str, str]:
 
 
 for r in (
+    agente.router,
     profile.router,
     categorias.router,
     cursos.router,

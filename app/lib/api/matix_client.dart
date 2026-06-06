@@ -103,6 +103,25 @@ class MatixClient {
     return json.decode(r.body) as Map<String, dynamic>;
   }
 
+  /// Estado de conexión del agente de la PC (Capa 6 · 6.0a).
+  ///
+  /// Devuelve `true` si la PC está conectada al cerebro ahora mismo. No lanza:
+  /// ante cualquier fallo (timeout, cerebro caído, 4xx) devuelve `false`
+  /// (desconectada). Es solo un indicador; nunca debe romper la UI.
+  Future<bool> pcConectada() async {
+    try {
+      final r = await _conTimeout(
+        _inner.get(_uri('/api/v1/agente/estado'), headers: _headers),
+        timeout: _timeoutHealth,
+      );
+      if (r.statusCode != 200) return false;
+      final j = json.decode(r.body) as Map<String, dynamic>;
+      return j['conectado'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<List<dynamic>> getList(String path) async {
     final r = await _conTimeout(_inner.get(_uri(path), headers: _headers));
     if (r.statusCode != 200) {

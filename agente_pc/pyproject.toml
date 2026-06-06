@@ -1,0 +1,36 @@
+[project]
+name = "matix-agente-pc"
+version = "0.1.0"
+description = "Agente local de Matix (Capa 6) — daemon que corre en la PC del usuario"
+requires-python = ">=3.12"
+dependencies = [
+    # Cliente WebSocket asyncio (API nueva en websockets>=14). El agente abre
+    # una conexión SALIENTE persistente al cerebro; nunca abre puertos.
+    "websockets>=14",
+    # Config desde agente_pc/.env (GITIGNORED).
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]
+
+# El agente es una aplicación, no un paquete publicable (igual que el cerebro).
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+# Añade la raíz del agente al path para importar el paquete `agente_pc` sin
+# instalarlo (uv package=false).
+pythonpath = ["."]
+testpaths = ["tests"]

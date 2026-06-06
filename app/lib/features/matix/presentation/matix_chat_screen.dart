@@ -1126,6 +1126,8 @@ class _ChipAcciones extends StatelessWidget {
   final List<String> acciones;
 
   static const _etiquetas = <String, ({String texto, IconData icono})>{
+    // PC (agente local · Capa 6)
+    'pc_listar_carpeta': (texto: 'Carpeta de la PC', icono: Icons.folder_open),
     // Crear
     'crear_tarea': (texto: 'Tarea creada', icono: Icons.checklist),
     'crear_evento': (texto: 'Evento agendado', icono: Icons.event),

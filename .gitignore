@@ -95,3 +95,7 @@ mi_voz/
 
 # Backups de data (export antes de limpiezas destructivas) — no se versiona
 backups/
+
+# ----- Agente local (Capa 6) -----
+# El audit log del agente es local de cada máquina; nunca al repo.
+agente_pc/audit.log

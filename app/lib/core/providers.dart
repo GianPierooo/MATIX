@@ -11,3 +11,11 @@ final matixClientProvider = Provider<MatixClient>((ref) {
   ref.onDispose(client.close);
   return client;
 });
+
+/// Estado de conexión de la PC (agente local · Capa 6 · 6.0a).
+///
+/// `FutureProvider.autoDispose` — se recalcula al entrar a Ajustes y al
+/// refrescar (`ref.invalidate`). Devuelve `true` si la PC está conectada.
+final pcConectadaProvider = FutureProvider.autoDispose<bool>((ref) async {
+  return ref.read(matixClientProvider).pcConectada();
+});
