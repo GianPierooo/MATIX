@@ -51,12 +51,28 @@ def test_prohibida_nunca_ejecuta():
     assert res["tipo"] == "prohibida"
 
 
-def test_consecuente_requiere_confirmacion():
+def test_consecuente_sin_confirmar_bloquea():
     r = Registro()
     r.registrar(_accion(NivelRiesgo.CONSECUENTE))
     res = asyncio.run(r.ejecutar("demo", {"x": "y"}, Contexto()))
     assert res["ok"] is False
     assert res["tipo"] == "requiere_confirmacion"
+
+
+def test_consecuente_con_confirmado_ejecuta():
+    r = Registro()
+    r.registrar(_accion(NivelRiesgo.CONSECUENTE))
+    res = asyncio.run(r.ejecutar("demo", {"x": "y"}, Contexto(), confirmado=True))
+    assert res["ok"] is True
+    assert res["eco"] == {"x": "y"}
+
+
+def test_prohibida_no_ejecuta_ni_con_confirmado():
+    r = Registro()
+    r.registrar(_accion(NivelRiesgo.PROHIBIDA))
+    res = asyncio.run(r.ejecutar("demo", {"x": "y"}, Contexto(), confirmado=True))
+    assert res["ok"] is False
+    assert res["tipo"] == "prohibida"
 
 
 def test_valida_param_requerido():

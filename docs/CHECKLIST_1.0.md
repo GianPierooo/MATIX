@@ -171,11 +171,13 @@ hay y qué falta.
 
 ### Capas posteriores
 - ↩️ Capa 5 — casa inteligente (Home Assistant).
-- ↩️ Capa 6 — PC y archivos: **cimiento 6.0a HECHO** (agente local `agente_pc/`,
-  canal WebSocket/TLS con secreto compartido, registry de acciones tipado, rails
-  de seguridad allowlist/denylist + audit + kill switch, y la acción de prueba
-  `listar_carpeta`). Leer/mover/escribir archivos y más acciones son post-1.0,
-  con confirmación explícita (ver `docs/Capa6_Agente_PC.md`).
+- ↩️ Capa 6 — PC y archivos: **6.0a + 6.0b + 6.1 HECHO** (agente local
+  `agente_pc/`, canal WebSocket/TLS con secreto compartido, registry tipado, rails
+  allowlist/denylist + traversal/symlink/TOCTOU + audit + kill switch). Lectura:
+  listar, buscar, leer, resumir. Organización con gate (la app confirma): mover,
+  renombrar, crear carpeta, organizar por tipo/fecha/proyecto. **Borrado** y
+  **escritura** de contenido quedan post-1.0, con confirmación reforzada (ver
+  `docs/Capa6_Agente_PC.md`).
 - ↩️ Capa 7 — visión por cámara (la foto→apunte ya cuenta como Capa 7 parcial;
   el resto es post-1.0).
 - ↩️ Capa 8 — proactividad en su versión final (ya hay base sólida con el

@@ -54,10 +54,15 @@ async def _atender(msg: dict, registro: Registro, ctx: Contexto) -> dict:
     rid = msg.get("id")
     nombre = str(msg.get("nombre", ""))
     args = msg.get("args") or {}
-    resultado = await registro.ejecutar(nombre, args, ctx)
+    # `confirmado` solo viaja por el canal de ejecución confirmada del cerebro
+    # (tras el OK del usuario en la app). Las acciones consecuentes lo exigen.
+    confirmado = bool(msg.get("confirmado", False))
+    resultado = await registro.ejecutar(nombre, args, ctx, confirmado=confirmado)
+    # Auditamos la ruta principal de la acción (origen para mover/renombrar).
+    ruta_audit = args.get("ruta") or args.get("origen") or args.get("carpeta") or ""
     auditoria.registrar(
         accion=nombre,
-        ruta=str(args.get("ruta", "")),
+        ruta=str(ruta_audit),
         ok=bool(resultado.get("ok")),
         detalle=str(resultado.get("tipo", "")),
     )

@@ -1128,6 +1128,13 @@ class _ChipAcciones extends StatelessWidget {
   static const _etiquetas = <String, ({String texto, IconData icono})>{
     // PC (agente local · Capa 6)
     'pc_listar_carpeta': (texto: 'Carpeta de la PC', icono: Icons.folder_open),
+    'pc_buscar_archivos': (texto: 'Búsqueda en la PC', icono: Icons.search),
+    'pc_leer_archivo': (texto: 'Archivo leído', icono: Icons.description_outlined),
+    'pc_resumir_documento': (texto: 'Documento resumido', icono: Icons.summarize_outlined),
+    'pc_mover_archivo': (texto: 'Mover en la PC', icono: Icons.drive_file_move_outline),
+    'pc_renombrar_archivo': (texto: 'Renombrar en la PC', icono: Icons.drive_file_rename_outline),
+    'pc_crear_carpeta': (texto: 'Crear carpeta', icono: Icons.create_new_folder_outlined),
+    'pc_organizar_carpeta': (texto: 'Organizar carpeta', icono: Icons.auto_awesome_motion_outlined),
     // Crear
     'crear_tarea': (texto: 'Tarea creada', icono: Icons.checklist),
     'crear_evento': (texto: 'Evento agendado', icono: Icons.event),

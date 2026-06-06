@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../api/matix_client.dart';
+import '../../../core/providers.dart';
 import '../data/accion_dispositivo.dart';
 import '../providers/dispositivo_providers.dart';
 import '../providers/matix_chat_providers.dart';
@@ -38,6 +40,13 @@ Future<void> manejarAccionDispositivo(
 
   if (accion.tipo == 'whatsapp') {
     await _manejarWhatsapp(context, ref, accion);
+    return;
+  }
+
+  // PC (Capa 6 · 6.1): acción consecuente en la PC. Reusa el sheet de gate y,
+  // tras confirmar, la ejecuta vía el cerebro (POST /agente/ejecutar).
+  if (accion.tipo == 'pc_accion') {
+    await _manejarPcAccion(context, ref, accion);
     return;
   }
 
@@ -171,6 +180,66 @@ Future<void> _manejarWhatsapp(
   if (context.mounted) _aviso(context, resultado.mensaje);
 }
 
+/// PC (Capa 6 · 6.1): ejecuta una acción consecuente en la PC TRAS la
+/// confirmación del usuario. El modelo solo propuso; aquí el humano da el OK en
+/// el sheet y recién entonces se ejecuta vía el cerebro (que pone confirmado=
+/// true al cruzar el canal). El agente revalida todo en su borde.
+Future<void> _manejarPcAccion(
+  BuildContext context,
+  WidgetRef ref,
+  AccionDispositivo accion,
+) async {
+  final confirmado = await _mostrarHoja(context, accion);
+  if (confirmado != true) return;
+
+  final accionInterna = accion.datos['accion'] as String?;
+  if (accionInterna == null || accionInterna.isEmpty) return;
+  final args = (accion.datos['args'] as Map?)?.cast<String, dynamic>() ?? const {};
+
+  if (context.mounted) _aviso(context, 'Haciéndolo en tu PC…');
+  try {
+    final r = await ref.read(matixClientProvider).post('/api/v1/agente/ejecutar', {
+      'accion': accionInterna,
+      'args': args,
+    });
+    final res = (r['resultado'] as Map?)?.cast<String, dynamic>() ?? const {};
+    if (context.mounted) _aviso(context, _mensajePcResultado(accionInterna, res));
+  } on MatixApiException catch (e) {
+    if (context.mounted) _aviso(context, 'No pude hablar con el cerebro (${e.statusCode}).');
+  } catch (_) {
+    if (context.mounted) _aviso(context, 'No pude completar la acción en tu PC.');
+  }
+}
+
+String _mensajePcResultado(String accion, Map<String, dynamic> res) {
+  if (res['ok'] == true) {
+    switch (accion) {
+      case 'mover_archivo':
+        return 'Listo, lo moví en tu PC.';
+      case 'renombrar_archivo':
+        return 'Listo, lo renombré.';
+      case 'crear_carpeta':
+        return 'Carpeta creada.';
+      case 'organizar_aplicar':
+        final n = res['total_movidos'] ?? 0;
+        final omitidos = (res['omitidos'] as List?)?.length ?? 0;
+        return omitidos > 0
+            ? 'Organicé tu carpeta: moví $n archivo(s), omití $omitidos.'
+            : 'Organicé tu carpeta: moví $n archivo(s).';
+      default:
+        return 'Hecho en tu PC.';
+    }
+  }
+  final tipo = res['tipo'];
+  if (tipo == 'pc_desconectada') {
+    return 'Tu PC no está conectada. Abre el agente y reintenta.';
+  }
+  if (tipo == 'destino_existe' || tipo == 'ya_existe') {
+    return 'Ya existe algo con ese nombre; no lo sobreescribí.';
+  }
+  return (res['mensaje'] as String?) ?? 'No pude completar la acción en tu PC.';
+}
+
 /// Nombre amable a partir del paquete (último segmento), para el indicador.
 String _nombreApp(String paquete) {
   if (paquete.isEmpty) return 'la app';
@@ -240,6 +309,7 @@ Future<bool?> _mostrarHoja(BuildContext context, AccionDispositivo accion) {
       'mensaje' => ('Enviar mensaje', Icons.send_rounded, 'Continuar'),
       'llamada' => ('Llamar', Icons.call_rounded, 'Marcar'),
       'evento' => ('Crear evento', Icons.event_rounded, 'Crear'),
+      'pc_accion' => ('Hacer en tu PC', Icons.folder_open, 'Confirmar'),
       _ => ('Confirmar acción', Icons.touch_app_rounded, 'Continuar'),
     };
 

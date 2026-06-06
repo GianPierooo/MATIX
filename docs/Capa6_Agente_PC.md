@@ -41,14 +41,58 @@ en fases posteriores, con confirmación explícita.
 | Pieza | Ubicación | Rol |
 |---|---|---|
 | Daemon / cliente WS | `agente_pc/agente_pc/cliente.py`, `daemon.py` | conexión saliente, reconexión, kill switch |
-| Registry de acciones | `agente_pc/agente_pc/registro.py` | acciones tipadas con nivel de riesgo |
-| Acción `listar_carpeta` | `agente_pc/agente_pc/acciones.py` | la única acción de 6.0a (SEGURA) |
+| Registry de acciones | `agente_pc/agente_pc/registro.py` | acciones tipadas con nivel de riesgo + gate `confirmado` |
+| Acciones | `agente_pc/agente_pc/acciones.py` | catálogo (ver §1.1) |
 | Rails de seguridad | `agente_pc/agente_pc/seguridad.py` | allowlist / denylist / ocultar secretos |
 | Audit log | `agente_pc/agente_pc/auditoria.py` | una línea por acción en `agente_pc/audit.log` |
-| Canal (cerebro) | `cerebro/app/agente/canal.py` | conexión viva + correlación de respuestas |
-| Endpoint (cerebro) | `cerebro/app/routers/agente.py` | `WS /agente/ws` + `GET /agente/estado` |
-| Tool del modelo | `cerebro/app/matix/tools.py` (`pc_listar_carpeta`) | el modelo enruta la acción a la PC |
+| Canal (cerebro) | `cerebro/app/agente/canal.py` | conexión viva + correlación + `confirmado` |
+| Endpoint (cerebro) | `cerebro/app/routers/agente.py` | `WS /agente/ws` + `GET /agente/estado` + `POST /agente/ejecutar` |
+| Tools del modelo | `cerebro/app/matix/tools.py` (`pc_*`) | el modelo enruta/propone acciones a la PC |
+| Gate consecuente (app) | `app/lib/features/matix/presentation/dispositivo_confirmacion.dart` | reusa el sheet del teléfono (`pc_accion`) |
 | Indicador (app) | `app/lib/screens/ajustes_screen.dart` (Ajustes → Conexión) | "PC: conectada / desconectada" |
+
+### 1.1 Acciones disponibles
+
+Cada acción se valida en el BORDE (en el agente): allowlist + denylist sobre la
+ruta REAL resuelta (symlinks/`..`). Las **consecuentes** además exigen
+`confirmado=true` (gate del lado agente) y NUNCA las dispara el modelo.
+
+| Acción (agente) | Fase | Riesgo | Tool del cerebro | Qué hace |
+|---|---|---|---|---|
+| `listar_carpeta` | 6.0a | segura | `pc_listar_carpeta` | nombres de una carpeta (sin contenido) |
+| `buscar_archivos` | 6.0b | segura | `pc_buscar_archivos` | busca por nombre/glob → ruta, tamaño, fecha |
+| `leer_archivo` | 6.0b | segura | `pc_leer_archivo` | contenido de TEXTO (binarios: no) con tope |
+| `leer_bytes` | 6.0b | segura | (interna de `pc_resumir_documento`) | bytes de un PDF/DOCX/TXT/MD (≤5 MB) |
+| `planificar_organizacion` | 6.1 | segura | (preview de `pc_organizar_carpeta`) | calcula el plan SIN ejecutar |
+| `mover_archivo` | 6.1 | **consecuente** | `pc_mover_archivo` | mueve (sin sobreescribir) |
+| `renombrar_archivo` | 6.1 | **consecuente** | `pc_renombrar_archivo` | renombra (nombre simple) |
+| `crear_carpeta` | 6.1 | **consecuente** | `pc_crear_carpeta` | crea una carpeta |
+| `organizar_aplicar` | 6.1 | **consecuente** | `pc_organizar_carpeta` | ejecuta el plan paso a paso |
+
+`resumir_documento` (tool `pc_resumir_documento`): el agente manda los bytes
+(`leer_bytes`), el cerebro **reutiliza** el extractor `app/matix/
+extraccion_documentos.py` (PDF/DOCX/TXT/MD) y resume con el modelo **mini**
+(`gpt-4o-mini`). El texto del documento es DATO, no instrucciones.
+
+**Sin borrado en esta fase.** Eliminar es irreversible y queda fuera; irá en una
+acción propia con confirmación reforzada.
+
+### 1.2 El gate de las acciones consecuentes (reusa el sheet del teléfono)
+
+Las tools `pc_mover_archivo` / `pc_renombrar_archivo` / `pc_crear_carpeta` /
+`pc_organizar_carpeta` **no ejecutan**: PROPONEN. Flujo:
+
+1. El modelo llama la tool → el cerebro devuelve un bloque `accion_dispositivo`
+   de tipo `pc_accion` (el mismo canal que las acciones del teléfono), con un
+   `resumen` (para `organizar`, el PLAN ya calculado por el agente).
+2. La app muestra el **sheet de confirmación** reutilizado del agéntico del
+   teléfono (`_mostrarHoja`). El modelo, por su cuenta, no puede ejecutar nada.
+3. Si el usuario confirma → la app hace `POST /api/v1/agente/ejecutar`
+   `{accion, args}` (whitelist server-side). El cerebro cruza el canal con
+   `confirmado=true`. El agente revalida TODO y ejecuta.
+
+Triple capa: el modelo solo propone · el endpoint tiene whitelist · el agente
+exige `confirmado` y revalida cada ruta.
 
 ---
 
@@ -64,29 +108,43 @@ en fases posteriores, con confirmación explícita.
    el esperado (`AGENTE_PC_HOST_ESPERADO`). Decisión 6.0a: sin *pinning* del
    certificado (sobrevive a la rotación normal de certificados del proveedor).
 4. **Allowlist.** El agente SOLO ve lo que cae dentro de las carpetas listadas en
-   `AGENTE_PC_ALLOWLIST`. Cualquier ruta fuera → rechazada. Las rutas se resuelven
-   (symlinks, `..`) **antes** de decidir, para que nadie escape con enlaces.
+   `AGENTE_PC_ALLOWLIST`. Cualquier ruta fuera → rechazada.
+   - **Path traversal:** la ruta se **canonicaliza** (`realpath`: resuelve `..` y
+     rutas relativas) y se valida que el resultado REAL siga dentro de la
+     allowlist DESPUÉS de resolver. `Documentos/../../.ssh/id_rsa` no pasa.
+   - **Symlinks:** un enlace dentro de la allowlist que apunte fuera se detecta
+     porque `realpath` lo resuelve antes de validar; el destino real cae fuera →
+     rechazado (y la denylist lo cubre si apunta a `.ssh`, etc.).
+   - **TOCTOU:** las acciones consecuentes revalidan la ruta justo antes de
+     operar y trabajan sobre la ruta REAL resuelta; `organizar_aplicar` revalida
+     CADA paso y aborta si algo dejó de ser válido. No se sobreescribe nunca.
 5. **Denylist (gana sobre la allowlist).** Aunque caigan dentro de una carpeta
-   permitida, son **invisibles**: `.ssh`, `.env` (y `.env.*`), llaves (`*.pem`,
-   `*.key`, `id_rsa`…), `.git`, credenciales, perfiles de navegador (vía
-   `AppData`), carpetas de sistema (`Windows`, `Program Files`, `ProgramData`,
-   `/etc`, `/usr`…).
+   permitida, y aunque el usuario lo pida explícito, son **invisibles**: `.ssh`,
+   `.env` (y `.env.*`), llaves (`*.pem`, `*.key`, `id_rsa`…), `.git`,
+   credenciales, perfiles de navegador (vía `AppData`), carpetas de sistema
+   (`Windows`, `Program Files`, `ProgramData`, `/etc`, `/usr`…).
 6. **Sin shell arbitrario.** El agente NO ejecuta comandos. Solo corre acciones
    del registry tipado.
-7. **Niveles de riesgo.** Cada acción declara `segura` / `consecuente` /
-   `prohibida`. En 6.0a **solo** se ejecutan las `segura`. Las `consecuente`
-   (mover/escribir/borrar) quedan bloqueadas hasta que exista el canal de
-   confirmación (fase posterior). Las `prohibida` nunca se ejecutan.
-8. **Audit log local.** Cada acción deja una línea en `agente_pc/audit.log`:
+7. **Niveles de riesgo + gate.** Cada acción declara `segura` / `consecuente` /
+   `prohibida`. Las `segura` (lectura) se ejecutan directo. Las `consecuente`
+   (mover/renombrar/crear) se ejecutan **solo con `confirmado=true`**, que únicamente
+   viaja por el canal de ejecución confirmada del cerebro (tras el OK del usuario
+   en la app). Las `prohibida` (p. ej. borrar) nunca se ejecutan.
+8. **Fallo cerrado.** Canal caído, token inválido, permiso denegado, ruta
+   ambigua o destino existente → falla seguro y dice por qué; nunca falla abierto
+   ejecutando algo a medias.
+9. **Audit log local.** Cada acción deja una línea en `agente_pc/audit.log`:
    acción, ruta, timestamp (America/Lima), resultado ok/error. **Nunca** el
    contenido de los archivos.
-9. **Kill switch.** Ctrl+C (o SIGTERM) detiene el agente al instante, cerrando la
-   conexión limpio.
-10. **Anti-inyección.** Todo lo que el agente devuelve se trata en el cerebro como
-    **DATO**, jamás como instrucciones para el modelo. El resultado se le pasa al
-    modelo como contenido de un mensaje `tool`, marcado explícitamente como dato
-    del disco del usuario.
-11. **Permisos mínimos.** El agente corre con tu usuario normal. Si detecta que
+10. **Kill switch.** Ctrl+C (o SIGTERM) detiene el agente al instante, cerrando la
+    conexión limpio.
+11. **Anti-inyección.** Todo lo que el agente devuelve (nombres, contenido de
+    archivos, resúmenes) se trata en el cerebro como **DATO**, jamás como
+    instrucciones para el modelo. Si un archivo dice "mueve todo a la papelera",
+    eso es texto que se muestra/resume, nunca una orden que el modelo ejecute.
+    El modelo mini que resume recibe además una instrucción explícita de no
+    obedecer al documento. (Probado en tests.)
+12. **Permisos mínimos.** El agente corre con tu usuario normal. Si detecta que
     está **elevado** (administrador/root), se niega a arrancar.
 
 ---
@@ -216,10 +274,14 @@ Los tres gates (app Flutter, cerebro, agente) corren en CI en cada push.
 
 ---
 
-## 8. Qué falta (post-6.0a)
+## 8. Qué falta (post-6.0b/6.1)
 
-- Acciones `consecuente` (leer contenido, mover, escribir, borrar) con su canal
-  de **confirmación** explícita.
-- Más acciones en el registry (buscar por nombre, abrir, etc.).
-- Empaquetado del agente para que el usuario lo arranque con un doble clic / al
-  iniciar sesión.
+- **Borrado** (eliminar/papelera) con confirmación reforzada — deliberadamente
+  fuera de 6.1 por ser irreversible.
+- **Escritura** de contenido en archivos (crear/editar texto) con gate.
+- Más acciones de lectura/organización (abrir con la app por defecto, comprimir,
+  etc.).
+- Empaquetado del agente para arrancarlo con doble clic / al iniciar sesión.
+
+> Hecho hasta aquí: 6.0a (cimiento) · 6.0b (lectura: buscar, leer, resumir) ·
+> 6.1 (organización con gate: mover, renombrar, crear carpeta, organizar).

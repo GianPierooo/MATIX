@@ -51,7 +51,10 @@ async def _run(config: ConfigAgente) -> int:
     stop = asyncio.Event()
     _instalar_senales(stop)
     registro = crear_registro()
-    ctx = Contexto(allowlist=config.allowlist)
+    ctx = Contexto(
+        allowlist=config.allowlist,
+        max_lectura_bytes=config.agente_pc_max_lectura_kb * 1024,
+    )
     print(f"[agente] acciones registradas: {', '.join(registro.nombres())}")
     print(f"[agente] carpetas permitidas: {len(config.allowlist)}")
     print(f"[agente] cerebro: {config.cerebro_ws_url}")

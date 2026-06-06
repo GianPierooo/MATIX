@@ -5,10 +5,11 @@ un `AccionDef`; el transporte (cliente.py) y el cerebro no cambian. Cada acción
 declara su nombre, parámetros tipados, nivel de riesgo y handler.
 
 Niveles de riesgo:
-  - SEGURA: lectura inocua (p. ej. listar nombres). Se ejecuta directo.
-  - CONSECUENTE: cambia algo (mover/escribir/borrar). Requerirá confirmación;
-    en 6.0a NO se ejecuta todavía (no hay canal de confirmación).
-  - PROHIBIDA: nunca se ejecuta. Placeholder defensivo.
+  - SEGURA: lectura inocua (listar/buscar/leer). Se ejecuta directo.
+  - CONSECUENTE: cambia algo (mover/renombrar/crear). Se ejecuta SOLO si el
+    envelope trae `confirmado=true` (gate del lado agente, defensa en
+    profundidad sobre el gate del cerebro/app). Nunca por iniciativa del modelo.
+  - PROHIBIDA: nunca se ejecuta. Placeholder defensivo (p. ej. borrar).
 """
 from __future__ import annotations
 
@@ -52,6 +53,8 @@ class Contexto:
     """Lo que un handler necesita para ejecutar. Se inyecta en cada llamada."""
 
     allowlist: list = field(default_factory=list)
+    # Tope de lectura de texto en bytes (leer_archivo). Default 256 KB.
+    max_lectura_bytes: int = 256 * 1024
 
 
 def _err(tipo: str, mensaje: str) -> dict[str, Any]:
@@ -84,19 +87,26 @@ class Registro:
         return True, ""
 
     async def ejecutar(
-        self, nombre: str, args: dict[str, Any], ctx: Contexto
+        self,
+        nombre: str,
+        args: dict[str, Any],
+        ctx: Contexto,
+        *,
+        confirmado: bool = False,
     ) -> dict[str, Any]:
         accion = self.get(nombre)
         if accion is None:
             return _err("desconocida", f"no existe la acción «{nombre}»")
         if accion.nivel is NivelRiesgo.PROHIBIDA:
             return _err("prohibida", f"la acción «{nombre}» está prohibida")
-        if accion.nivel is not NivelRiesgo.SEGURA:
-            # 6.0a solo ejecuta acciones SEGURAS. El canal de confirmación para
-            # acciones consecuentes llega en una fase posterior.
+        if accion.nivel is NivelRiesgo.CONSECUENTE and not confirmado:
+            # Gate del lado agente: una acción consecuente NO se ejecuta sin la
+            # marca de confirmación que solo viaja por el canal de ejecución
+            # confirmada del cerebro (tras el OK explícito del usuario en la
+            # app). Falla cerrado: ante la duda, no muta nada.
             return _err(
                 "requiere_confirmacion",
-                f"«{nombre}» es consecuente y aún no hay canal de confirmación",
+                f"«{nombre}» es consecuente y no llegó confirmada",
             )
         ok, motivo = self.validar(accion, args or {})
         if not ok:

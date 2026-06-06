@@ -50,6 +50,10 @@ class ConfigAgente(BaseSettings):
     # (admin/root). Poner a 1 solo a conciencia.
     agente_pc_permitir_elevado: bool = False
 
+    # Tope de lectura de texto (leer_archivo), en KB. Archivos más grandes se
+    # leen truncados. Evita volcar archivos enormes por el canal.
+    agente_pc_max_lectura_kb: int = 256
+
     model_config = SettingsConfigDict(
         env_file=str(RUTA_ENV),
         env_file_encoding="utf-8",

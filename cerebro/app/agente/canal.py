@@ -72,11 +72,19 @@ class CanalAgente:
             fut.set_result(msg.get("resultado") or {})
 
     async def enviar_accion(
-        self, nombre: str, args: dict[str, Any], *, timeout: float = TIMEOUT_ACCION
+        self,
+        nombre: str,
+        args: dict[str, Any],
+        *,
+        confirmado: bool = False,
+        timeout: float = TIMEOUT_ACCION,
     ) -> dict[str, Any]:
         """Envía una acción al agente y espera su resultado.
 
-        Devuelve siempre un dict; nunca lanza por desconexión/timeout.
+        `confirmado` solo se pone a True en el canal de ejecución confirmada
+        (tras el OK del usuario en la app); el agente lo exige para ejecutar
+        acciones consecuentes. Devuelve siempre un dict; nunca lanza por
+        desconexión/timeout.
         """
         ws = self._ws
         if ws is None:
@@ -93,7 +101,13 @@ class CanalAgente:
         self._pendientes[rid] = fut
         try:
             await ws.send_json(
-                {"tipo": "accion", "id": rid, "nombre": nombre, "args": args}
+                {
+                    "tipo": "accion",
+                    "id": rid,
+                    "nombre": nombre,
+                    "args": args,
+                    "confirmado": confirmado,
+                }
             )
             return await asyncio.wait_for(fut, timeout=timeout)
         except asyncio.TimeoutError:
