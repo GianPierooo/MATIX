@@ -14,6 +14,14 @@ class HorarioRepository {
     return PlanDia.fromJson(j);
   }
 
+  /// "Me acabo de levantar": registra el ancla de despertar de HOY (sin tocar
+  /// la rutina estándar) y devuelve el plan recalculado desde esa hora. 100%
+  /// determinista en el cerebro (sin LLM): las cosas de hoy aparecen al toque.
+  Future<PlanDia> despertar() async {
+    final j = await _client.post('/api/v1/horario/despertar', const {});
+    return PlanDia.fromJson((j['plan'] as Map).cast<String, dynamic>());
+  }
+
   /// Marca un bloque planificado como hecho (cierra nodo y/o tarea).
   Future<void> completar({String? tareaId, String? nodoId}) async {
     await _client.post('/api/v1/horario/bloque/completar', {

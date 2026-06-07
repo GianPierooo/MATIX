@@ -116,7 +116,13 @@ def test_tools_y_tool_choice_a_anthropic():
         {"type": "function", "function": {"name": "crear_tarea", "description": "d", "parameters": {"type": "object"}}}
     ]
     a = llm._tools_a_anthropic(tools)
-    assert a == [{"name": "crear_tarea", "description": "d", "input_schema": {"type": "object"}}]
+    # La ÚLTIMA tool lleva cache_control (caching del bloque de tools en
+    # Anthropic); el resto de campos intactos.
+    assert a == [{
+        "name": "crear_tarea", "description": "d",
+        "input_schema": {"type": "object"},
+        "cache_control": {"type": "ephemeral"},
+    }]
     assert llm._tool_choice_a_anthropic("auto") == {"type": "auto"}
     assert llm._tool_choice_a_anthropic(
         {"type": "function", "function": {"name": "crear_apunte"}}

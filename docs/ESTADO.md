@@ -57,6 +57,31 @@ SOLO-BACKEND (existe en el cerebro, sin pantalla propia en la app).
   chat surfacea `failover`/`modelo_usado` (la app muestra "respondiendo con …").
 - Búsqueda web: Tavily. Push: Firebase Cloud Messaging (FCM).
 
+### Optimización de tokens / determinismo (palancas estructurales)
+
+- **Flujos deterministas (cero LLM, cero tokens):** rollover (propuesta +
+  aceptar/otro-día/lo-suelto), ventanas libres, briefing matutino, cierre del
+  día, hitos, contenido de TODAS las notificaciones (incl. rendición de
+  cuentas), set/sugerencias del día. El juicio del modelo se mantiene SOLO en:
+  chat, intake de proyecto, visión, resumen de documentos, extracción de OCR,
+  repaso semanal, y la desambiguación de proactividad (tie-break raro). Un test
+  estático (`test_audit_determinista`) enforza que los deterministas no llamen
+  al modelo (gate rojo si alguien mete un LLM ahí).
+- **Filtrado de tools por turno** (`seleccion_tools.py`): el chat manda solo un
+  CORE (~37) + grupos disparados por keyword en vez de las 93 — ~50% menos
+  tokens de tools en turnos comunes, sin perder potencia (mensaje largo/ambiguo
+  o modo pesado → todas; salvaguarda nunca cae bajo el CORE).
+- **Prompt caching:** system ya se cachea en Anthropic; ahora las TOOLS también
+  (`cache_control` en la última). OpenAI auto-cachea por prefijo estable.
+- **Routing a barato por defecto** (enrutador, modo auto) + recorte de historial
+  por turno (`_MAX_HISTORIAL_MENSAJES`) + RAG top-k=5 (verificado razonable).
+- **Robot instantáneo:** la burbuja de rollover y posponer/reprogramar son
+  update OPTIMISTA (instant al tocar) + operación de BD en background; nada pasa
+  por el modelo. **Bolita persistente** del robot abajo-izquierda (tocar = chat).
+- **"Me acabo de levantar"** (`POST /horario/despertar`, migración 0042): setea
+  el ancla de despertar SOLO-HOY (no toca la rutina estándar) y materializa el
+  set del día desde esa hora — determinista, instantáneo.
+
 ### Cerebro — tools del chat (93)
 
 Hub básico: crear_tarea, crear_tareas (lote), editar_tarea, completar_tarea,

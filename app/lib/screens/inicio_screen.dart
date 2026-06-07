@@ -306,6 +306,7 @@ class _InicioScreenState extends ConsumerState<InicioScreen> {
                     (ref.watch(mascotaConfigProvider).habilitada ? 230 : 0),
               ),
               children: [
+                _BotonDespertar(onListo: _verMiDia),
                 const _BotonesRitual(),
                 const _CapturaApunte(),
                 KeyedSubtree(key: _planKey, child: const PlanDiaSection()),
@@ -329,6 +330,95 @@ class _InicioScreenState extends ConsumerState<InicioScreen> {
     if (h.hour < 12) return 'Buenos días';
     if (h.hour < 19) return 'Buenas tardes';
     return 'Buenas noches';
+  }
+}
+
+// ─── Botón "Me acabo de levantar" ───────────────────────────────
+//
+// 100% DETERMINISTA (sin LLM): registra tu ancla de despertar de HOY
+// (sin tocar tu rutina estándar) y materializa las sugerencias del día
+// desde esta hora. Las cosas de hoy aparecen AL INSTANTE — distinto de
+// "Buenos días", que abre el chat narrado.
+class _BotonDespertar extends ConsumerStatefulWidget {
+  const _BotonDespertar({required this.onListo});
+  final VoidCallback onListo;
+
+  @override
+  ConsumerState<_BotonDespertar> createState() => _BotonDespertarState();
+}
+
+class _BotonDespertarState extends ConsumerState<_BotonDespertar> {
+  bool _cargando = false;
+
+  Future<void> _despertar() async {
+    if (_cargando) return;
+    setState(() => _cargando = true);
+    try {
+      // Determinista en el cerebro: setea ancla de hoy + construye el set.
+      await ref.read(horarioRepositoryProvider).despertar();
+      // El plan de hoy se ve desde AHORA (replan), e invalidamos para refrescar.
+      ref.read(replanActivoProvider.notifier).state = true;
+      ref.invalidate(planDiaProvider);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+            content: Text('¡Arriba! Aquí está tu día desde ahora.')));
+      widget.onListo(); // baja a «Tu día»
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text('No pude armar tu día: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: Material(
+        color: MatixColors.accent.withValues(alpha: 0.16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: MatixColors.accent.withValues(alpha: 0.5)),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: _cargando ? null : _despertar,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (_cargando)
+                  const SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: MatixColors.accent),
+                  )
+                else
+                  const Icon(Icons.bedtime_off_outlined,
+                      color: MatixColors.accent, size: 20),
+                const SizedBox(width: 10),
+                Text(
+                  _cargando ? 'Armando tu día…' : 'Me acabo de levantar',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: MatixColors.accent,
+                    letterSpacing: 0.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

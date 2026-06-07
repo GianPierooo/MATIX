@@ -3,13 +3,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/markdown_plano.dart';
 import '../../../theme/matix_colors.dart';
+import '../../matix/providers/navegacion_matix_provider.dart';
 import '../domain/personalidad.dart';
 import '../providers/mascota_providers.dart';
 import 'avatar_matix.dart';
 
 /// Burbuja flotante de la mascota: el robot surge con un mensaje y opciones
 /// tocables. Vive sobre el contenido del HomeShell, encima de la barra inferior.
-/// Si no hay mensaje, no ocupa espacio. Reusa el chat al tocar "Hablemos".
+///
+/// SIEMPRE visible y anclada ABAJO A LA IZQUIERDA: si no hay mensaje, queda la
+/// "bolita" del robot (tocarla abre el chat de Matix); cuando hay mensaje, la
+/// bolita se expande a la burbuja con opciones. Persistente entre pestañas
+/// (vive en el HomeShell).
 class MascotaBurbuja extends ConsumerWidget {
   const MascotaBurbuja({super.key});
 
@@ -18,33 +23,77 @@ class MascotaBurbuja extends ConsumerWidget {
     final msg = ref.watch(mascotaControllerProvider);
     final ctrl = ref.read(mascotaControllerProvider.notifier);
 
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 260),
-      switchInCurve: Curves.easeOutBack,
-      switchOutCurve: Curves.easeIn,
-      transitionBuilder: (child, anim) => FadeTransition(
-        opacity: anim,
-        child: SlideTransition(
-          position: Tween(begin: const Offset(0, 0.18), end: Offset.zero)
-              .animate(anim),
-          child: child,
+    // Todo anclado a la IZQUIERDA (no full-width): bolita o burbuja chica.
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 260),
+        switchInCurve: Curves.easeOutBack,
+        switchOutCurve: Curves.easeIn,
+        transitionBuilder: (child, anim) => FadeTransition(
+          opacity: anim,
+          child: SlideTransition(
+            position: Tween(begin: const Offset(0, 0.18), end: Offset.zero)
+                .animate(anim),
+            child: child,
+          ),
+        ),
+        child: msg == null
+            // Persistente: la bolita del robot, abajo a la izquierda. Tocar =
+            // abrir el chat de Matix.
+            ? _Bolita(
+                key: const ValueKey('bolita'),
+                onTap: () => ref
+                    .read(objetivoNavegacionProvider.notifier)
+                    .state = SeccionMatix.matix,
+              )
+            : ConstrainedBox(
+                key: ValueKey(msg.texto),
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.sizeOf(context).width * 0.86,
+                ),
+                child: _Burbuja(
+                  msg: msg,
+                  onOpcion: ctrl.responder,
+                  onCerrar: ctrl.descartar,
+                ),
+              ),
+      ),
+    );
+  }
+}
+
+/// Bolita persistente del robot (estado colapsado): solo el avatar, tocable.
+class _Bolita extends StatelessWidget {
+  const _Bolita({super.key, required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 12),
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: MatixColors.cardHi,
+            border: Border.all(color: MatixColors.accent.withValues(alpha: 0.35)),
+            boxShadow: const [
+              BoxShadow(color: Color(0x55000000), blurRadius: 16, offset: Offset(0, 6)),
+            ],
+          ),
+          child: const AvatarMatix(size: 44),
         ),
       ),
-      child: msg == null
-          ? const SizedBox.shrink(key: ValueKey('sin-mascota'))
-          : _Burbuja(
-              key: ValueKey(msg.texto),
-              msg: msg,
-              onOpcion: ctrl.responder,
-              onCerrar: ctrl.descartar,
-            ),
     );
   }
 }
 
 class _Burbuja extends StatelessWidget {
   const _Burbuja({
-    super.key,
     required this.msg,
     required this.onOpcion,
     required this.onCerrar,

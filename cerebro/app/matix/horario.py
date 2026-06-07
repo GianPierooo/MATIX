@@ -20,12 +20,15 @@ separada y se testea sin BD.
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..db import Postgrest
 from . import creacion_proyecto
+
+logger = logging.getLogger("matix.horario")
 
 LIMA = ZoneInfo("America/Lima")
 
@@ -578,7 +581,10 @@ async def plan_de_hoy_data(
     fecha = local.date()
     cfg = await _config(db)
 
-    despertar = int(cfg["hora_despertar"]) * 60
+    # Ancla de despertar SOLO-HOY (botón "Me acabo de levantar"): si hay un
+    # registro para esta fecha, manda sobre la rutina estándar (que no se toca).
+    override = await despertar_override_min(db, fecha)
+    despertar = override if override is not None else int(cfg["hora_despertar"]) * 60
     dormir = int(cfg["hora_dormir"]) * 60
     buffer_min = int(cfg["buffer_min"])
     pico_ini = int(cfg["pico_inicio"]) * 60
@@ -644,6 +650,58 @@ async def plan_de_hoy_data(
         # Pool ofrecible en los huecos libres (la app dosifica: una por hueco).
         "sugerencias": pool_sugerencias(colocado["fuera"]),
     }
+
+
+# ── Ancla de despertar POR DÍA (botón "Me acabo de levantar") ────────────────
+
+async def despertar_override_min(db: Postgrest, fecha) -> int | None:
+    """Minutos desde medianoche en que el usuario despertó HOY (registro
+    por-día), o None si no marcó. NO toca la rutina estándar. Best-effort."""
+    try:
+        filas = await db.list(
+            "despertar_dia", filters={"fecha": fecha.isoformat()}, limit=1
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if not filas:
+        return None
+    m = filas[0].get("minutos")
+    return int(m) if m is not None else None
+
+
+async def marcar_despertar(
+    db: Postgrest, *, ahora: datetime | None = None
+) -> dict[str, Any]:
+    """Registra que el usuario despertó AHORA (ancla solo-hoy) y devuelve el
+    plan del día recalculado desde esa hora — todo determinista, sin LLM.
+    Reusa `plan_de_hoy_data(desde_ahora=True)` para que las cosas de hoy
+    aparezcan al instante."""
+    ahora = ahora or datetime.now(timezone.utc)
+    local = ahora.astimezone(LIMA)
+    fecha = local.date()
+    minutos = local.hour * 60 + local.minute
+    # Upsert por fecha (una marca por día; re-marcar actualiza la hora).
+    try:
+        filas = await db.list(
+            "despertar_dia", filters={"fecha": fecha.isoformat()}, limit=1
+        )
+        if filas:
+            await db.update("despertar_dia", filas[0]["fecha"], {"minutos": minutos})
+        else:
+            await db.insert(
+                "despertar_dia", {"fecha": fecha.isoformat(), "minutos": minutos}
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("marcar_despertar: no pude guardar el ancla de hoy")
+    # Materializa el set del día (determinista) para que aparezca al instante.
+    try:
+        from . import planificador_diario
+
+        await planificador_diario.construir_set(db, ahora=ahora)
+    except Exception:  # noqa: BLE001
+        logger.exception("marcar_despertar: no pude construir el set del día")
+    plan = await plan_de_hoy_data(db, ahora=ahora, desde_ahora=True)
+    return {"despierta_hoy": min_a_hhmm(minutos), "plan": plan}
 
 
 # ── Acciones del loop principal (mutan el estado real, no un plan rancio) ─────

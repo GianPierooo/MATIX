@@ -52,6 +52,9 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
   bool _recienEntra = true;
   bool _celebrando = false;
   bool _trabajando = false;
+  // Tareas de rollover ya resueltas localmente (update optimista): se ocultan
+  // de la burbuja AL INSTANTE; si la red falla, se revierten.
+  final Set<String> _rolloverResueltas = {};
   int _rotacion = 0;
 
   @override
@@ -108,18 +111,25 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
       case AccionPresencia.hecho:
         await _completar(m);
       case AccionPresencia.posponer:
-        await _irAlChat('Pospón lo de ahora un rato y reacomoda mi día, porfa.');
+        _posponer(m);
       case AccionPresencia.saltar:
         await _saltar(m);
       case AccionPresencia.reprogramar:
-        await _irAlChat(
-            'Reprograma lo que se me pasó de fecha; muévelo a hoy si se puede.');
+        // Reprogramar lo que se pasó = rollover "aceptar" (próximo hueco hoy o
+        // adelante). Determinista e instantáneo; sin chat. Si no hay tarea
+        // enlazada, cae al chat (caso raro: bloque sin id).
+        if (m.tareaId != null) {
+          _decidirRollover(m.tareaId, DecisionRollover.aceptar);
+        } else {
+          await _irAlChat(
+              'Reprograma lo que se me pasó de fecha; muévelo a hoy si se puede.');
+        }
       case AccionPresencia.aceptarRollover:
-        await _decidirRollover(m.tareaId, DecisionRollover.aceptar);
+        _decidirRollover(m.tareaId, DecisionRollover.aceptar);
       case AccionPresencia.otroDia:
-        await _decidirRollover(m.tareaId, DecisionRollover.otroDia);
+        _decidirRollover(m.tareaId, DecisionRollover.otroDia);
       case AccionPresencia.soltar:
-        await _decidirRollover(m.tareaId, DecisionRollover.soltar);
+        _decidirRollover(m.tareaId, DecisionRollover.soltar);
       case AccionPresencia.seguimos:
         setState(() => _celebrando = false);
     }
@@ -136,25 +146,68 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
         TipoPresencia.idle => 'Hola, ¿cómo vamos?',
       };
 
-  /// Aplica la decisión de rollover sobre la tarea no cumplida y refresca.
-  Future<void> _decidirRollover(String? tareaId, DecisionRollover d) async {
-    if (tareaId == null || _trabajando) return;
-    setState(() => _trabajando = true);
-    try {
-      await ref.read(rolloverRepositoryProvider).decidir(tareaId, d);
-      ref.invalidate(rolloverProvider);
-      ref.invalidate(planDiaProvider);
-      ref.invalidate(tareasProvider);
-      _aviso(switch (d) {
-        DecisionRollover.aceptar => 'Listo, lo reagendé.',
-        DecisionRollover.otroDia => 'Lo moví a otro día.',
-        DecisionRollover.soltar => 'Lo solté, sin culpa.',
-      });
-    } catch (e) {
-      _aviso('No pude moverlo: $e');
-    } finally {
-      if (mounted) setState(() => _trabajando = false);
+  /// Aplica la decisión de rollover. OPTIMISTA: la burbuja se cierra y el aviso
+  /// sale AL INSTANTE; la operación de BD va en segundo plano y, si falla, se
+  /// revierte. Cero LLM (cálculo + DB).
+  void _decidirRollover(String? tareaId, DecisionRollover d) {
+    if (tareaId == null || _rolloverResueltas.contains(tareaId)) return;
+    // Instant: oculta esta propuesta y confirma ya.
+    setState(() => _rolloverResueltas.add(tareaId));
+    _aviso(switch (d) {
+      DecisionRollover.aceptar => 'Listo, lo reagendé.',
+      DecisionRollover.otroDia => 'Lo moví a otro día.',
+      DecisionRollover.soltar => 'Lo solté, sin culpa.',
+    });
+    // Red en segundo plano: al confirmar el cerebro, refrescamos para que la
+    // verdad real reemplace al estado optimista (sin parpadeo: ya estaba oculta).
+    unawaited(() async {
+      try {
+        await ref.read(rolloverRepositoryProvider).decidir(tareaId, d);
+        ref.invalidate(rolloverProvider);
+        ref.invalidate(planDiaProvider);
+        ref.invalidate(tareasProvider);
+      } catch (e) {
+        // Revertir: vuelve a mostrar la propuesta y avisa honesto.
+        if (mounted) {
+          setState(() => _rolloverResueltas.remove(tareaId));
+          _aviso('No pude moverlo, sigue ahí.');
+        }
+      }
+    }());
+  }
+
+  /// "Posponer un rato": mueve la tarea al próximo hueco real de HOY (antes de
+  /// tu ancla de dormir). Determinista e instantáneo (optimista). Si ya no hay
+  /// ventana útil hoy, avisa y deja la tarea como está (el robot la re-ofrecerá
+  /// para mañana).
+  void _posponer(MensajePresencia m) {
+    final tareaId = m.tareaId;
+    if (tareaId == null) {
+      unawaited(_irAlChat('Pospón lo de ahora un rato y reacomoda mi día, porfa.'));
+      return;
     }
+    if (_rolloverResueltas.contains(tareaId)) return;
+    setState(() => _rolloverResueltas.add(tareaId));
+    _aviso('Lo pospuse un rato.');
+    unawaited(() async {
+      try {
+        final ok = await ref.read(rolloverRepositoryProvider).posponerHoy(tareaId);
+        if (!ok && mounted) {
+          // No quedaba ventana hoy: revierte y dice la verdad.
+          setState(() => _rolloverResueltas.remove(tareaId));
+          _aviso('Hoy ya no queda hueco; déjame ofrecerte mañana.');
+          return;
+        }
+        ref.invalidate(rolloverProvider);
+        ref.invalidate(planDiaProvider);
+        ref.invalidate(tareasProvider);
+      } catch (e) {
+        if (mounted) {
+          setState(() => _rolloverResueltas.remove(tareaId));
+          _aviso('No pude posponerlo, sigue ahí.');
+        }
+      }
+    }());
   }
 
   /// Navega al chat de Matix y manda una semilla (reusa Capa 2: chat/voz).
@@ -332,12 +385,22 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
       case 'hacer':
         if (accionable != null) await _completar(accionable);
       case 'posponer':
-        await _irAlChat('Pospón lo de ahora un rato y reacomoda mi día, porfa.');
+        // Determinista: próximo hueco real de hoy (o chat si no hay tarea).
+        if (accionable != null) {
+          _posponer(accionable);
+        } else {
+          await _irAlChat('Pospón lo de ahora un rato y reacomoda mi día, porfa.');
+        }
       case 'saltar':
         if (accionable != null) await _saltar(accionable);
       case 'reprogramar':
-        await _irAlChat(
-            'Reprograma lo que se me pasó de fecha; muévelo a hoy si se puede.');
+        // Determinista: rollover aceptar (próximo hueco hoy o adelante).
+        if (accionable?.tareaId != null) {
+          _decidirRollover(accionable!.tareaId, DecisionRollover.aceptar);
+        } else {
+          await _irAlChat(
+              'Reprograma lo que se me pasó de fecha; muévelo a hoy si se puede.');
+        }
       case 'anotar':
         await _capturaRapida();
       case 'dictar':
@@ -407,9 +470,13 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
             'Estás arrastrando varias cosas. Bajemos la carga juntos.',
         acciones: const [AccionPresencia.hablemos, AccionPresencia.verMiDia],
       );
-    } else if (rollover != null && rollover.proposals.isNotEmpty) {
-      // Lo no cumplido NO muere callado: se propone moverlo, tocable.
-      final p = rollover.proposals.first;
+    } else if (rollover != null &&
+        rollover.proposals.any((p) => !_rolloverResueltas.contains(p.tareaId))) {
+      // Lo no cumplido NO muere callado: se propone moverlo, tocable. Saltamos
+      // las ya resueltas localmente (update optimista) para que la burbuja
+      // desaparezca al instante al tocar, sin esperar la red.
+      final p = rollover.proposals
+          .firstWhere((p) => !_rolloverResueltas.contains(p.tareaId));
       final cuando = p.propuesta?.cuando;
       msg = MensajePresencia(
         tipo: TipoPresencia.rollover,

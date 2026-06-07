@@ -21,4 +21,16 @@ class RolloverRepository {
       'decision': decision.id,
     });
   }
+
+  /// "Posponer un rato": mueve la tarea al PRÓXIMO hueco real de HOY (antes de
+  /// tu ancla de dormir). Reusa el endpoint determinista de rendición de
+  /// cuentas (acción `mas_tarde`) — no duplica lógica de ventana útil.
+  /// Devuelve `true` si se movió; `false` si ya no quedaba ventana hoy.
+  Future<bool> posponerHoy(String tareaId) async {
+    final j = await _client.post('/api/v1/push/rendicion-cuentas/accion', {
+      'tarea_id': tareaId,
+      'accion': 'mas_tarde',
+    });
+    return j['ok'] == true;
+  }
 }

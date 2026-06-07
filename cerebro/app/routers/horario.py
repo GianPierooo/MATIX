@@ -46,6 +46,15 @@ async def replanificar(
     return await horario.plan_de_hoy_data(db, ahora=ahora, desde_ahora=True)
 
 
+@router.post("/despertar")
+async def despertar(db: Postgrest = Depends(get_db)) -> dict:
+    """Botón "Me acabo de levantar": registra el ancla de despertar de HOY
+    (sin tocar la rutina estándar), materializa el set del día y devuelve el
+    plan recalculado desde esta hora. 100% DETERMINISTA (sin LLM): las cosas de
+    hoy aparecen al instante. Devuelve `{despierta_hoy, plan}`."""
+    return await horario.marcar_despertar(db, ahora=datetime.now(timezone.utc))
+
+
 @router.post("/bloque/completar")
 async def completar_bloque(
     body: CompletarBloqueRequest, db: Postgrest = Depends(get_db)

@@ -36,6 +36,7 @@ from . import (
     memoria_conversacional,
     modelos_llm,
     modos,
+    seleccion_tools,
 )
 from .contexto import contexto_vivo
 from .system_prompt import system_prompt_fijo
@@ -314,9 +315,15 @@ async def conversar(
     modelo_efectivo = modelo
     hubo_failover = False
 
+    # Filtrado de tools por turno: solo las que este mensaje puede necesitar
+    # (CORE + grupos disparados). Recorta tokens fuerte sin perder potencia
+    # (mensaje largo/ambiguo o modo pesado → todas). Se decide UNA vez por turno
+    # (igual que el modelo): el loop de tools encadena dentro del mismo set.
+    tools_turno = seleccion_tools.filtrar_tools(TOOL_DEFINITIONS, mensaje, modo=modo)
+
     for _ in range(_MAX_VUELTAS):
         salida = await llm.responder_con_tools(
-            mensajes, TOOL_DEFINITIONS, model=modelo
+            mensajes, tools_turno, model=modelo
         )
         # El modelo REAL que respondió (puede diferir por proveedor preferido
         # o por failover). Lo surfaceamos siempre como `modelo_usado`.
