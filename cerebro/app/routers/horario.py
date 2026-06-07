@@ -16,7 +16,7 @@ from ..matix import horario
 from ..schemas.horario import (
     CompletarBloqueRequest,
     PlanDelDiaRead,
-    PushCalendarioRequest,
+    AgendarRequest,
     ReplanRequest,
     SaltarBloqueRequest,
 )
@@ -75,16 +75,17 @@ async def saltar_bloque(
     return await horario.saltar_bloque(db, set_item_id=str(body.set_item_id))
 
 
-@router.post("/calendario")
-async def empujar_a_calendario(
-    body: PushCalendarioRequest | None = None, db: Postgrest = Depends(get_db)
+@router.post("/agendar")
+async def agendar(
+    body: AgendarRequest | None = None, db: Postgrest = Depends(get_db)
 ) -> dict:
-    """Crea los bloques planificados como eventos tentativos. Idempotente: no
-    duplica si ya se empujó (mismo título + hora de inicio hoy). Si la app manda
-    `bloques` (con sus horas editadas), usa esos."""
+    """Agenda los bloques tentativos del plan como TAREAS del hub (camino único
+    canónico de "agregar al día"). Cada bloque engancha su tarea (existente o
+    nueva) a su horario; NUNCA crea eventos pelados. Así aparece en Tareas y en
+    Tu día. Idempotente. Si la app manda `bloques` (con sus ediciones), usa esos."""
     bloques = (
         [b.model_dump() for b in body.bloques]
         if body and body.bloques is not None
         else None
     )
-    return await horario.empujar_a_calendario(db, bloques=bloques)
+    return await horario.agendar_plan(db, bloques=bloques)

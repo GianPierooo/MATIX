@@ -39,14 +39,29 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
     return lista;
   }
 
-  void _aceptarHueco(Hueco h) {
+  /// Acepta una sugerencia de un hueco: la AGENDA como TAREA enganchada a su
+  /// bloque (camino canónico, NUNCA un evento) y refresca el hub para que
+  /// aparezca al instante en Tareas y en Tu día. Oculta la oferta optimista; si
+  /// la red falla, la revierte.
+  Future<void> _aceptarHueco(Hueco h) async {
     final s = h.sugerencia;
     if (s == null) return;
     setState(() {
-      _aceptadas.add(s.aBloque(h.inicioMin, h.durMin));
       _huecosOcultos.add(h.clave);
+      _trabajando = true;
     });
-    _aviso('Listo, lo metí al día. Si no, lo sueltas nomás.');
+    try {
+      await ref
+          .read(horarioRepositoryProvider)
+          .agendar([s.aBloque(h.inicioMin, h.durMin)]);
+      invalidarHub(ref); // el plan recargado muestra la tarea agendada
+      _aviso('Listo, lo agendé en tu día.');
+    } on Object catch (e) {
+      if (mounted) setState(() => _huecosOcultos.remove(h.clave));
+      _aviso('No pude agendarlo: $e');
+    } finally {
+      if (mounted) setState(() => _trabajando = false);
+    }
   }
 
   Future<void> _hecho(BloquePlan b) async {
@@ -128,23 +143,23 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
     ref.invalidate(planDiaProvider);
   }
 
-  Future<void> _alCalendario(PlanDia plan) async {
+  /// Agenda TODO el plan tentativo como TAREAS del hub (camino canónico, nunca
+  /// eventos): cada bloque engancha su tarea (existente o nueva) a su horario.
+  /// Refresca el hub para que aparezca al instante en Tareas y Tu día.
+  Future<void> _agendar(PlanDia plan) async {
     final tentativos = _visibles(plan).where((b) => b.tentativo).toList();
     if (tentativos.isEmpty) {
-      _aviso('No hay bloques planificados para mandar.');
+      _aviso('No hay nada tentativo para agendar.');
       return;
     }
     setState(() => _trabajando = true);
     try {
-      final r = await ref.read(horarioRepositoryProvider).aCalendario(tentativos);
-      final creados = (r['creados'] as num?)?.toInt() ?? 0;
-      final omitidos = (r['omitidos'] as num?)?.toInt() ?? 0;
-      _aviso(creados == 0
-          ? 'Ya estaban en el calendario ($omitidos).'
-          : 'Mandé $creados al calendario'
-              '${omitidos > 0 ? ' ($omitidos ya estaban)' : ''}.');
+      final r = await ref.read(horarioRepositoryProvider).agendar(tentativos);
+      final n = (r['agendadas'] as num?)?.toInt() ?? 0;
+      invalidarHub(ref);
+      _aviso(n == 0 ? 'Ya estaba todo agendado.' : 'Agendé $n en tu día.');
     } on Object catch (e) {
-      _aviso('No pude mandarlo al calendario: $e');
+      _aviso('No pude agendar: $e');
     } finally {
       if (mounted) setState(() => _trabajando = false);
     }
@@ -174,9 +189,9 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
           esReplan: planAsync.valueOrNull?.esReplan ?? false,
           onReplan: _trabajando ? null : _replanificar,
           onDiaCompleto: _verDiaCompleto,
-          onCalendario: (_trabajando || planAsync.valueOrNull == null)
+          onAgendar: (_trabajando || planAsync.valueOrNull == null)
               ? null
-              : () => _alCalendario(planAsync.value!),
+              : () => _agendar(planAsync.value!),
         ),
         planAsync.when(
           loading: () => const _Loader(),
@@ -231,12 +246,12 @@ class _Header extends StatelessWidget {
     required this.esReplan,
     required this.onReplan,
     required this.onDiaCompleto,
-    required this.onCalendario,
+    required this.onAgendar,
   });
   final bool esReplan;
   final VoidCallback? onReplan;
   final VoidCallback onDiaCompleto;
-  final VoidCallback? onCalendario;
+  final VoidCallback? onAgendar;
 
   @override
   Widget build(BuildContext context) {
@@ -259,7 +274,7 @@ class _Header extends StatelessWidget {
             _AccionTexto(label: 'Día completo', onTap: onDiaCompleto)
           else
             _AccionTexto(label: 'Replanifica', onTap: onReplan),
-          _AccionTexto(label: 'Al calendario', onTap: onCalendario),
+          _AccionTexto(label: 'Agendar', onTap: onAgendar),
         ],
       ),
     );

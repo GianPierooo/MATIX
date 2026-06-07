@@ -35,13 +35,23 @@ class HorarioRepository {
     await _client.post('/api/v1/horario/bloque/saltar', {'set_item_id': setItemId});
   }
 
-  /// Empuja los bloques tentativos (con sus horas, incluidas ediciones) al
-  /// calendario. Idempotente del lado del cerebro. Devuelve {creados, omitidos}.
-  Future<Map<String, dynamic>> aCalendario(List<BloquePlan> tentativos) {
-    return _client.post('/api/v1/horario/calendario', {
+  /// AGENDA los bloques tentativos como TAREAS del hub (camino canónico). Manda
+  /// los ids para enganchar al modelo Tarea↔bloque: si el bloque ya viene de una
+  /// tarea/set/nodo se agenda ESA, si no se crea una tarea — NUNCA un evento.
+  /// Idempotente del lado del cerebro. Devuelve {agendadas, omitidas}.
+  Future<Map<String, dynamic>> agendar(List<BloquePlan> tentativos) {
+    return _client.post('/api/v1/horario/agendar', {
       'bloques': [
         for (final b in tentativos)
-          {'titulo': b.titulo, 'inicio': b.inicio, 'fin': b.fin},
+          {
+            'titulo': b.titulo,
+            'inicio': b.inicio,
+            'fin': b.fin,
+            'tipo': b.tipo,
+            'tarea_id': ?b.tareaId,
+            'nodo_id': ?b.nodoId,
+            'set_item_id': ?b.setItemId,
+          },
       ],
     });
   }

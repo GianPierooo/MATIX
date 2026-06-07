@@ -929,53 +929,102 @@ def _hhmm_a_utc_iso(fecha: date, hhmm: str) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-async def empujar_a_calendario(
+def _bloque_inicio_es_hoy(tarea: dict[str, Any], fecha: date) -> bool:
+    bi = _parse_dt(tarea.get("bloque_inicio"))
+    return bi is not None and bi.astimezone(LIMA).date() == fecha
+
+
+async def agendar_plan(
     db: Postgrest,
     *,
     bloques: list[dict[str, Any]] | None = None,
     ahora: datetime | None = None,
 ) -> dict[str, Any]:
-    """Crea los bloques PLANIFICADOS (tentativos) como eventos del calendario.
+    """Agenda los bloques tentativos del plan como TAREAS del hub — el ÚNICO
+    camino canónico de "agregar al día". NUNCA crea eventos pelados (los eventos
+    solo nacen por la ruta explícita de evento fijo: clase, gym).
 
-    Si la app pasa `bloques` (con las horas que ve, incluidas ediciones), se
-    usan esos; si no, se recalcula el plan. Idempotente: si ya existe un evento
-    de hoy con el mismo título y hora de inicio, lo OMITE (no duplica si lo
-    empujas dos veces). Los fijos (clases, gym) ya viven en el calendario."""
+    Reusa el modelo Tarea↔bloque:
+    - Si el bloque ya viene de una tarea (`tarea_id`) → le engancha su horario
+      (`bloque_inicio/fin`, vence hoy).
+    - Si viene de un item del set (`set_item_id`) → lo promueve a Tarea
+      (reusa `planificador_diario.aceptar_items`) y la engancha.
+    - Si no tiene tarea (skill, sugerencia sintetizada, nodo) → crea una Tarea
+      nueva con su bloque (y la enlaza al nodo del árbol si lo trae).
+
+    Así TODO lo que agregas aparece en Tareas Y en Tu día. Idempotente: una tarea
+    ya enganchada se re-actualiza; las nuevas se dedupean por título + bloque de
+    hoy. Si la app pasa `bloques` (con sus ediciones), se usan esos."""
     ahora = ahora or datetime.now(timezone.utc)
-    fecha = ahora.astimezone(LIMA).date()
+    local = ahora.astimezone(LIMA)
+    fecha = local.date()
     if bloques is None:
         data = await plan_de_hoy_data(db, ahora=ahora)
         bloques = [b for b in data["bloques"] if b.get("tentativo")]
 
-    # Índice de lo que ya hay hoy (para no duplicar).
-    try:
-        eventos = await db.list("eventos", raw_filters={"eliminado_en": "is.null"})
-    except Exception:  # noqa: BLE001
-        eventos = []
-    existentes = set()
-    for e in eventos:
-        dt = _parse_dt(e.get("inicia_en"))
-        if dt and dt.astimezone(LIMA).date() == fecha:
-            existentes.add((e.get("titulo"), dt.astimezone(LIMA).strftime("%H:%M")))
+    from . import planificador_diario
 
-    creados, omitidos = 0, 0
+    try:
+        tareas = await db.list(
+            "tareas",
+            raw_filters={"eliminado_en": "is.null", "completada": "is.false"},
+            limit=500,
+        )
+    except Exception:  # noqa: BLE001
+        tareas = []
+    titulos_hoy = {_norm(t.get("titulo")) for t in tareas if _bloque_inicio_es_hoy(t, fecha)}
+
+    agendadas, omitidas = 0, 0
     for b in bloques:
         titulo = (b.get("titulo") or "").strip()
         inicio = (b.get("inicio") or "").strip()
         if not titulo or not inicio:
             continue
-        clave = (titulo, inicio)
-        if clave in existentes:
-            omitidos += 1
-            continue
         fin = (b.get("fin") or "").strip() or min_a_hhmm((hhmm_a_min(inicio) or 0) + 30)
-        await db.insert("eventos", {
+        ini_iso = _hhmm_a_utc_iso(fecha, inicio)
+        fin_iso = _hhmm_a_utc_iso(fecha, fin)
+
+        tid = b.get("tarea_id")
+        # Item del set 'propuesto' → promover a tarea (reusa el flujo del set).
+        if not tid and b.get("set_item_id"):
+            try:
+                prom = await planificador_diario.aceptar_items(
+                    db, item_ids=[b["set_item_id"]], ahora=ahora
+                )
+                if prom:
+                    tid = prom[0].get("tarea_id")
+            except Exception:  # noqa: BLE001
+                logger.exception("agendar: no pude promover el item del set")
+
+        if tid:
+            await db.update(
+                "tareas", tid,
+                {"bloque_inicio": ini_iso, "bloque_fin": fin_iso, "vence_en": fin_iso},
+            )
+            agendadas += 1
+            continue
+
+        # Sin tarea (skill / sugerencia sintetizada / nodo): crear una Tarea.
+        if _norm(titulo) in titulos_hoy:
+            omitidas += 1
+            continue
+        nueva = await db.insert("tareas", {
             "titulo": titulo,
-            "inicia_en": _hhmm_a_utc_iso(fecha, inicio),
-            "termina_en": _hhmm_a_utc_iso(fecha, fin),
-            "color": "#E0A33A",  # ámbar = tentativo
-            "descripcion": "Bloque del plan de hoy (tentativo).",
+            "proyecto_id": b.get("proyecto_id"),
+            "bloque_inicio": ini_iso,
+            "bloque_fin": fin_iso,
+            "vence_en": fin_iso,
+            "nudges_silenciada": True,
         })
-        existentes.add(clave)
-        creados += 1
-    return {"creados": creados, "omitidos": omitidos, "fecha": fecha.isoformat()}
+        if b.get("nodo_id"):
+            try:
+                await db.update(
+                    "arbol_nodos", b["nodo_id"],
+                    {"tarea_id": nueva["id"], "estado": "en_curso"},
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("agendar: no pude enlazar el nodo")
+        titulos_hoy.add(_norm(titulo))
+        agendadas += 1
+
+    return {"agendadas": agendadas, "omitidas": omitidas, "fecha": fecha.isoformat()}

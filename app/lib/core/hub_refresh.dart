@@ -1,21 +1,26 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/horario/providers/horario_providers.dart';
+import '../features/proyectos/providers/proyectos_providers.dart';
 import '../features/rollover/providers/rollover_providers.dart';
 import '../features/tareas/providers/tareas_providers.dart';
 
-/// Invalida en bloque las vistas que cuentan la MISMA historia de "lo que hay
-/// que hacer hoy": Tareas, plan del día y rollover. Una tarea es UNA entidad —
-/// completarla o moverla desde cualquier lado tiene que reflejarse en las tres.
+/// Refresca SISTÉMICAMENTE todas las vistas que cuentan la MISMA historia de "lo
+/// que hay que hacer": Tareas, plan del día (Tu día), rollover y Proyectos (la
+/// acción siguiente de un proyecto cambia al crear/completar/mover una tarea).
+/// Una tarea es UNA entidad — crearla, completarla o moverla desde cualquier
+/// lado tiene que reflejarse en TODAS las vistas, sin refresco manual.
 ///
-/// Antes cada call-site invalidaba solo "su" provider y eso desincronizaba el
-/// hub: marcar hecho desde el plan no quitaba la tarea de la pestaña Tareas, y
-/// completar desde Tareas no quitaba el bloque de "Tu día". Esto cierra el aro.
+/// REGLA: cualquier mutación (crear, completar, agendar, posponer, saltar) llama
+/// a esto al terminar con éxito. Antes cada call-site invalidaba solo "su"
+/// provider y eso desincronizaba el hub (agregar algo no aparecía hasta tirar a
+/// refrescar). Esto cierra el aro.
 ///
-/// Es barato (cada provider se recarga lazy, solo si hay un widget watcheándolo)
+/// Es barato (cada provider recarga lazy, solo si hay un widget watcheándolo)
 /// y safe (no hace red por sí mismo).
 void invalidarHub(WidgetRef ref) {
   ref.invalidate(tareasProvider);
   ref.invalidate(planDiaProvider);
   ref.invalidate(rolloverProvider);
+  ref.invalidate(proyectosListProvider);
 }

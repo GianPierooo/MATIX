@@ -784,6 +784,26 @@ Pasos completados de Capa 2:
 
 ---
 
+## Convenciones que NO deben regresar (bugs de raíz cerrados)
+
+- **Agregar al día = SIEMPRE Tarea, nunca Evento pelado** (2026-06-07). El único
+  camino canónico es `horario.agendar_plan` (endpoint `/horario/agendar`,
+  repo `HorarioRepository.agendar`): cada bloque tentativo engancha su Tarea
+  (existente vía tarea_id, promovida vía set_item_id, o creada nueva) a su
+  bloque_inicio/fin, reusando el modelo Tarea↔bloque. Así aparece en Tareas Y en
+  Tu día. Se ELIMINÓ `empujar_a_calendario` (insertaba eventos pelados — era el
+  bug recurrente). Los EVENTOS solo nacen por la ruta explícita de evento fijo
+  (clase, gym / NuevoEventoScreen). La captura rápida ya creaba tarea/apunte.
+- **Refresco sistémico**: toda mutación (crear/agendar/completar/posponer/saltar)
+  llama a `invalidarHub` (Tareas + Tu día + rollover + Proyectos). Nada de
+  estados rancios: el ítem aparece al instante sin refresco manual.
+- **Scroll**: TODA pantalla scrolleable reserva `MatixLayout.scrollBottom(ctx)`
+  como `padding.bottom` (= inset del sistema + alto de la barra inferior +
+  holgura; `conRobot:` añade el robot flotante en Inicio). El bug era que el
+  guard leía solo el `viewPadding` y olvidaba el alto de la barra (~64) → cortaba
+  el último ítem (p. ej. el domingo del calendario semanal). Pantalla nueva
+  hereda la convención (o usa `PantallaScroll`).
+
 ## Pendientes y dudas abiertas
 
 - Norte de 2.0 — capa de comandos unificada: ver docs/Matix_2.0_Norte_Capa_de_Comandos.md.

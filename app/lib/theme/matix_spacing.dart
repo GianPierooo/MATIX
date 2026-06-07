@@ -25,24 +25,46 @@ class MatixSpacing {
   static const double xl4 = 32;
 }
 
-/// Helpers de layout sensibles al `MediaQuery`.
+/// Convención ÚNICA de scroll de Matix: el inset inferior que TODA pantalla
+/// scrolleable debe reservar para que el último ítem nunca quede tapado por la
+/// barra de navegación ni por el robot flotante. Aplícala SIEMPRE (o usa
+/// [PantallaScroll], que ya la hereda). Pantalla nueva = hereda esto y el bug
+/// no vuelve.
+///
+/// La fórmula es la del prompt: insets del sistema (gesto/barra) + alto de la
+/// barra de navegación inferior + holgura (+ robot si aplica).
 class MatixLayout {
   const MatixLayout._();
 
-  /// Padding inferior recomendado para scrollables que viven dentro
-  /// del `HomeShell` (Inicio · Proyectos · Tareas · Universidad).
+  /// Alto aproximado de la barra de navegación inferior del HomeShell (sin el
+  /// safe area del sistema, que se cuenta aparte vía `viewPadding`). El
+  /// `_MatixBottomNav` mide ~64 px de contenido (iconos + labels + padding).
+  static const double alturaBarraNav = 64;
+
+  /// Holgura visual mínima: el "saliente" del FAB central (`Transform.translate
+  /// (-22)`) + aire para que no quede pegado.
+  static const double holgura = 12;
+
+  /// Espacio para el robot flotante (PresenciaMatix, tarjeta expandida). Solo
+  /// Inicio lo necesita; el resto de pantallas no monta ese robot.
+  static const double holguraRobot = 200;
+
+  /// Inset inferior CANÓNICO para cualquier scrollable.
   ///
-  /// El `HomeShell` usa `Scaffold(extendBody: true)` para que el
-  /// círculo elevado de Matix sobresalga del fondo. Como consecuencia,
-  /// el body se dibuja BAJO la nav inferior — si el ListView no
-  /// reserva espacio, los últimos ítems quedan tapados.
-  ///
-  /// Con `extendBody=true`, `Scaffold` inyecta en `MediaQuery.padding.
-  /// bottom` la altura de la nav + el safe area del sistema; lo
-  /// leemos vía `viewPaddingOf(...)`. Sumamos una constante extra
-  /// (~32 px) para cubrir el "saliente" visual del FAB central, que
-  /// usa `Transform.translate(-22)` y por eso sobresale por encima
-  /// de la nav sin estar contabilizado en su `Size`.
-  static double bottomNavGuard(BuildContext ctx) =>
-      MediaQuery.viewPaddingOf(ctx).bottom + 32;
+  /// El `HomeShell` usa `Scaffold(extendBody: true)` (para que el círculo
+  /// elevado de Matix sobresalga), así que el body se dibuja BAJO la barra
+  /// inferior: sin este colchón, los últimos ítems quedan tapados. Antes el
+  /// guard solo sumaba el `viewPadding` del sistema (~gesto) + 32 y se OLVIDABA
+  /// el alto de la barra (~64) — por eso se cortaba (p. ej. el domingo en el
+  /// calendario semanal). Ahora lo incluye explícito. `conRobot` añade el
+  /// espacio del robot flotante (Inicio).
+  static double scrollBottom(BuildContext ctx, {bool conRobot = false}) =>
+      MediaQuery.viewPaddingOf(ctx).bottom +
+      alturaBarraNav +
+      holgura +
+      (conRobot ? holguraRobot : 0);
+
+  /// Alias histórico (sin robot). Equivale a `scrollBottom(ctx)`. Mantiene el
+  /// nombre que ya usan varias pantallas.
+  static double bottomNavGuard(BuildContext ctx) => scrollBottom(ctx);
 }

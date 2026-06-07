@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../theme/matix_colors.dart';
+import '../../../theme/matix_spacing.dart';
 import '../../captura_camara/presentation/captura_camara_screen.dart';
 import '../domain/apunte.dart';
 import '../providers/apuntes_providers.dart';
@@ -54,7 +55,8 @@ class ApuntesListScreen extends ConsumerWidget {
                 color: MatixColors.accent,
                 onRefresh: () async => ref.invalidate(apuntesListProvider),
                 child: ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                  padding: EdgeInsets.fromLTRB(
+                      16, 8, 16, MatixLayout.scrollBottom(context)),
                   itemCount: lista.length,
                   itemBuilder: (_, i) => _Card(apunte: lista[i]),
                 ),

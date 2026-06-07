@@ -76,9 +76,16 @@ class BloquePush(BaseModel):
     titulo: str
     inicio: str          # "HH:MM"
     fin: str | None = None
+    # Ids para enganchar al modelo Tarea↔bloque (no se crea evento): si el bloque
+    # ya viene de una tarea/set/nodo, se agenda ESA; si no, se crea una tarea.
+    tarea_id: str | None = None
+    nodo_id: str | None = None
+    set_item_id: str | None = None
+    proyecto_id: str | None = None
+    tipo: str | None = None
 
 
-class PushCalendarioRequest(BaseModel):
+class AgendarRequest(BaseModel):
     # Bloques que ve la app (con horas editadas). Si viene vacío, el cerebro
-    # recalcula el plan y empuja los tentativos.
+    # recalcula el plan y agenda los tentativos como TAREAS.
     bloques: list[BloquePush] | None = None

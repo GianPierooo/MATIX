@@ -38,20 +38,44 @@ class FakeDB:
         return {"id": id_, **payload}
 
 
-def test_empujar_a_calendario_es_idempotente():
+def test_agendar_sugerencia_crea_tarea_no_evento():
+    """El bug recurrente: agregar una sugerencia debe crear una TAREA, nunca un
+    Evento de calendario. Una sugerencia sin tarea_id (skill / sintetizada) →
+    nace como Tarea (aparece en Tareas) con su bloque (aparece en Tu día)."""
     db = FakeDB()
     bloques = [
-        {"titulo": "OneXotic: sprint", "inicio": "08:00", "fin": "09:30"},
-        {"titulo": "Práctica: Inglés", "inicio": "10:00", "fin": "10:30"},
+        {"titulo": "Práctica: Inglés", "inicio": "10:00", "fin": "10:30",
+         "proyecto_id": "skill-ing"},
     ]
-    # Primera vez: crea los 2.
-    r1 = asyncio.run(horario.empujar_a_calendario(db, bloques=bloques))
-    assert r1["creados"] == 2 and r1["omitidos"] == 0
-    assert len(db.tablas.get("eventos", [])) == 2
-    # Segunda vez (mismos bloques): no duplica.
-    r2 = asyncio.run(horario.empujar_a_calendario(db, bloques=bloques))
-    assert r2["creados"] == 0 and r2["omitidos"] == 2
-    assert len(db.tablas.get("eventos", [])) == 2  # sigue habiendo 2, no 4
+    r = asyncio.run(horario.agendar_plan(db, bloques=bloques))
+    assert r["agendadas"] == 1
+    # Creó una TAREA (con bloque) y NINGÚN evento.
+    tareas = db.tablas.get("tareas", [])
+    assert len(tareas) == 1
+    assert tareas[0]["titulo"] == "Práctica: Inglés"
+    assert tareas[0].get("bloque_inicio") and tareas[0].get("vence_en")
+    assert db.tablas.get("eventos", []) == []  # NUNCA un evento pelado
+    # Dedup: re-agendar lo mismo no duplica.
+    r2 = asyncio.run(horario.agendar_plan(db, bloques=bloques))
+    assert r2["omitidas"] == 1
+    assert len(db.tablas.get("tareas", [])) == 1
+
+
+def test_agendar_engancha_tarea_existente_sin_crear_evento():
+    """Si el bloque ya viene de una tarea (tarea_id), se ENGANCHA su horario
+    (no se crea otra tarea ni un evento)."""
+    db = FakeDB()
+    bloques = [
+        {"titulo": "OneXotic: sprint", "inicio": "08:00", "fin": "09:30",
+         "tarea_id": "t1"},
+    ]
+    r = asyncio.run(horario.agendar_plan(db, bloques=bloques))
+    assert r["agendadas"] == 1
+    # Actualizó la tarea t1 con su bloque; sin tareas nuevas ni eventos.
+    assert any(t == "tareas" and id_ == "t1" and "bloque_inicio" in p
+               for t, id_, p in db.updates)
+    assert db.tablas.get("tareas", []) == []  # no insertó tarea nueva
+    assert db.tablas.get("eventos", []) == []  # ni evento
 
 
 def test_completar_bloque_cierra_nodo_y_tarea():

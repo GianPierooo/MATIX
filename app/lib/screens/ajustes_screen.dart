@@ -38,6 +38,7 @@ import '../features/wakeword/data/wakeword_modelo.dart';
 import '../features/wakeword/presentation/entrenar_voz_screen.dart';
 import '../features/wakeword/providers/wakeword_providers.dart';
 import '../theme/matix_colors.dart';
+import '../theme/matix_spacing.dart';
 
 /// Pantalla de Ajustes — informativa en Capa 1.
 ///
@@ -217,7 +218,7 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Ajustes')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
+        padding: EdgeInsets.fromLTRB(0, 8, 0, MatixLayout.scrollBottom(context)),
         children: [
           const _Seccion('Matix'),
           _Accion(

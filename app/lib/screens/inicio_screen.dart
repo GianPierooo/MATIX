@@ -294,16 +294,17 @@ class _InicioScreenState extends ConsumerState<InicioScreen> {
             },
             child: ListView(
               controller: _scroll,
-              // Cubre la nav inferior + safe area + saliente del FAB. Cuando la
-              // mascota está habilitada sumamos la altura típica de su tarjeta
-              // expandida (~230px) para que NO tape el último contenido al
-              // hacer scroll hasta el final — antes se comía los Pendientes.
+              // Convención única de scroll: nav + safe area + holgura, y el
+              // espacio del robot flotante cuando la mascota está activa (para
+              // que su tarjeta expandida no tape el último contenido).
               padding: EdgeInsets.fromLTRB(
                 0,
                 8,
                 0,
-                MatixLayout.bottomNavGuard(context) +
-                    (ref.watch(mascotaConfigProvider).habilitada ? 230 : 0),
+                MatixLayout.scrollBottom(
+                  context,
+                  conRobot: ref.watch(mascotaConfigProvider).habilitada,
+                ),
               ),
               children: [
                 _BotonDespertar(onListo: _verMiDia),

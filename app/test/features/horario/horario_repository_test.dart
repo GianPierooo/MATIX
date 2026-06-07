@@ -76,22 +76,31 @@ void main() {
     expect(p.body, {'set_item_id': 's1'});
   });
 
-  test('aCalendario manda solo titulo/inicio/fin de los tentativos', () async {
-    client.respPost = {'creados': 1, 'omitidos': 0, 'fecha': '2026-06-04'};
+  test('agendar manda título/horas + ids para enganchar al modelo Tarea↔bloque',
+      () async {
+    client.respPost = {'agendadas': 1, 'omitidas': 0, 'fecha': '2026-06-04'};
     final bloques = [
       const BloquePlan(
         inicio: '08:00', fin: '09:30', titulo: 'OneXotic',
         tipo: 'trabajo', tentativo: true, nodoId: 'n1', setItemId: 's1',
       ),
     ];
-    final r = await repo.aCalendario(bloques);
+    final r = await repo.agendar(bloques);
     final p = client.posts.single;
-    expect(p.path, '/api/v1/horario/calendario');
+    // Camino canónico de TAREA (no eventos): endpoint /agendar con los ids.
+    expect(p.path, '/api/v1/horario/agendar');
     expect(p.body, {
       'bloques': [
-        {'titulo': 'OneXotic', 'inicio': '08:00', 'fin': '09:30'},
+        {
+          'titulo': 'OneXotic',
+          'inicio': '08:00',
+          'fin': '09:30',
+          'tipo': 'trabajo',
+          'nodo_id': 'n1',
+          'set_item_id': 's1',
+        },
       ],
     });
-    expect(r['creados'], 1);
+    expect(r['agendadas'], 1);
   });
 }
