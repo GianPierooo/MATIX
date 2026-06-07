@@ -726,6 +726,7 @@ Pasos completados de Capa 2:
 
 ## Pendientes y dudas abiertas
 
+- Norte de 2.0 — capa de comandos unificada: ver docs/Matix_2.0_Norte_Capa_de_Comandos.md.
 - La pantalla de chat con Matix es de Capa 2; no se diseña ahora.
 - Hay un segundo proyecto Supabase en la organización (el viejo
   `xapqlnyzblhnhnnvttyy`). El plan free permite 2 proyectos, así
