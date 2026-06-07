@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from ..db import Postgrest, get_db
-from ..matix import horario, rendicion_cuentas, rollover
+from ..matix import asistencia_eventos, horario, rendicion_cuentas, rollover
 from ..matix.push_fcm import TokenInvalido, enviar_push
 from ..schemas.push import (
     ProbarPushRequest,
@@ -240,3 +240,43 @@ async def aplicar_accion(
         "bloque_inicio": bloque_ini.isoformat(),
         "bloque_fin": bloque_fin.isoformat(),
     }
+
+
+# ── Asistencia a eventos: "¿Fuiste a X?" desde la notificación ──────────────
+
+
+class AccionAsistencia(BaseModel):
+    evento_id: str
+    # 'si_fui' | 'no_fui' | 'reprogramar'
+    accion: str
+
+
+@router.post("/asistencia/accion")
+async def aplicar_asistencia(
+    body: AccionAsistencia, db: Postgrest = Depends(get_db)
+) -> dict:
+    """Aplica la respuesta de asistencia que el usuario tocó en la notificación.
+    Idempotente, con la app cerrada. Marca `eventos.asistencia` y alimenta así el
+    motor de evolución (tasas reales).
+
+    - 'si_fui'      → asistencia = 'asistio'.
+    - 'no_fui'      → asistencia = 'no_asistio'.
+    - 'reprogramar' → 'no_asistio' + intención de reprogramar (el usuario lo
+                      reacomoda; no movemos un evento con ubicación a ciegas).
+    """
+    accion = (body.accion or "").strip().lower()
+    if accion not in ("si_fui", "no_fui", "reprogramar"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Acción desconocida: {body.accion!r}",
+        )
+    evento = await db.get("eventos", body.evento_id)
+    if evento is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No existe ese evento.",
+        )
+    return await asistencia_eventos.marcar_asistencia(
+        db, evento_id=body.evento_id, accion=accion,
+        ahora=datetime.now(timezone.utc),
+    )

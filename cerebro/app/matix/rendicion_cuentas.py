@@ -111,17 +111,33 @@ def armar_contenido(
     return {"titulo": titulo, "cuerpo": cuerpo, "acciones": acciones}
 
 
+def horas_entre_niveles(intensidad: str) -> int:
+    """Cada cuántas horas se RE-ALERTA (sube de nivel) si la tarea sigue sin
+    resolver, según la intensidad. Más intensa = insiste más seguido (la fuerza
+    está en la insistencia, no en el tono). El tope de niveles (NIVEL_MAX) y el
+    silencio nocturno siguen firmes — esto solo regula la cadencia. PURO."""
+    return {
+        "suave": 20,
+        "medio": 12,
+        "intenso": 6,
+        "maximo": 3,
+    }.get(intensidad, HORAS_ENTRE_NIVELES)
+
+
 def calcular_nivel_siguiente(
-    ultimo: dict[str, Any] | None, *, ahora: datetime
+    ultimo: dict[str, Any] | None,
+    *,
+    ahora: datetime,
+    horas_cooldown: int = HORAS_ENTRE_NIVELES,
 ) -> int | None:
     """Devuelve el nivel del PRÓXIMO ping para esta tarea, o None si ya no se
     debe pingar (resuelta, o ya pasó el tope). PURO.
 
-    - Sin pings previos        → nivel 1 (suave).
-    - Último resuelto          → None (silencio definitivo).
-    - Último < N horas atrás   → None (cooldown, no spam).
-    - Último nivel 3           → None (tope dura).
-    - Lo demás                 → ultimo.nivel + 1.
+    - Sin pings previos             → nivel 1 (suave).
+    - Último resuelto               → None (silencio definitivo).
+    - Último < `horas_cooldown` atrás → None (cooldown, no spam).
+    - Último nivel 3                → None (tope dura).
+    - Lo demás                      → ultimo.nivel + 1.
     """
     if ultimo is None:
         return 1
@@ -130,7 +146,7 @@ def calcular_nivel_siguiente(
     enviado = _parse_dt(ultimo.get("enviado_en"))
     if enviado is None:
         return None
-    if (ahora - enviado) < timedelta(hours=HORAS_ENTRE_NIVELES):
+    if (ahora - enviado) < timedelta(hours=horas_cooldown):
         return None
     nivel_prev = int(ultimo.get("nivel") or 0)
     if nivel_prev >= NIVEL_MAX:
@@ -202,10 +218,11 @@ async def _ultimos_pings(
 
 
 async def _candidatas_a_pingar(
-    db: Postgrest, *, ahora: datetime
+    db: Postgrest, *, ahora: datetime, horas_cooldown: int = HORAS_ENTRE_NIVELES
 ) -> list[tuple[dict[str, Any], int]]:
     """Tareas no cumplidas que toca pingar AHORA con su nivel siguiente.
-    Aplica dedup por nivel y tope (NIVEL_MAX)."""
+    Aplica dedup por nivel y tope (NIVEL_MAX). El `horas_cooldown` (cadencia de
+    re-alerta) lo fija la intensidad."""
     tareas = await db.list(
         "tareas",
         raw_filters={"eliminado_en": "is.null", "completada": "is.false"},
@@ -217,7 +234,9 @@ async def _candidatas_a_pingar(
     ultimos = await _ultimos_pings(db, tarea_ids=[t["id"] for t in pendientes])
     out: list[tuple[dict[str, Any], int]] = []
     for t in pendientes:
-        nivel = calcular_nivel_siguiente(ultimos.get(t["id"]), ahora=ahora)
+        nivel = calcular_nivel_siguiente(
+            ultimos.get(t["id"]), ahora=ahora, horas_cooldown=horas_cooldown
+        )
         if nivel is not None:
             out.append((t, nivel))
         if len(out) >= MAX_TAREAS_POR_TICK:
@@ -235,12 +254,17 @@ async def revisar_rendicion_cuentas(
     local = ahora.astimezone(LIMA)
 
     # Silencio nocturno: reusamos la misma fuente que los nudges (config_nudges
-    # → ancla del usuario). Si está en silencio, este tick no manda nada.
+    # → ancla del usuario). Si está en silencio, este tick no manda nada (ni el
+    # modo máximo dispara full-screen mientras duermes).
     cfgs = await db.list("config_nudges", limit=1)
-    if cfgs and not recordatorios.permitido_ahora(local, cfgs[0]):
+    cfg_nudges = cfgs[0] if cfgs else None
+    if cfg_nudges and not recordatorios.permitido_ahora(local, cfg_nudges):
         return {"pings": 0, "silencio": True}
+    intensidad = str((cfg_nudges or {}).get("intensidad") or "intenso")
 
-    candidatas = await _candidatas_a_pingar(db, ahora=ahora)
+    candidatas = await _candidatas_a_pingar(
+        db, ahora=ahora, horas_cooldown=horas_entre_niveles(intensidad)
+    )
     if not candidatas:
         return {"pings": 0}
 
@@ -286,6 +310,11 @@ async def revisar_rendicion_cuentas(
         "tareas_titulos": "||".join(_titulo_corto(t) for t in tareas_solo),
         "acciones": ",".join(contenido["acciones"]),
         "nivel": str(nivel_efectivo),
+        # La app mapea la intensidad al mecanismo Android (heads-up /
+        # persistente / full-screen). `critico` = tarea vencida en el último
+        # nivel: SOLO esto habilita el full-screen del modo máximo.
+        "intensidad": intensidad,
+        "critico": "true" if nivel_efectivo >= NIVEL_MAX else "false",
     }
     enviados_ok = 0
     for tok in list(tokens):

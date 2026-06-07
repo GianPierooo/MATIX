@@ -690,10 +690,16 @@ def iniciar(db: Postgrest) -> None:
         await correr_job("nudges", revisar_nudges(db))
         # Rendición de cuentas (Push con botones de acción): chequeo periódico
         # cada minuto, con dedup por tarea + tope de niveles + silencio nocturno.
-        from . import rendicion_cuentas
+        from . import asistencia_eventos, rendicion_cuentas
         await correr_job(
             "rendicion_cuentas",
             rendicion_cuentas.revisar_rendicion_cuentas(db),
+        )
+        # Asistencia a eventos fuera de casa: "¿Fuiste a X?" tras terminar.
+        # Mismo silencio nocturno y pipeline de botones que la rendición.
+        await correr_job(
+            "asistencia_eventos",
+            asistencia_eventos.revisar_asistencia(db),
         )
         await correr_job(
             "automatizaciones", automatizaciones.revisar_automatizaciones(db)

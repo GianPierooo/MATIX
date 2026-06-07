@@ -28,6 +28,16 @@ Marcas: ✅ Hecho · ⚠️ Parcial (sirve pero le falta algo concreto) · ❌ F
   cursos/clases, evaluaciones, cuadernos, categorías.
 - ✅ Papelera + restaurar + borrado permanente para tareas/eventos/apuntes.
 - ✅ Notificaciones locales + push (FCM) con scheduler cada minuto.
+- ✅ Rendición de cuentas con botones de acción (app cerrada): tareas
+  "¿Hiciste X?" (Sí / No, mañana / No, más tarde) + asistencia a eventos fuera
+  de casa "¿Fuiste a X?" (Sí fui / No fui / Reprogramar). Alimentan el motor de
+  evolución (tasas de cierre + asistencia).
+- ✅ Intensidad graduable de los avisos (dial Ajustes: suave/medio/intenso/
+  máximo, default intenso) → mecanismos Android (heads-up / persistente /
+  full-screen) con canales por importancia; re-alerta escalada por intensidad;
+  silencio nocturno gatea todo (ni el máximo dispara full-screen de noche).
+  MagicOS: guía honesta (batería + full-screen intent + autoarranque). Lo
+  nativo de timing/entrega es de dispositivo (no corre en CI).
 
 ### Chat con Matix (Capa 2)
 - ✅ Chat de texto con tool-calling (83 tools del hub).

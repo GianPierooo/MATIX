@@ -188,6 +188,25 @@ def test_escalada_sube_nivel_cuando_pasa_cooldown():
     assert rc.calcular_nivel_siguiente(ultimo, ahora=ahora) == 2
 
 
+def test_cadencia_de_realerta_escala_con_intensidad():
+    """La intensidad regula CADA CUÁNTO se re-alerta (no el tope ni el silencio).
+    Máximo insiste más seguido que suave."""
+    assert rc.horas_entre_niveles("suave") == 20
+    assert rc.horas_entre_niveles("medio") == 12
+    assert rc.horas_entre_niveles("intenso") == 6
+    assert rc.horas_entre_niveles("maximo") == 3
+    assert rc.horas_entre_niveles("desconocido") == rc.HORAS_ENTRE_NIVELES
+
+    # Mismo último ping de hace 4h: en 'maximo' (cooldown 3h) ya re-alerta; en
+    # 'intenso' (6h) todavía no.
+    ahora = datetime(2026, 6, 7, 12, 0, tzinfo=timezone.utc)
+    ultimo = {"nivel": 1, "enviado_en": (ahora - timedelta(hours=4)).isoformat()}
+    assert rc.calcular_nivel_siguiente(
+        ultimo, ahora=ahora, horas_cooldown=rc.horas_entre_niveles("maximo")) == 2
+    assert rc.calcular_nivel_siguiente(
+        ultimo, ahora=ahora, horas_cooldown=rc.horas_entre_niveles("intenso")) is None
+
+
 def test_tope_dura_nivel_3_no_se_sobrepasa():
     """Tope: tras nivel 3 (final) NO se vuelve a pingar — anti-spam infinito."""
     ahora = datetime(2026, 6, 7, 12, 0, tzinfo=timezone.utc)

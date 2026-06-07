@@ -274,7 +274,13 @@ async def construir_set(db: Postgrest, *, ahora: datetime | None = None) -> list
     base = int(cfg.get("tamano_set", 3))
     # ANTI-PATRÓN (no apilar): si el ritmo real de cierre es bajo o vienes
     # arrastrando pendientes de ayer, REDUCE el volumen — nunca sumes más.
-    tasa = await _tasa_cierre_reciente(db, hoy=hoy)
+    # El motor de evolución mira DOS señales reales: cuánto cierras (tareas) y
+    # cuánto cumples lo agendado fuera de casa (asistencia). La PEOR manda
+    # (conservador): faltar a eventos también achica el día.
+    from . import asistencia_eventos
+    tasa_cierre = await _tasa_cierre_reciente(db, hoy=hoy)
+    tasa_asist = await asistencia_eventos.tasa_asistencia_reciente(db, hoy=hoy)
+    tasa = asistencia_eventos.combinar_tasas(tasa_cierre, tasa_asist)
     ajuste = ajustar_tamano_set(base, tasa, len(rollover))
     tamano = ajuste["tamano"]
     if tamano < base:

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../push/domain/intensidad_notif.dart';
 import '../data/nudges_prefs.dart';
 import '../data/nudges_repository.dart';
 
@@ -17,17 +18,25 @@ class NudgesUiConfig {
     this.activo = true,
     this.silencioInicio = 22,
     this.silencioFin = 8,
+    this.intensidad = IntensidadNotif.intenso,
   });
 
   final bool activo;
   final int silencioInicio;
   final int silencioFin;
+  final IntensidadNotif intensidad;
 
-  NudgesUiConfig copyWith({bool? activo, int? silencioInicio, int? silencioFin}) =>
+  NudgesUiConfig copyWith({
+    bool? activo,
+    int? silencioInicio,
+    int? silencioFin,
+    IntensidadNotif? intensidad,
+  }) =>
       NudgesUiConfig(
         activo: activo ?? this.activo,
         silencioInicio: silencioInicio ?? this.silencioInicio,
         silencioFin: silencioFin ?? this.silencioFin,
+        intensidad: intensidad ?? this.intensidad,
       );
 }
 
@@ -48,6 +57,7 @@ class NudgesConfigController extends StateNotifier<NudgesUiConfig> {
           activo: c.activo,
           silencioInicio: c.silencioInicio,
           silencioFin: c.silencioFin,
+          intensidad: IntensidadNotif.fromJson(c.intensidad),
         );
       }
     } catch (_) {
@@ -66,6 +76,15 @@ class NudgesConfigController extends StateNotifier<NudgesUiConfig> {
     state = state.copyWith(silencioInicio: inicio, silencioFin: fin);
     try {
       await _repo.actualizar(silencioInicio: inicio, silencioFin: fin);
+    } catch (_) {}
+  }
+
+  /// Cambia la intensidad de los avisos (optimista: el dial responde ya y la
+  /// red sincroniza en segundo plano).
+  Future<void> cambiarIntensidad(IntensidadNotif v) async {
+    state = state.copyWith(intensidad: v);
+    try {
+      await _repo.actualizar(intensidad: v.toJson());
     } catch (_) {}
   }
 }

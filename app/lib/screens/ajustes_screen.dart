@@ -22,6 +22,7 @@ import '../features/matix/presentation/accesibilidad_screen.dart';
 import '../features/memoria/presentation/sobre_mi_screen.dart';
 import '../features/modelos/presentation/modelo_screen.dart';
 import '../features/nudges/providers/nudges_providers.dart';
+import '../features/push/domain/intensidad_notif.dart';
 import '../features/mascota/domain/dosificacion.dart';
 import '../features/mascota/providers/mascota_providers.dart';
 import '../features/papelera/presentation/papelera_screen.dart';
@@ -435,6 +436,9 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
 
           const _Seccion('Nudges de urgencia'),
           const _NudgesTile(),
+
+          const _Seccion('Intensidad de los avisos'),
+          const _IntensidadAvisosTile(),
 
           const _Seccion('Disponibilidad'),
           const _DisponibilidadTile(),
@@ -1940,6 +1944,224 @@ class _NivelChip extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Dial de INTENSIDAD de los avisos (rendición de cuentas + asistencia):
+/// suave / medio / intenso / máximo. Arranca en intenso (lo que el dueño
+/// quiere); se baja para calibrarlo viviéndolo. Vive en el cerebro
+/// (config_nudges) y viaja en cada push; la app la mapea al mecanismo Android.
+/// En 'máximo' guía honesto a conceder lo que el fabricante (Honor/MagicOS)
+/// exige para el full-screen — sin eso, el modo máximo no entrega.
+class _IntensidadAvisosTile extends ConsumerWidget {
+  const _IntensidadAvisosTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cfg = ref.watch(nudgesConfigProvider);
+    final ctrl = ref.read(nudgesConfigProvider.notifier);
+    final actual = cfg.intensidad;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: MatixColors.card,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Qué tan fuerte te aviso',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: MatixColors.text,
+            ),
+          ),
+          const SizedBox(height: 2),
+          const Text(
+            'La fuerza está en la insistencia y la presencia, nunca en el tono: '
+            'siempre te pregunto directo, sin reproche.',
+            style: TextStyle(fontSize: 12, color: MatixColors.muted),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final i in IntensidadNotif.values)
+                _PildoraIntensidad(
+                  texto: i.etiqueta,
+                  activo: i == actual,
+                  onTap: () => ctrl.cambiarIntensidad(i),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            actual.descripcion,
+            style: const TextStyle(
+              fontSize: 12, color: MatixColors.text, height: 1.35),
+          ),
+          if (actual == IntensidadNotif.maximo) ...[
+            const SizedBox(height: 12),
+            const _GuiaMaximo(),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Píldora seleccionable del dial de intensidad (mismo lenguaje visual que los
+/// chips de Matix).
+class _PildoraIntensidad extends StatelessWidget {
+  const _PildoraIntensidad({
+    required this.texto,
+    required this.activo,
+    required this.onTap,
+  });
+  final String texto;
+  final bool activo;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: activo
+          ? MatixColors.accent
+          : MatixColors.accent.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(99),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(99),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Text(
+            texto,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: activo ? Colors.white : MatixColors.accent,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Guía honesta para que el modo MÁXIMO entregue de verdad en Honor/MagicOS:
+/// batería sin restricciones + permiso de pantalla completa + autoarranque
+/// manual. Reusa los servicios que ya existen (no duplica).
+class _GuiaMaximo extends ConsumerWidget {
+  const _GuiaMaximo();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final exenta = ref.watch(exencionBateriaProvider).valueOrNull ?? false;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: MatixColors.amber.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: MatixColors.amber.withValues(alpha: 0.40)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded,
+                  size: 16, color: MatixColors.amber),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Para el modo máximo (alarma sobre la pantalla), el '
+                  'fabricante (Honor/MagicOS) exige unos permisos extra. Sin '
+                  'ellos, el sistema bloquea el full-screen.',
+                  style: TextStyle(fontSize: 12, color: MatixColors.text,
+                      height: 1.35),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _PasoMaximo(
+            ok: exenta,
+            texto: exenta
+                ? 'Batería: sin restricciones (OK).'
+                : 'Batería: concédela arriba en "Entrega en background".',
+          ),
+          const SizedBox(height: 8),
+          _PasoMaximo(
+            ok: null,
+            texto: 'Pantalla completa: concédele el permiso a Matix.',
+            cta: 'Permitir',
+            onCta: () async {
+              await ref
+                  .read(wakeWordBgServiceProvider)
+                  .pedirFullScreenIntent();
+            },
+          ),
+          const SizedBox(height: 8),
+          const _PasoMaximo(
+            ok: null,
+            texto: 'Honor/MagicOS: Ajustes > Batería > Lanzamiento de apps → '
+                'Matix en manual (Autoarranque + Ejecución en segundo plano). '
+                'Si no, el SO la frena.',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PasoMaximo extends StatelessWidget {
+  const _PasoMaximo({
+    required this.ok,
+    required this.texto,
+    this.cta,
+    this.onCta,
+  });
+  final bool? ok; // true=hecho, false=pendiente, null=manual (sin estado)
+  final String texto;
+  final String? cta;
+  final VoidCallback? onCta;
+
+  @override
+  Widget build(BuildContext context) {
+    final icono = ok == true
+        ? Icons.check_circle_outline
+        : (ok == false ? Icons.radio_button_unchecked : Icons.chevron_right);
+    final color = ok == true ? MatixColors.green : MatixColors.muted;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icono, size: 16, color: color),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            texto,
+            style: const TextStyle(fontSize: 12, color: MatixColors.muted,
+                height: 1.35),
+          ),
+        ),
+        if (cta != null && onCta != null)
+          TextButton(
+            onPressed: onCta,
+            style: TextButton.styleFrom(
+              foregroundColor: MatixColors.accent,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 30),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text(cta!),
+          ),
+      ],
     );
   }
 }

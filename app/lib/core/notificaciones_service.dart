@@ -8,8 +8,11 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
+import '../features/push/application/asistencia_background.dart'
+    show manejarTapAsistencia;
 import '../features/push/application/rendicion_cuentas_background.dart'
     show manejarTapRendicionCuentas;
+import '../features/push/domain/intensidad_notif.dart';
 
 /// Handler de tap en BACKGROUND / app cerrada.
 ///
@@ -31,6 +34,9 @@ void manejarTapNotificacionEnBackground(NotificationResponse resp) {
     // Fire-and-forget: el isolate de background tiene timeout corto. El handler
     // valida y llama al cerebro; nunca lanza.
     manejarTapRendicionCuentas(tareaId: tareaId, accion: accion);
+  } else if (payload.startsWith('as:')) {
+    final eventoId = payload.substring('as:'.length);
+    manejarTapAsistencia(eventoId: eventoId, accion: accion);
   }
 }
 
@@ -117,6 +123,13 @@ class NotificacionesService {
             );
             return;
           }
+          if (accion != null && payload != null && payload.startsWith('as:')) {
+            manejarTapAsistencia(
+              eventoId: payload.substring('as:'.length),
+              accion: accion,
+            );
+            return;
+          }
           _onTapHandler?.call(payload);
         },
         // App CERRADA / background: top-level handler para actions de notif.
@@ -129,12 +142,32 @@ class NotificacionesService {
       // en algunos OEM la notificación no se muestra) y es idempotente.
       final android = _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
+      // Tres canales por importancia: el heads-up y el full-screen los gobierna
+      // la importancia del canal (no se puede subir por-noti en Android 8+), por
+      // eso la intensidad elige canal. Idempotente.
       await android?.createNotificationChannel(
         const AndroidNotificationChannel(
-          _canalId,
+          _canalId, // matix_recordatorios (alta) — heads-up
           _canalNombre,
           description: _canalDescripcion,
           importance: Importance.high,
+        ),
+      );
+      await android?.createNotificationChannel(
+        const AndroidNotificationChannel(
+          canalSuave, // importancia default — notificación estándar, sin saltar
+          'Avisos suaves',
+          description: 'Avisos sin interrumpir, para la intensidad suave.',
+          importance: Importance.defaultImportance,
+        ),
+      );
+      await android?.createNotificationChannel(
+        const AndroidNotificationChannel(
+          canalCritico, // máxima — habilita el full-screen del modo máximo
+          'Avisos críticos',
+          description:
+              'Lo crítico vencido: puede aparecer como alarma sobre la pantalla.',
+          importance: Importance.max,
         ),
       );
     } catch (e) {
@@ -353,6 +386,8 @@ class NotificacionesService {
     required String cuerpo,
     required List<String> acciones,
     required String payload,
+    IntensidadNotif intensidad = IntensidadNotif.intenso,
+    bool critico = false,
   }) async {
     if (!_inicializado) await inicializar();
     final botones = <AndroidNotificationAction>[];
@@ -369,14 +404,27 @@ class NotificacionesService {
         cancelNotification: true,
       ));
     }
+    // La intensidad elige el mecanismo Android (canal/heads-up/persistente/
+    // full-screen). Mapeo PURO en `intensidad_notif.dart`.
+    final m = mecanismoDe(intensidad, critico: critico);
+    final importancia = m.canal == canalSuave
+        ? Importance.defaultImportance
+        : (m.canal == canalCritico ? Importance.max : Importance.high);
     final detalles = NotificationDetails(
       android: AndroidNotificationDetails(
-        _canalId,
-        _canalNombre,
+        m.canal,
+        _nombreCanal(m.canal),
         channelDescription: _canalDescripcion,
-        importance: Importance.high,
-        priority: Priority.high,
+        importance: importancia,
+        priority: m.headsUp ? Priority.high : Priority.defaultPriority,
         actions: botones,
+        // Persistente (intenso/máximo): no se desliza; se va al resolver con un
+        // botón (cancelNotification:true).
+        ongoing: m.persistente,
+        // Full-screen (máximo + crítico): aparece sobre lo que uses, como alarma.
+        fullScreenIntent: m.fullScreen,
+        category:
+            m.fullScreen ? AndroidNotificationCategory.alarm : null,
         // Cuerpo expandible (la lista de tareas puede ser larga).
         styleInformation: BigTextStyleInformation(cuerpo),
       ),
@@ -388,12 +436,23 @@ class NotificacionesService {
     }
   }
 
+  String _nombreCanal(String canal) {
+    if (canal == canalSuave) return 'Avisos suaves';
+    if (canal == canalCritico) return 'Avisos críticos';
+    return _canalNombre;
+  }
+
   /// Mapa de IDs → etiqueta visible del botón. Sincronizado con el cerebro:
-  /// `cerebro/app/matix/rendicion_cuentas.py:armar_contenido`.
+  /// `rendicion_cuentas.py` (tareas) y `asistencia_eventos.py` (eventos).
   static const _etiquetasAcciones = <String, String>{
-    'hecho': 'Sí, lo hice',
-    'mas_tarde': 'Más tarde hoy',
-    'manana': 'Mañana',
+    // Tareas — "¿Hiciste X?": directo, de un toque, sin reproche.
+    'hecho': 'Sí',
+    'mas_tarde': 'No, más tarde',
+    'manana': 'No, mañana',
+    // Asistencia — "¿Fuiste a X?".
+    'si_fui': 'Sí fui',
+    'no_fui': 'No fui',
+    'reprogramar': 'Reprogramar',
   };
 
   /// Cuántas notificaciones hay programadas (diagnóstico). 0 si la lectura

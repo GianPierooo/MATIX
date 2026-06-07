@@ -156,6 +156,31 @@ batería (`permission_handler` + `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`); si
 el OEM bloquea el diálogo, abre Ajustes de la app. Migración 0041
 (`pings_rendicion_cuentas`). Detalle en `docs/Rendicion_Cuentas.md`.
 
+Extensión (2026-06-07, migración 0044):
+- **Asistencia a eventos fuera de casa** (`asistencia_eventos.py`): tras un
+  evento con `ubicacion` (clase/gym/cita) que termina, push "¿Fuiste a X?" con
+  "Sí fui" / "No fui" / "Reprogramar". La respuesta vive en `eventos.asistencia`
+  y alimenta el motor de evolución. Endpoint `/push/asistencia/accion`; tipo de
+  push `asistencia_evento`, payload `as:<id>`, handler
+  `manejarTapAsistencia`. Dedup por `asistencia_preguntada_en`.
+- **Tareas re-etiquetadas** "¿Hiciste X?": Sí / No, mañana / No, más tarde
+  (mismo motor `hecho`/`manana`/`mas_tarde`; "más tarde" solo con ventana útil).
+- **Intensidad graduable** (`config_nudges.intensidad`, dial en Ajustes:
+  suave/medio/intenso/máximo, default intenso). El cerebro la manda en el push;
+  la app la mapea (puro, `intensidad_notif.dart`) a mecanismos Android:
+  suave=estándar, medio=heads-up, intenso=heads-up+persistente, máximo=+full-
+  screen para lo crítico vencido. Canales: `matix_suave` (default),
+  `matix_recordatorios` (alta), `matix_critico` (máx). La cadencia de re-alerta
+  escala con la intensidad (20/12/6/3 h).
+- **Evolución alimentada por dos señales reales**: tasa de cierre de tareas +
+  tasa de asistencia (`combinar_tasas`, conservador: la peor manda → faltar a
+  eventos también achica el set).
+- **Silencio nocturno** gatea ambos ticks (ni el máximo dispara full-screen
+  mientras duermes). MagicOS: la guía del modo máximo (batería + full-screen
+  intent + autoarranque) reusa `entrega_background_service` y el canal nativo de
+  `wakeword_bg_service`. Lo nativo (heads-up/full-screen/ongoing real) es de
+  DISPOSITIVO: no corre en CI; cubierto por tests puros del mapeo + contratos.
+
 ### Capa 6 — Agente de PC (6.0a cimiento · 6.0b lectura · 6.1 organización)
 
 Daemon local `agente_pc/` (Python) que corre en la PC del usuario y abre una

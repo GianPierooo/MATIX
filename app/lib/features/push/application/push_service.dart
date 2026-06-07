@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/notificaciones_service.dart';
+import '../domain/intensidad_notif.dart';
 import '../data/push_repository.dart';
 
 /// Handler de push en BACKGROUND / app terminada. Top-level con
@@ -17,27 +18,47 @@ import '../data/push_repository.dart';
 Future<void> manejarPushEnBackground(RemoteMessage message) async {
   try {
     final data = message.data;
-    if (data['tipo'] != 'rendicion_cuentas') return;
-    final tareasIds = (data['tareas_ids'] as String?) ?? '';
-    final acciones = ((data['acciones'] as String?) ?? '').split(',')
-        .where((a) => a.isNotEmpty).toList();
+    final tipo = data['tipo'];
     final titulo = message.notification?.title ?? 'Matix';
     final cuerpo = message.notification?.body ?? '';
-    if (tareasIds.isEmpty || acciones.isEmpty) return;
-    // Una notificación por tarea (los botones actúan sobre UNA tarea — si la
-    // lista trae varias, mostramos una con los botones para la primera; las
-    // demás caen por el push periódico siguiente. Esto es deliberado: que
-    // sean acciones únicas y atómicas, no batch).
-    final primera = tareasIds.split(',').first;
+    final acciones = ((data['acciones'] as String?) ?? '')
+        .split(',')
+        .where((a) => a.isNotEmpty)
+        .toList();
+    final intensidad = IntensidadNotif.fromJson(data['intensidad'] as String?);
+    final critico = data['critico'] == 'true';
+    if (acciones.isEmpty) return;
     final notif = NotificacionesService();
     await notif.inicializar();
-    await notif.mostrarConAcciones(
-      id: 990300,
-      titulo: titulo,
-      cuerpo: cuerpo,
-      acciones: acciones,
-      payload: 'rc:$primera',
-    );
+
+    if (tipo == 'rendicion_cuentas') {
+      final tareasIds = (data['tareas_ids'] as String?) ?? '';
+      if (tareasIds.isEmpty) return;
+      // Los botones actúan sobre UNA tarea (la primera); las demás caen por el
+      // tick siguiente. Acciones únicas y atómicas, no batch.
+      final primera = tareasIds.split(',').first;
+      await notif.mostrarConAcciones(
+        id: 990300,
+        titulo: titulo,
+        cuerpo: cuerpo,
+        acciones: acciones,
+        payload: 'rc:$primera',
+        intensidad: intensidad,
+        critico: critico,
+      );
+    } else if (tipo == 'asistencia_evento') {
+      final eventoId = (data['evento_id'] as String?) ?? '';
+      if (eventoId.isEmpty) return;
+      await notif.mostrarConAcciones(
+        id: 990400,
+        titulo: titulo,
+        cuerpo: cuerpo,
+        acciones: acciones,
+        payload: 'as:$eventoId',
+        intensidad: intensidad,
+        critico: critico,
+      );
+    }
   } catch (e) {
     debugPrint('Push BG: no pude repintar notif ($e).');
   }
@@ -67,19 +88,42 @@ class PushService {
       FirebaseMessaging.onMessage.listen((m) {
         final n = m.notification;
         if (n == null) return;
-        // Push de rendición de cuentas → notif CON botones de acción.
-        if (m.data['tipo'] == 'rendicion_cuentas') {
+        final tipo = m.data['tipo'];
+        final acciones = ((m.data['acciones'] as String?) ?? '')
+            .split(',')
+            .where((a) => a.isNotEmpty)
+            .toList();
+        final intensidad =
+            IntensidadNotif.fromJson(m.data['intensidad'] as String?);
+        final critico = m.data['critico'] == 'true';
+        // Rendición de cuentas (tareas) → notif CON botones.
+        if (tipo == 'rendicion_cuentas') {
           final tareasIds = (m.data['tareas_ids'] as String?) ?? '';
-          final acciones = ((m.data['acciones'] as String?) ?? '')
-              .split(',').where((a) => a.isNotEmpty).toList();
           if (tareasIds.isNotEmpty && acciones.isNotEmpty) {
-            final primera = tareasIds.split(',').first;
             _notif.mostrarConAcciones(
               id: 990300,
               titulo: n.title ?? 'Matix',
               cuerpo: n.body ?? '',
               acciones: acciones,
-              payload: 'rc:$primera',
+              payload: 'rc:${tareasIds.split(',').first}',
+              intensidad: intensidad,
+              critico: critico,
+            );
+            return;
+          }
+        }
+        // Asistencia a eventos → notif CON botones.
+        if (tipo == 'asistencia_evento') {
+          final eventoId = (m.data['evento_id'] as String?) ?? '';
+          if (eventoId.isNotEmpty && acciones.isNotEmpty) {
+            _notif.mostrarConAcciones(
+              id: 990400,
+              titulo: n.title ?? 'Matix',
+              cuerpo: n.body ?? '',
+              acciones: acciones,
+              payload: 'as:$eventoId',
+              intensidad: intensidad,
+              critico: critico,
             );
             return;
           }
