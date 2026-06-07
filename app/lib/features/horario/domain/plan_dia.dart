@@ -138,6 +138,42 @@ class Sugerencia {
   }
 }
 
+/// Un HUECO libre del día (apartado «Huecos libres»): la ventana real que queda
+/// libre tras colocar todo, su duración legible, y UNA sugerencia dosificada que
+/// de verdad cabe (o ninguna). La casa el cerebro con su motor determinista
+/// (instantáneo, sin tokens): la app solo la muestra y deja tocarla.
+@immutable
+class Hueco {
+  const Hueco({
+    required this.inicio,
+    required this.fin,
+    required this.durMin,
+    required this.etiqueta,
+    this.sugerencia,
+  });
+
+  final String inicio; // "HH:MM"
+  final String fin; // "HH:MM"
+  final int durMin;
+  final String etiqueta; // duración legible: "1 h 30 min"
+  final Sugerencia? sugerencia;
+
+  int get inicioMin => minDesdeHHMM(inicio);
+
+  /// Clave estable del hueco (para ocultarlo al aceptar/descartar en la vista).
+  String get clave => 'hueco|$inicio|$fin';
+
+  factory Hueco.fromJson(Map<String, dynamic> j) => Hueco(
+        inicio: (j['inicio'] as String?) ?? '00:00',
+        fin: (j['fin'] as String?) ?? '00:00',
+        durMin: (j['dur_min'] as num?)?.toInt() ?? 0,
+        etiqueta: (j['etiqueta'] as String?) ?? '',
+        sugerencia: j['sugerencia'] == null
+            ? null
+            : Sugerencia.fromJson(j['sugerencia'] as Map<String, dynamic>),
+      );
+}
+
 /// El plan del día que devuelve el cerebro (capa de horario).
 @immutable
 class PlanDia {
@@ -148,6 +184,7 @@ class PlanDia {
     required this.bloques,
     required this.fuera,
     this.sugerencias = const [],
+    this.huecos = const [],
     this.desde,
   });
 
@@ -158,6 +195,7 @@ class PlanDia {
   final List<BloquePlan> bloques;
   final List<FueraPlan> fuera;
   final List<Sugerencia> sugerencias;
+  final List<Hueco> huecos;
 
   bool get vacio => bloques.isEmpty;
   bool get esReplan => desde != null;
@@ -176,6 +214,9 @@ class PlanDia {
             .toList(),
         sugerencias: ((j['sugerencias'] as List<dynamic>?) ?? const [])
             .map((e) => Sugerencia.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        huecos: ((j['huecos'] as List<dynamic>?) ?? const [])
+            .map((e) => Hueco.fromJson(e as Map<String, dynamic>))
             .toList(),
       );
 }

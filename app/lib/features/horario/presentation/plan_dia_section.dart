@@ -24,12 +24,8 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
   final Set<String> _ocultos = {};
   // Sugerencias que el usuario aceptó en un hueco → bloques tentativos locales.
   final List<BloquePlan> _aceptadas = [];
-  // Claves de sugerencias ya usadas (no volver a ofrecer la misma en otro hueco).
-  final Set<String> _sugUsadas = {};
-  // Huecos donde el usuario descartó la sugerencia (clave del bloque previo).
-  final Set<String> _huecosSaltados = {};
-  // "Otra": contador de rotación por hueco (clave del bloque previo).
-  final Map<String, int> _huecoOtra = {};
+  // Huecos ya resueltos en la vista (aceptados o descartados): no se re-ofrecen.
+  final Set<String> _huecosOcultos = {};
   bool _trabajando = false;
 
   List<BloquePlan> _visibles(PlanDia plan) {
@@ -43,10 +39,12 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
     return lista;
   }
 
-  void _aceptarSugerencia(Sugerencia s, int iniMin, int hueco) {
+  void _aceptarHueco(Hueco h) {
+    final s = h.sugerencia;
+    if (s == null) return;
     setState(() {
-      _aceptadas.add(s.aBloque(iniMin, hueco));
-      _sugUsadas.add(s.clave);
+      _aceptadas.add(s.aBloque(h.inicioMin, h.durMin));
+      _huecosOcultos.add(h.clave);
     });
     _aviso('Listo, lo metí al día. Si no, lo sueltas nomás.');
   }
@@ -119,9 +117,7 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
       _overrides.clear();
       _ocultos.clear();
       _aceptadas.clear();
-      _sugUsadas.clear();
-      _huecosSaltados.clear();
-      _huecoOtra.clear();
+      _huecosOcultos.clear();
     });
     ref.read(replanActivoProvider.notifier).state = true;
     ref.invalidate(planDiaProvider);
@@ -161,37 +157,6 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
       ..showSnackBar(SnackBar(content: Text(texto)));
   }
 
-  /// Un hueco libre: si hay una sugerencia que cabe (y no fue descartada) la
-  /// ofrece tocable; si no, lo muestra como tiempo libre, sin culpa. Dosifica:
-  /// una sola sugerencia por hueco.
-  Widget _huecoWidget(PlanDia plan, {required BloquePlan prev, required int hueco}) {
-    final key = prev.clave;
-    final descartado = _huecosSaltados.contains(key);
-    final sug = descartado
-        ? null
-        : elegirSugerencia(
-            plan.sugerencias,
-            hueco,
-            usadas: _sugUsadas,
-            saltar: _huecoOtra[key] ?? 0,
-          );
-    if (sug == null) return _LibreFila(minutos: hueco);
-
-    // ¿Hay otra alternativa distinta para este hueco? (para mostrar "Otra").
-    final caben = plan.sugerencias
-        .where((s) => !_sugUsadas.contains(s.clave) && s.durMin <= hueco)
-        .length;
-    return _SugerenciaFila(
-      hueco: hueco,
-      sugerencia: sug,
-      hayOtra: caben > 1,
-      habilitado: !_trabajando,
-      onHacer: () => _aceptarSugerencia(sug, prev.finMin, hueco),
-      onOtra: () => setState(() => _huecoOtra[key] = (_huecoOtra[key] ?? 0) + 1),
-      onSaltar: () => setState(() => _huecosSaltados.add(key)),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final planAsync = ref.watch(planDiaProvider);
@@ -223,25 +188,32 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
             if (bloques.isEmpty) {
               return _Vacio(onGenerar: () => ref.invalidate(planDiaProvider));
             }
+            // Apartado de huecos libres: ventanas reales que quedan libres, con
+            // una sugerencia dosificada que cabe (la casa el cerebro). Se
+            // ocultan los micro-huecos y los ya resueltos en la vista.
+            final huecos = plan.huecos
+                .where((h) =>
+                    h.durMin >= 20 && !_huecosOcultos.contains(h.clave))
+                .toList();
             return Column(
               children: [
-                for (var i = 0; i < bloques.length; i++) ...[
-                  if (i > 0 &&
-                      huecoVisible(bloques[i - 1].fin, bloques[i].inicio))
-                    _huecoWidget(
-                      plan,
-                      prev: bloques[i - 1],
-                      hueco: huecoMin(bloques[i - 1].fin, bloques[i].inicio),
-                    ),
+                for (final b in bloques)
                   _BloqueFila(
-                    bloque: bloques[i],
-                    colorCurso: colorPorCurso[bloques[i].titulo],
+                    bloque: b,
+                    colorCurso: colorPorCurso[b.titulo],
                     habilitado: !_trabajando,
-                    onHecho: () => _hecho(bloques[i]),
-                    onSaltar: () => _saltar(bloques[i]),
-                    onEditarHora: () => _editarHora(bloques[i]),
+                    onHecho: () => _hecho(b),
+                    onSaltar: () => _saltar(b),
+                    onEditarHora: () => _editarHora(b),
                   ),
-                ],
+                if (huecos.isNotEmpty)
+                  _HuecosApartado(
+                    huecos: huecos,
+                    habilitado: !_trabajando,
+                    onHacer: _aceptarHueco,
+                    onSaltar: (h) =>
+                        setState(() => _huecosOcultos.add(h.clave)),
+                  ),
                 if (plan.fuera.isNotEmpty) _FueraFila(fuera: plan.fuera),
               ],
             );
@@ -496,160 +468,177 @@ class _AccionIcono extends StatelessWidget {
   }
 }
 
-class _LibreFila extends StatelessWidget {
-  const _LibreFila({required this.minutos});
-  final int minutos;
+/// Apartado «Huecos libres»: su propia sección legible con las ventanas libres
+/// del día. Para cada hueco, UNA sugerencia dosificada tocable que de verdad
+/// cabe (la casa el cerebro), o el hueco como tiempo libre, sin culpa.
+class _HuecosApartado extends StatelessWidget {
+  const _HuecosApartado({
+    required this.huecos,
+    required this.habilitado,
+    required this.onHacer,
+    required this.onSaltar,
+  });
+  final List<Hueco> huecos;
+  final bool habilitado;
+  final void Function(Hueco) onHacer;
+  final void Function(Hueco) onSaltar;
+
   @override
   Widget build(BuildContext context) {
-    final h = minutos ~/ 60;
-    final m = minutos % 60;
-    final txt = h > 0 ? '${h}h${m > 0 ? ' ${m}min' : ''}' : '${m}min';
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(28, 2, 16, 2),
-      child: Row(
-        children: [
-          const Icon(Icons.more_vert, size: 14, color: MatixColors.muted),
-          const SizedBox(width: 6),
-          Text(
-            'Libre · $txt',
-            style: const TextStyle(
-              fontSize: 11.5,
-              color: MatixColors.muted,
-              fontStyle: FontStyle.italic,
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(22, 16, 14, 6),
+          child: Row(
+            children: [
+              Icon(Icons.bubble_chart_outlined,
+                  size: 14, color: MatixColors.muted),
+              SizedBox(width: 6),
+              Text(
+                'HUECOS LIBRES',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.0,
+                  color: MatixColors.muted,
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+        for (final h in huecos)
+          _HuecoFila(
+            hueco: h,
+            habilitado: habilitado,
+            onHacer: () => onHacer(h),
+            onSaltar: () => onSaltar(h),
+          ),
+      ],
     );
   }
 }
 
-/// Un hueco libre con UNA sugerencia tocable (skill o tarea de proyecto corto).
-/// Es oferta, no relleno: el usuario la hace, pide otra, o la deja pasar.
-class _SugerenciaFila extends StatelessWidget {
-  const _SugerenciaFila({
+/// Una fila del apartado: la ventana libre legible ("09:00–10:00 · Libre 1 h")
+/// y, si hay, UNA sugerencia dosificada tocable (skill o tarea de proyecto).
+class _HuecoFila extends StatelessWidget {
+  const _HuecoFila({
     required this.hueco,
-    required this.sugerencia,
-    required this.hayOtra,
     required this.habilitado,
     required this.onHacer,
-    required this.onOtra,
     required this.onSaltar,
   });
-  final int hueco;
-  final Sugerencia sugerencia;
-  final bool hayOtra;
+  final Hueco hueco;
   final bool habilitado;
   final VoidCallback onHacer;
-  final VoidCallback onOtra;
   final VoidCallback onSaltar;
 
   @override
   Widget build(BuildContext context) {
-    final h = hueco ~/ 60;
-    final m = hueco % 60;
-    final libre = h > 0 ? '${h}h${m > 0 ? ' ${m}min' : ''}' : '${m}min';
-    final contexto = sugerencia.proyecto ?? sugerencia.skill;
-    final color = _colorTipo(sugerencia.tipo, null);
+    final sug = hueco.sugerencia;
+    final color = _colorTipo(sug?.tipo ?? 'tarea', null);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(28, 4, 16, 4),
+      padding: const EdgeInsets.fromLTRB(16, 3, 16, 3),
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
         decoration: BoxDecoration(
           color: MatixColors.card,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.30)),
+          border: Border.all(
+            color: sug == null
+                ? MatixColors.hairline
+                : color.withValues(alpha: 0.30),
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Icon(Icons.more_vert, size: 14, color: MatixColors.muted),
-                const SizedBox(width: 4),
+                const Icon(Icons.schedule, size: 13, color: MatixColors.muted),
+                const SizedBox(width: 6),
                 Text(
-                  'Libre · $libre',
+                  '${hueco.inicio}–${hueco.fin}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: MatixColors.text,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Libre · ${hueco.etiqueta}',
                   style: const TextStyle(
                     fontSize: 11.5,
                     color: MatixColors.muted,
                     fontStyle: FontStyle.italic,
                   ),
                 ),
-                const Spacer(),
-                Text(
-                  'aprovecha si quieres',
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    color: MatixColors.muted.withValues(alpha: 0.8),
-                  ),
-                ),
               ],
             ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Container(width: 3, height: 30, color: color),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        sugerencia.titulo,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600,
-                          color: MatixColors.text,
-                          height: 1.3,
+            if (sug != null) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Container(width: 3, height: 30, color: color),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          sug.titulo,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
+                            color: MatixColors.text,
+                            height: 1.3,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        contexto != null
-                            ? '$contexto · ~${sugerencia.durMin}min'
-                            : '~${sugerencia.durMin}min',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: MatixColors.muted,
+                        const SizedBox(height: 2),
+                        Text(
+                          () {
+                            final ctx = sug.proyecto ?? sug.skill;
+                            return ctx != null
+                                ? '$ctx · ~${sug.durMin} min'
+                                : '~${sug.durMin} min';
+                          }(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: MatixColors.muted,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _SugChip(
-                  texto: 'Hacer',
-                  primario: true,
-                  enabled: habilitado,
-                  onTap: onHacer,
-                ),
-                if (hayOtra)
+                ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
                   _SugChip(
-                    texto: 'Otra',
+                    texto: 'Hacer',
+                    primario: true,
+                    enabled: habilitado,
+                    onTap: onHacer,
+                  ),
+                  _SugChip(
+                    texto: 'Ahora no',
                     primario: false,
                     enabled: habilitado,
-                    onTap: onOtra,
+                    onTap: onSaltar,
                   ),
-                _SugChip(
-                  texto: 'Ahora no',
-                  primario: false,
-                  enabled: habilitado,
-                  onTap: onSaltar,
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

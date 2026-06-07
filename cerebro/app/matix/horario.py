@@ -43,6 +43,10 @@ _CFG_DEFAULT: dict[str, Any] = {
     # Antes el planificador apuraba cosas hasta las 23:00 si dormías a las 23:00.
     # Ahora resta este buffer para no proponer "hoy 22:30" como bloque de trabajo.
     "buffer_pre_sueno_min": 60,
+    # Buffer de TRANSICIÓN tras un compromiso FUERA DE CASA (clase, evento con
+    # ubicación): volver/reacomodarse antes de retomar trabajo de casa. Default
+    # global; cada evento puede traer su override (`transicion_min`).
+    "transicion_min": 60,
     "dur_trabajo_min": 90,
     "dur_skill_min": 30,
     "dur_tarea_min": 20,
@@ -314,6 +318,131 @@ def anclas_fijas(
     return out
 
 
+def bloques_transicion(
+    fijos: list[dict[str, Any]], *, transicion_default_min: int
+) -> list[dict[str, Any]]:
+    """Tras cada compromiso FUERA DE CASA (clase de uni o evento con `ubicacion`)
+    reserva un bloque de TRANSICIÓN —volver a casa / reacomodarse— donde el
+    planificador NO coloca trabajo de casa. Usa el override del evento
+    (`transicion_min`) si lo trae; si no, el default global. 0 (o negativo) =
+    sin transición para ese compromiso. SOLO después (el `buffer_min` corto ya
+    pad-ea ambos lados). PURO y testeable.
+
+    Espera que cada `fijo` traiga `fuera_casa: bool` y opcionalmente
+    `transicion_min` (override). No genera transición tras una transición."""
+    out: list[dict[str, Any]] = []
+    for c in fijos:
+        if not c.get("fuera_casa"):
+            continue
+        override = c.get("transicion_min")
+        try:
+            dur = int(transicion_default_min if override is None else override)
+        except (TypeError, ValueError):
+            dur = int(transicion_default_min)
+        if dur <= 0:
+            continue
+        fin = c.get("fin_min")
+        if fin is None:
+            continue
+        out.append({"ini_min": int(fin), "fin_min": int(fin) + dur,
+                    "tipo": "transicion", "titulo": "Transición"})
+    return out
+
+
+def accion_siguiente_proyecto(
+    proyecto: dict[str, Any],
+    candidatos: list[dict[str, Any]],
+    *,
+    dur_trabajo_min: int,
+) -> dict[str, Any]:
+    """La ACCIÓN SIGUIENTE de un proyecto de trabajo para el plan, derivada de su
+    descomposición por horizontes: el primer nodo fino DESBLOQUEADO (`candidatos`,
+    ya filtrados por `planificador_diario.candidatos_proyecto`). Si el proyecto no
+    tiene árbol o no le queda nodo abierto, sintetiza una acción de PLANIFICACIÓN
+    («Definir el siguiente paso de X») — así NINGÚN proyecto activo queda sin
+    acción siguiente (mata el bug «0%, sin acción»). Es trabajo profundo (pelea
+    por el pico), pero con `orden` alto: nunca desplaza al set comprometido. PURO."""
+    pid = proyecto.get("id")
+    nombre = proyecto.get("nombre") or "tu proyecto"
+    prio = proyecto.get("prioridad") or 9
+    base = {
+        "tipo": "trabajo", "dur": int(dur_trabajo_min),
+        "prioridad": prio, "orden": 120,
+        "proyecto_id": pid, "proyecto": nombre, "auto_siguiente": True,
+    }
+    if candidatos:
+        n = candidatos[0]
+        return {**base, "titulo": n.get("titulo") or "Siguiente paso",
+                "nodo_id": n.get("id")}
+    return {**base, "titulo": f"Definir el siguiente paso de {nombre}",
+            "auto_planificacion": True}
+
+
+def etiqueta_duracion(mins: int) -> str:
+    """Duración legible en español: '45 min', '1 h', '1 h 30 min'. PURO."""
+    mins = max(0, int(mins))
+    h, m = divmod(mins, 60)
+    if h and m:
+        return f"{h} h {m} min"
+    if h:
+        return f"{h} h"
+    return f"{m} min"
+
+
+def huecos_libres(
+    bloques: list[dict[str, Any]], *, inicio_min: int, fin_min: int
+) -> list[dict[str, int]]:
+    """Huecos REALES que quedan libres tras colocar TODO (fijos + transiciones +
+    tentativos): el tiempo dentro de [inicio, fin] no cubierto por ningún bloque.
+    Sin buffer (es el tiempo verdaderamente libre que el usuario ve). PURO."""
+    if inicio_min >= fin_min:
+        return []
+    ocupados = fusionar_ocupados(bloques, buffer_min=0)
+    libres: list[dict[str, int]] = []
+    cursor = inicio_min
+    for oi, of in ocupados:
+        if of <= cursor:
+            continue
+        if oi > cursor:
+            fin = min(oi, fin_min)
+            if fin > cursor:
+                libres.append({"ini": cursor, "fin": fin, "dur": fin - cursor})
+        cursor = max(cursor, of)
+        if cursor >= fin_min:
+            break
+    if cursor < fin_min:
+        libres.append({"ini": cursor, "fin": fin_min, "dur": fin_min - cursor})
+    return [v for v in libres if v["dur"] > 0]
+
+
+def huecos_con_sugerencia(
+    huecos: list[dict[str, int]], pool: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Apartado de HUECOS LIBRES: para cada hueco, su rango + duración legible y
+    UNA sugerencia DOSIFICADA que de verdad QUEPA (la de mayor valor del pool que
+    entre en la ventana), o `None` si no hay nada pendiente que entre. Una cosa
+    por hueco (no avalancha) y no repite la misma sugerencia en dos huecos. El
+    `pool` ya viene ordenado por prioridad (lo que no entró, en orden). PURO."""
+    usados: set[int] = set()
+    out: list[dict[str, Any]] = []
+    for h in huecos:
+        dur = int(h["dur"])
+        elegida = None
+        for idx, s in enumerate(pool):
+            if idx in usados:
+                continue
+            if int(s.get("dur_min") or 0) <= dur:
+                elegida = s
+                usados.add(idx)
+                break
+        out.append({
+            "inicio": min_a_hhmm(h["ini"]), "fin": min_a_hhmm(h["fin"]),
+            "dur_min": dur, "etiqueta": etiqueta_duracion(dur),
+            "sugerencia": elegida,
+        })
+    return out
+
+
 def pool_sugerencias(fuera: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """De lo que NO entró hoy arma un pool de sugerencias ofrecibles en los huecos
     libres (práctica de skill o tarea de proyecto corto), cada una con su duración
@@ -401,12 +530,16 @@ async def _config(db: Postgrest) -> dict[str, Any]:
 
 async def _compromisos_fijos(
     db: Postgrest, *, fecha: date, anclas: list[dict[str, Any]],
-    skills_norm: set[str] | None = None,
+    skills_norm: set[str] | None = None, transicion_default_min: int = 0,
 ) -> list[dict[str, Any]]:
     """Clases de uni (sesiones_clase) + recurrentes/sueltos (eventos) + anclas,
     como rangos en minutos. NO duplica: lee de donde ya viven. Las anclas que son
     una práctica de skill NO entran acá (son tentativas, no fijas): se excluyen
-    con `skills_norm`."""
+    con `skills_norm`.
+
+    Tras cada compromiso FUERA DE CASA (clase, o evento con `ubicacion`) anexa un
+    bloque de TRANSICIÓN (`transicion_default_min`, o el override del evento) para
+    no colocar trabajo de casa pegado a la salida."""
     fijos: list[dict[str, Any]] = []
 
     # Clases de uni (dia_semana: 0=Lun..6=Dom).
@@ -428,8 +561,10 @@ async def _compromisos_fijos(
         fin = hhmm_a_min(s.get("hora_fin") or "")
         if ini is None or fin is None:
             continue
+        # Una clase es FUERA DE CASA (la uni): merece transición de vuelta.
         fijos.append({"ini_min": ini, "fin_min": fin, "tipo": "clase",
-                      "titulo": cursos.get(s.get("curso_id"), "Clase")})
+                      "titulo": cursos.get(s.get("curso_id"), "Clase"),
+                      "fuera_casa": True})
 
     # Eventos (gym y demás): sueltos del día + recurrentes que caen hoy.
     try:
@@ -447,14 +582,24 @@ async def _compromisos_fijos(
         fin = _min_evento(e, "termina_en")
         if fin is None or fin <= ini:
             fin = ini + 60  # sin término: asume 1h
+        # FUERA DE CASA si el evento tiene ubicación (gym, cita, etc.): se reserva
+        # transición de vuelta. El evento puede traer su propio `transicion_min`.
+        fuera = bool((e.get("ubicacion") or "").strip())
         fijos.append({"ini_min": ini, "fin_min": fin, "tipo": "evento",
-                      "titulo": e.get("titulo") or "Evento"})
+                      "titulo": e.get("titulo") or "Evento",
+                      "fuera_casa": fuera, "transicion_min": e.get("transicion_min")})
 
     # Anclas editables: solo las que NO son práctica de skill (esas son
     # tentativas). La lógica vive en `anclas_fijas` para testearla sin BD.
     fijos.extend(anclas_fijas(
         anclas, iso_weekday=fecha.isoweekday(), skills_norm=skills_norm,
     ))
+
+    # Transición tras lo que es fuera de casa (lógica pura, testeable sin BD).
+    if transicion_default_min:
+        fijos.extend(bloques_transicion(
+            fijos, transicion_default_min=transicion_default_min,
+        ))
 
     fijos.sort(key=lambda c: c["ini_min"])
     return fijos
@@ -549,6 +694,32 @@ async def _items_a_colocar(
         dur_tarea_min=int(cfg["dur_tarea_min"]),
     ))
 
+    # NINGÚN proyecto activo sin acción siguiente (#2): si un proyecto de trabajo
+    # no quedó representado por el set ni por una tarea de hoy, le derivo su
+    # siguiente paso del árbol (primer nodo fino abierto); si no tiene árbol/nodo,
+    # sintetizo «Definir el siguiente paso de X». Así nunca vuelve el «0%, sin
+    # acción». Determinista (selección por cálculo, sin LLM).
+    from . import planificador_diario  # lazy: evita ciclo de import
+    proy_por_id = {p["id"]: p for p in proyectos}
+    proyectos_con_item = {
+        i.get("proyecto_id") for i in items
+        if i.get("tipo") == "trabajo" and i.get("proyecto_id")
+    }
+    for pid in ids_trabajo:
+        if pid in proyectos_con_item:
+            continue
+        try:
+            nodos = await db.list(
+                "arbol_nodos", filters={"proyecto_id": pid}, order="orden.asc"
+            )
+        except Exception:  # noqa: BLE001
+            nodos = []
+        candidatos = planificador_diario.candidatos_proyecto(nodos)
+        items.append(accion_siguiente_proyecto(
+            proy_por_id.get(pid, {"id": pid, "nombre": nombre_proy.get(pid)}),
+            candidatos, dur_trabajo_min=int(cfg["dur_trabajo_min"]),
+        ))
+
     # Skills activas: slot chico opcional cada una (lo más ligero, va al final).
     # Si la skill YA tiene su rutina como compromiso fijo del día (p. ej.
     # Calistenia a las 07:00), su práctica ocurre AHÍ: no agendamos un segundo
@@ -601,6 +772,7 @@ async def plan_de_hoy_data(
 
     fijos = await _compromisos_fijos(
         db, fecha=fecha, anclas=cfg.get("anclas") or [], skills_norm=skills_norm,
+        transicion_default_min=int(cfg.get("transicion_min", 0) or 0),
     )
     desde_min = (local.hour * 60 + local.minute) if desde_ahora else None
     ventanas = ventanas_libres(
@@ -640,6 +812,22 @@ async def plan_de_hoy_data(
     fuera = [{"titulo": f["titulo"], "tipo": f["tipo"], "motivo": f["motivo"]}
              for f in colocado["fuera"]]
 
+    # Apartado de HUECOS LIBRES (#3): el tiempo que de verdad queda libre tras
+    # colocar TODO (fijos + transiciones + tentativos), con UNA sugerencia que
+    # quepa por hueco (motor determinista: el pool es lo que no entró, en orden
+    # de prioridad). Instantáneo y sin tokens.
+    fin_util = max(despertar + 30, dormir - int(cfg.get("buffer_pre_sueno_min", 0) or 0))
+    inicio_huecos = despertar if desde_min is None else max(despertar, desde_min)
+    ocupado_final = (
+        [{"ini_min": c["ini_min"], "fin_min": c["fin_min"]} for c in fijos]
+        + [{"ini_min": b["ini_min"], "fin_min": b["fin_min"]} for b in colocado["bloques"]]
+    )
+    pool = pool_sugerencias(colocado["fuera"])
+    huecos = huecos_con_sugerencia(
+        huecos_libres(ocupado_final, inicio_min=inicio_huecos, fin_min=fin_util),
+        pool,
+    )
+
     return {
         "fecha": fecha.isoformat(),
         "despierta": min_a_hhmm(despertar),
@@ -648,7 +836,9 @@ async def plan_de_hoy_data(
         "bloques": bloques,
         "fuera": fuera,
         # Pool ofrecible en los huecos libres (la app dosifica: una por hueco).
-        "sugerencias": pool_sugerencias(colocado["fuera"]),
+        "sugerencias": pool,
+        # Apartado legible de huecos libres + su sugerencia dosificada (una/hueco).
+        "huecos": huecos,
     }
 
 

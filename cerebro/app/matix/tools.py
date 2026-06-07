@@ -2247,11 +2247,13 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "description": (
                 "Ajusta las ANCLAS y límites del horario: `hora_despertar`, "
                 "`hora_dormir` (no se agenda después), `pico_inicio`/`pico_fin` "
-                "(bloque de trabajo profundo), `buffer_min`, duraciones "
+                "(bloque de trabajo profundo), `buffer_min`, `transicion_min` "
+                "(buffer de transición tras compromisos fuera de casa: clases, "
+                "eventos con ubicación), duraciones "
                 "(`dur_trabajo_min`/`dur_skill_min`/`dur_tarea_min`), y `anclas` "
                 "(lista de {titulo, inicio 'HH:MM', fin 'HH:MM', dias [1..7 ISO]}). "
                 "Para «despierto a las 6», «la calistenia es 7 a 7:45», «bloques de "
-                "trabajo de 1 hora»."
+                "trabajo de 1 hora», «deja 1 hora de transición después de la uni»."
             ),
             "parameters": {
                 "type": "object",
@@ -2261,6 +2263,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "pico_inicio": {"type": "integer"},
                     "pico_fin": {"type": "integer"},
                     "buffer_min": {"type": "integer"},
+                    "transicion_min": {"type": "integer"},
                     "dur_trabajo_min": {"type": "integer"},
                     "dur_skill_min": {"type": "integer"},
                     "dur_tarea_min": {"type": "integer"},
@@ -5367,7 +5370,8 @@ async def _ver_set_dia(db: Postgrest, args: dict) -> dict[str, Any]:
 def _formatear_plan(data: dict) -> str:
     if not data.get("bloques"):
         return "Hoy no hay bloques para agendar (¿sin ventanas libres o sin set?)."
-    etq = {"clase": "📚", "evento": "📌", "ancla": "⚓", "trabajo": "🛠️", "skill": "🎯", "tarea": "✅"}
+    etq = {"clase": "📚", "evento": "📌", "transicion": "🚶", "ancla": "⚓",
+           "trabajo": "🛠️", "skill": "🎯", "tarea": "✅"}
     lineas = []
     for b in data["bloques"]:
         marca = etq.get(b.get("tipo"), "•")
@@ -5378,6 +5382,20 @@ def _formatear_plan(data: dict) -> str:
         elif b.get("skill"):
             ctx = f"  · {b['skill']}"
         lineas.append(f"- {b['inicio']}–{b['fin']}  {marca} {b['titulo']}{ctx}{tent}")
+    # Apartado de huecos libres: el rato libre + UNA sugerencia que cabe (o nada).
+    huecos = [h for h in (data.get("huecos") or []) if h.get("dur_min", 0) >= 10]
+    if huecos:
+        lineas.append("")
+        lineas.append("Huecos libres:")
+        for h in huecos:
+            s = h.get("sugerencia")
+            if s:
+                ctx = s.get("proyecto") or s.get("skill") or ""
+                ctx = f" · {ctx}" if ctx else ""
+                sug = f"  → ¿{s['titulo']}{ctx}?"
+            else:
+                sug = "  → libre, sin pendientes que entren"
+            lineas.append(f"- {h['inicio']}–{h['fin']}  Libre · {h['etiqueta']}{sug}")
     return "\n".join(lineas)
 
 
@@ -5417,7 +5435,8 @@ async def _replanificar_dia(db: Postgrest, args: dict) -> dict[str, Any]:
 async def _configurar_horario(db: Postgrest, args: dict) -> dict[str, Any]:
     campos: dict[str, Any] = {}
     for k in ("hora_despertar", "hora_dormir", "pico_inicio", "pico_fin",
-              "buffer_min", "dur_trabajo_min", "dur_skill_min", "dur_tarea_min"):
+              "buffer_min", "transicion_min", "dur_trabajo_min", "dur_skill_min",
+              "dur_tarea_min"):
         if args.get(k) is not None:
             try:
                 campos[k] = int(args[k])

@@ -81,6 +81,21 @@ SOLO-BACKEND (existe en el cerebro, sin pantalla propia en la app).
 - **"Me acabo de levantar"** (`POST /horario/despertar`, migración 0042): setea
   el ancla de despertar SOLO-HOY (no toca la rutina estándar) y materializa el
   set del día desde esa hora — determinista, instantáneo.
+- **Inteligencia del planificador (determinista, sin LLM):**
+  - **Transición tras compromisos fuera de casa** (migración 0043): tras una
+    clase o un evento con `ubicacion`, reserva un buffer de transición
+    (`config_horario.transicion_min`, default 60 min; override por evento en
+    `eventos.transicion_min`) donde NO coloca trabajo de casa. Editable por chat
+    con `configurar_horario`.
+  - **Ningún proyecto activo sin acción siguiente:** si un proyecto de trabajo no
+    quedó en el set ni con tarea de hoy, el planificador deriva su siguiente paso
+    del árbol (primer nodo fino abierto) o sintetiza "Definir el siguiente paso
+    de X". Mata el bug "0%, sin acción".
+  - **Apartado de huecos libres:** el plan del día expone `huecos` (ventana libre
+    real + duración legible) con UNA sugerencia dosificada que de verdad cabe por
+    hueco (pool = lo que no entró, en orden de prioridad). Instantáneo, sin
+    tokens. (Hoy se surface por el chat/`plan_de_hoy`; la vista nativa "Tu día"
+    en Flutter aún no lo dibuja — el REST ya lleva `huecos`/`sugerencias`.)
 
 ### Cerebro — tools del chat (93)
 

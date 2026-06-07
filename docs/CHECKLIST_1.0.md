@@ -57,6 +57,15 @@ Marcas: ✅ Hecho · ⚠️ Parcial (sirve pero le falta algo concreto) · ❌ F
 - ✅ Vista «Hoy» (timeline del plan) en Inicio.
 - ✅ Plan del día determinístico (`/horario`) con ventanas libres, colocación
   del set en el pico (trabajo profundo) y skills/tareas en ventanas ligeras.
+- ✅ Transición tras compromisos fuera de casa (clase / evento con ubicación):
+  buffer configurable (`config_horario.transicion_min` default 1h + override por
+  evento, migración 0043) donde NO se coloca trabajo de casa.
+- ✅ Ningún proyecto activo sin acción siguiente: si no quedó en el set ni con
+  tarea de hoy, se deriva el siguiente paso del árbol o se sintetiza "Definir el
+  siguiente paso de X" (mata el bug "0%, sin acción").
+- ✅ Apartado «Huecos libres» en Tu día: ventanas libres legibles con UNA
+  sugerencia dosificada que de verdad cabe por hueco (motor determinista del
+  cerebro, instantáneo y sin tokens).
 - ✅ Práctica de skill SIEMPRE tentativa (nunca fija): `anclas_fijas` excluye
   las anclas que son skill → liberan el pico para trabajo de proyecto.
 - ✅ Backlog vivo: tareas sin fecha se ofrecen como tier ligero al final;

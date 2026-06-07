@@ -121,6 +121,48 @@ void main() {
       final plan = PlanDia.fromJson(json);
       expect(plan.sugerencias, isEmpty);
     });
+
+    test('parsea huecos libres con su sugerencia dosificada', () {
+      final plan = PlanDia.fromJson({
+        ...json,
+        'huecos': [
+          {
+            'inicio': '09:30',
+            'fin': '11:00',
+            'dur_min': 90,
+            'etiqueta': '1 h 30 min',
+            'sugerencia': {
+              'titulo': 'OneXotic: cerrar landing',
+              'tipo': 'trabajo',
+              'dur_min': 90,
+              'proyecto': 'OneXotic',
+              'tarea_id': 't7',
+            },
+          },
+          {
+            'inicio': '15:00',
+            'fin': '15:40',
+            'dur_min': 40,
+            'etiqueta': '40 min',
+            'sugerencia': null, // hueco libre sin nada que entre
+          },
+        ],
+      });
+      expect(plan.huecos.length, 2);
+      final h0 = plan.huecos[0];
+      expect(h0.etiqueta, '1 h 30 min');
+      expect(h0.inicioMin, 9 * 60 + 30);
+      expect(h0.sugerencia!.tareaId, 't7');
+      expect(h0.sugerencia!.titulo, 'OneXotic: cerrar landing');
+      expect(h0.clave, 'hueco|09:30|11:00');
+      // El segundo hueco no trae sugerencia: tiempo libre honesto.
+      expect(plan.huecos[1].sugerencia, isNull);
+    });
+
+    test('sin huecos la lista queda vacía (compat)', () {
+      final plan = PlanDia.fromJson(json);
+      expect(plan.huecos, isEmpty);
+    });
   });
 
   group('elegirSugerencia (dosificación por hueco)', () {

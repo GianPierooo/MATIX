@@ -11,7 +11,7 @@ class BloqueRead(BaseModel):
     inicio: str          # "HH:MM" (hora Lima)
     fin: str             # "HH:MM"
     titulo: str
-    tipo: str            # clase | evento | ancla | trabajo | skill | tarea
+    tipo: str            # clase | evento | transicion | ancla | trabajo | skill | tarea
     proyecto: str | None = None
     skill: str | None = None
     nodo_id: UUID | None = None
@@ -26,6 +26,28 @@ class FueraRead(BaseModel):
     motivo: str
 
 
+class SugerenciaRead(BaseModel):
+    """Una sugerencia ofrecible en un hueco libre (motor determinista)."""
+    titulo: str
+    tipo: str            # trabajo | skill | tarea
+    dur_min: int
+    proyecto: str | None = None
+    skill: str | None = None
+    proyecto_id: UUID | None = None
+    nodo_id: UUID | None = None
+    tarea_id: UUID | None = None
+    set_item_id: UUID | None = None
+
+
+class HuecoRead(BaseModel):
+    """Una ventana libre del día + UNA sugerencia dosificada que cabe (o nada)."""
+    inicio: str          # "HH:MM"
+    fin: str             # "HH:MM"
+    dur_min: int
+    etiqueta: str        # duración legible: "1 h 30 min"
+    sugerencia: SugerenciaRead | None = None
+
+
 class PlanDelDiaRead(BaseModel):
     fecha: str           # ISO date
     despierta: str       # "HH:MM"
@@ -33,6 +55,8 @@ class PlanDelDiaRead(BaseModel):
     desde: str | None = None  # "HH:MM" si es replan desde la hora actual
     bloques: list[BloqueRead]
     fuera: list[FueraRead]
+    sugerencias: list[SugerenciaRead] = []
+    huecos: list[HuecoRead] = []
 
 
 class CompletarBloqueRequest(BaseModel):
