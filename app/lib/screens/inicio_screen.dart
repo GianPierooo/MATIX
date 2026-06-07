@@ -354,11 +354,17 @@ class _BotonDespertarState extends ConsumerState<_BotonDespertar> {
     if (_cargando) return;
     setState(() => _cargando = true);
     try {
-      // Determinista en el cerebro: setea ancla de hoy + construye el set.
+      // Determinista en el cerebro (sin LLM): setea el ancla de hoy + construye
+      // el set. La llamada va con timeout (MatixClient: 10s) y, si falla,
+      // termina en el catch con un mensaje honesto — la UI nunca queda girando.
       await ref.read(horarioRepositoryProvider).despertar();
+      // Registrado para HOY: el botón se oculta el resto del día (reaparece
+      // mañana). Persistente y local, sin depender de la red.
+      await ref.read(despertarPrefsProvider).marcar(DateTime.now());
       // El plan de hoy se ve desde AHORA (replan), e invalidamos para refrescar.
       ref.read(replanActivoProvider.notifier).state = true;
       ref.invalidate(planDiaProvider);
+      ref.invalidate(despertarHoyProvider);
       if (!mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
@@ -378,6 +384,9 @@ class _BotonDespertarState extends ConsumerState<_BotonDespertar> {
 
   @override
   Widget build(BuildContext context) {
+    // Si ya marcaste el despertar HOY, no se muestra el botón (reaparece mañana).
+    final yaHoy = ref.watch(despertarHoyProvider).valueOrNull ?? false;
+    if (yaHoy) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       child: Material(

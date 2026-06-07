@@ -3,18 +3,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/markdown_plano.dart';
 import '../../../theme/matix_colors.dart';
-import '../../matix/providers/navegacion_matix_provider.dart';
 import '../domain/personalidad.dart';
 import '../providers/mascota_providers.dart';
 import 'avatar_matix.dart';
 
-/// Burbuja flotante de la mascota: el robot surge con un mensaje y opciones
-/// tocables. Vive sobre el contenido del HomeShell, encima de la barra inferior.
+/// Burbuja GLOBAL de la mascota: SOLO la despedida (al salir de la app). Vive en
+/// el HomeShell, sobre todas las pestañas.
 ///
-/// SIEMPRE visible y anclada ABAJO A LA IZQUIERDA: si no hay mensaje, queda la
-/// "bolita" del robot (tocarla abre el chat de Matix); cuando hay mensaje, la
-/// bolita se expande a la burbuja con opciones. Persistente entre pestañas
-/// (vive en el HomeShell).
+/// El robot-compañero del día (bolita colapsada ⇄ tarjeta expandida) NO vive
+/// aquí: es [PresenciaMatix], que solo se monta en Inicio. Antes esta burbuja
+/// pintaba ADEMÁS una "bolita" persistente cuando no había mensaje, lo que
+/// duplicaba el robot en Inicio (dos avatares) y, peor, su tap navegaba al chat
+/// en vez de alternar estados. Por eso, sin mensaje, no dibuja NADA (no ocupa ni
+/// intercepta): así hay un solo robot y no tapa el contenido del timeline.
 class MascotaBurbuja extends ConsumerWidget {
   const MascotaBurbuja({super.key});
 
@@ -23,7 +24,8 @@ class MascotaBurbuja extends ConsumerWidget {
     final msg = ref.watch(mascotaControllerProvider);
     final ctrl = ref.read(mascotaControllerProvider.notifier);
 
-    // Todo anclado a la IZQUIERDA (no full-width): bolita o burbuja chica.
+    // Anclada a la IZQUIERDA. Sin mensaje (caso normal): nada en pantalla — el
+    // compañero es PresenciaMatix en Inicio. Con mensaje: la burbuja de despedida.
     return Align(
       alignment: Alignment.centerLeft,
       child: AnimatedSwitcher(
@@ -39,14 +41,7 @@ class MascotaBurbuja extends ConsumerWidget {
           ),
         ),
         child: msg == null
-            // Persistente: la bolita del robot, abajo a la izquierda. Tocar =
-            // abrir el chat de Matix.
-            ? _Bolita(
-                key: const ValueKey('bolita'),
-                onTap: () => ref
-                    .read(objetivoNavegacionProvider.notifier)
-                    .state = SeccionMatix.matix,
-              )
+            ? const SizedBox.shrink(key: ValueKey('vacio'))
             : ConstrainedBox(
                 key: ValueKey(msg.texto),
                 constraints: BoxConstraints(
@@ -58,35 +53,6 @@ class MascotaBurbuja extends ConsumerWidget {
                   onCerrar: ctrl.descartar,
                 ),
               ),
-      ),
-    );
-  }
-}
-
-/// Bolita persistente del robot (estado colapsado): solo el avatar, tocable.
-class _Bolita extends StatelessWidget {
-  const _Bolita({super.key, required this.onTap});
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 12),
-      child: GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Container(
-          padding: const EdgeInsets.all(4),
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: MatixColors.cardHi,
-            border: Border.all(color: MatixColors.accent.withValues(alpha: 0.35)),
-            boxShadow: const [
-              BoxShadow(color: Color(0x55000000), blurRadius: 16, offset: Offset(0, 6)),
-            ],
-          ),
-          child: const AvatarMatix(size: 44),
-        ),
       ),
     );
   }

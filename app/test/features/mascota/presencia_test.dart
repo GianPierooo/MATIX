@@ -166,6 +166,35 @@ void main() {
     });
   });
 
+  group('concordancia de número en el pool (#4)', () {
+    MensajePresencia vencida(int n) {
+      final pool = poolPresencia(null, ContextoMascota(vencidas: n), nueve);
+      return pool.firstWhere(
+          (m) => m.acciones.contains(AccionPresencia.reprogramar));
+    }
+
+    test('UNA vencida → singular ("se pasó", "La vemos")', () {
+      final m = vencida(1);
+      expect(m.texto, contains('1'));
+      expect(m.texto, contains('se pasó'));
+      expect(m.texto, isNot(contains('pasaron')));
+    });
+
+    test('DOS vencidas → plural ("se pasaron", "Las vemos")', () {
+      final m = vencida(2);
+      expect(m.texto, contains('2'));
+      expect(m.texto, contains('se pasaron'));
+    });
+
+    test('UNA sin fecha → singular ("1 sin fecha suelta", no "sueltas")', () {
+      final pool =
+          poolPresencia(null, const ContextoMascota(tareasSinFecha: 1), nueve);
+      final m = pool.firstWhere((m) => m.texto.contains('sin fecha'));
+      expect(m.texto, contains('suelta'));
+      expect(m.texto, isNot(contains('sueltas')));
+    });
+  });
+
   group('mensajePresencia con rotación', () {
     test('rotación recorre el pool (cambia de mensaje)', () {
       const ctx = ContextoMascota(vencidas: 1, tareasHoy: 2);

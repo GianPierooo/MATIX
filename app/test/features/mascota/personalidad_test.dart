@@ -83,6 +83,29 @@ void main() {
     });
   });
 
+  group('plural (concordancia de número · #4)', () {
+    test('1 → singular; 2+ (y 0) → plural', () {
+      expect(plural(1, 'pasó', 'pasaron'), 'pasó');
+      expect(plural(2, 'pasó', 'pasaron'), 'pasaron');
+      expect(plural(0, 'la', 'las'), 'las');
+      expect(plural(5, 'tarea', 'tareas'), 'tareas');
+    });
+
+    test('saludo con UNA vencida concuerda en singular', () {
+      final m = saludo(FranjaDia.manana, const ContextoMascota(vencidas: 1));
+      expect(m.texto, contains('1'));
+      expect(m.texto, contains('se te pasó'));
+      expect(m.texto, isNot(contains('pasaron')));
+    });
+
+    test('saludo con DOS vencidas concuerda en plural (el bug del usuario)', () {
+      final m = saludo(FranjaDia.manana, const ContextoMascota(vencidas: 2));
+      expect(m.texto, contains('2'));
+      expect(m.texto, contains('se te pasaron'));
+      expect(m.texto, contains('las vemos'));
+    });
+  });
+
   group('franjaPersonaDe (modo persona alineado a anclas, no al silencio)', () {
     test('antes de despertar → dormido', () {
       expect(franjaPersonaDe(3, despertar: 7, dormir: 23),

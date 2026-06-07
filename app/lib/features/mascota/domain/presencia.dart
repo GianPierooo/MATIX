@@ -181,11 +181,13 @@ List<MensajePresencia> poolPresencia(
 
   // 4) Atrasos: "esto venció, ¿lo muevo?" (sin culpa, con reprogramar).
   if (ctx.vencidas > 0) {
+    final n = ctx.vencidas;
     out.add(MensajePresencia(
       tipo: TipoPresencia.pendientes,
       texto: _rot([
-        'Tienes ${ctx.vencidas} que se pasó de fecha. ¿La vemos sin drama?',
-        'Algo venció (${ctx.vencidas}). ¿Lo muevo a hoy?',
+        'Tienes $n que se ${plural(n, "pasó", "pasaron")} de fecha. '
+            '¿${plural(n, "La", "Las")} vemos sin drama?',
+        '${plural(n, "Venció", "Vencieron")} $n. ¿${plural(n, "Lo", "Los")} muevo a hoy?',
       ], semilla),
       acciones: const [AccionPresencia.reprogramar, AccionPresencia.hablemos],
     ));
@@ -247,8 +249,10 @@ List<MensajePresencia> poolPresencia(
     out.add(MensajePresencia(
       tipo: TipoPresencia.pendientes,
       texto: _rot([
-        'Tienes $n sin fecha sueltas. ¿Las acomodo en un hueco?',
-        '$n tareas esperan turno sin fecha. ¿Les busco lugar hoy?',
+        'Tienes $n sin fecha ${plural(n, "suelta", "sueltas")}. '
+            '¿${plural(n, "La", "Las")} acomodo en un hueco?',
+        '$n ${plural(n, "tarea espera", "tareas esperan")} turno sin fecha. '
+            '¿${plural(n, "Le", "Les")} busco lugar hoy?',
       ], semilla),
       acciones: _acInfo,
     ));

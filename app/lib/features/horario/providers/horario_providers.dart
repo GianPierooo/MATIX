@@ -1,11 +1,27 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/providers.dart';
+import '../data/despertar_prefs.dart';
 import '../data/horario_repository.dart';
 import '../domain/plan_dia.dart';
 
 final horarioRepositoryProvider = Provider<HorarioRepository>((ref) {
   return HorarioRepository(ref.watch(matixClientProvider));
+});
+
+/// Persistencia de "Me acabo de levantar" (local).
+final despertarPrefsProvider = Provider<DespertarPrefs>((ref) => DespertarPrefs());
+
+/// `true` si el despertar de HOY ya está registrado → el botón se oculta el
+/// resto del día y reaparece mañana (fecha nueva). Se relee al invalidar (tras
+/// marcar el despertar). Best-effort: ante cualquier fallo, muestra el botón.
+final despertarHoyProvider = FutureProvider<bool>((ref) async {
+  try {
+    final fecha = await ref.watch(despertarPrefsProvider).leerFecha();
+    return despertarRegistradoHoy(fecha, DateTime.now());
+  } catch (_) {
+    return false;
+  }
 });
 
 /// Si está activo, el plan se trae como REPLAN (resto del día desde ahora).

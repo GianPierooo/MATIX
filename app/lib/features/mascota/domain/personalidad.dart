@@ -123,6 +123,11 @@ class MensajeMascota {
 
 String _rot(List<String> pool, int semilla) => pool[semilla.abs() % pool.length];
 
+/// Concordancia de número para las plantillas con conteo: [uno] si n == 1,
+/// [varios] en cualquier otro caso. Evita el "Tienes 2 que se te pasó" (debe
+/// ser "se te pasaron") y el "1 tareas" (debe ser "1 tarea"). PURO.
+String plural(int n, String uno, String varios) => n == 1 ? uno : varios;
+
 /// Saludo al entrar: cálido, con un toque de contexto. Para la tarjeta de Inicio.
 MensajeMascota saludo(FranjaDia franja, ContextoMascota ctx, {int semilla = 0}) {
   final hola = switch (franja) {
@@ -146,9 +151,11 @@ MensajeMascota saludo(FranjaDia franja, ContextoMascota ctx, {int semilla = 0}) 
 
 String? _detalleContexto(ContextoMascota ctx, FranjaDia franja, int semilla) {
   if (ctx.vencidas > 0) {
+    final n = ctx.vencidas;
     return _rot([
-      'Tienes ${ctx.vencidas} que se te pasó de fecha; cuando quieras la vemos sin drama.',
-      'Quedaron ${ctx.vencidas} atrás, pero nada que no se pueda retomar.',
+      'Tienes $n que se te ${plural(n, "pasó", "pasaron")} de fecha; '
+          'cuando quieras ${plural(n, "la", "las")} vemos sin drama.',
+      '${plural(n, "Quedó", "Quedaron")} $n atrás, pero nada que no se pueda retomar.',
     ], semilla);
   }
   if (ctx.tareasHoy > 0) {
