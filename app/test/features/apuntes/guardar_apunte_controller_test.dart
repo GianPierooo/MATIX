@@ -22,6 +22,7 @@ class _FakeCaptura implements CapturaApunteRepository {
     if (error != null) throw error!;
     return resultado ??
         const ApunteCapturado(
+          tipo: 'apunte',
           id: 'a1',
           titulo: 'Apunte',
           etiquetas: [],
@@ -54,6 +55,7 @@ void main() {
       () async {
     final fake = _FakeCaptura(
       resultado: const ApunteCapturado(
+        tipo: 'apunte',
         id: 'a9',
         titulo: 'Resumen de clase',
         etiquetas: ['clase'],

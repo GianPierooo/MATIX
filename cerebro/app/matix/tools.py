@@ -273,8 +273,15 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "crear_evento",
             "description": (
-                "Agenda un evento en el calendario. NO usar para "
-                "clases recurrentes (esas son sesiones de clase, "
+                "Agenda un EVENTO FIJO en el calendario: algo con hora EXPLÍCITA "
+                "que el usuario dio (cita médica, reunión, cumpleaños). NUNCA "
+                "uses esto cuando el usuario solo te dictó una idea o un "
+                "pendiente sin hora explícita («pasear al perro», «estudiar "
+                "cálculo», «llamar a Ana», «comprar pan»): eso es una TAREA — "
+                "llama `crear_tarea`. Si el usuario no dijo una hora concreta "
+                "(«a las HH:MM», «mañana 9am», «el lunes 3pm»), NO inventes una: "
+                "es señal clara de que era una tarea, no un evento. Tampoco "
+                "para clases recurrentes (esas son sesiones de clase, "
                 "gestionadas desde Universidad)."
             ),
             "parameters": {

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../api/matix_client.dart';
+import '../core/hub_refresh.dart';
 import '../core/urgencia.dart';
 import '../features/apuntes/domain/apunte.dart';
 import '../features/apuntes/presentation/apuntes_list_screen.dart';
@@ -500,6 +501,9 @@ class _CapturaApunteState extends ConsumerState<_CapturaApunte> {
     try {
       final apunte = await ref.read(capturaApunteRepoProvider).capturar(texto);
       _ctrl.clear();
+      // La captura puede crear tarea o apunte → invalidamos el hub completo
+      // (tareas + plan + rollover) y, además, la lista de apuntes.
+      invalidarHub(ref);
       ref.invalidate(apuntesListProvider);
       if (!mounted) return;
       FocusScope.of(context).unfocus();
@@ -622,6 +626,8 @@ class _CapturaApunteState extends ConsumerState<_CapturaApunte> {
     try {
       final apunte =
           await ref.read(capturaApunteRepoProvider).capturar(texto.trim());
+      // Voz: puede ser tarea o apunte → invalidamos el hub + apuntes.
+      invalidarHub(ref);
       ref.invalidate(apuntesListProvider);
       _aIdle();
       _mostrarGuardado(apunte);

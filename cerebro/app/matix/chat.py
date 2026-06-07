@@ -432,38 +432,45 @@ async def conversar(
     }
 
 
-# Forzamos esta tool concreta: la captura rápida de Inicio no es una
-# conversación, su único trabajo es guardar el apunte clasificado.
-_TOOL_CHOICE_CREAR_APUNTE = {
-    "type": "function",
-    "function": {"name": "crear_apunte"},
-}
+# Whitelist de tools para la captura rápida (NO incluye `crear_evento`: la
+# captura jamás agenda eventos en el calendario — eso solo viene por la ruta
+# explícita de evento con hora fija). El modelo elige entre estas dos según el
+# texto. Bloqueo de raíz contra el bug #2.
+_TOOLS_CAPTURA = ("crear_tarea", "crear_apunte")
+
+
+def _tools_para_captura() -> list[dict]:
+    return [t for t in TOOL_DEFINITIONS if t["function"]["name"] in _TOOLS_CAPTURA]
 
 
 async def capturar_apunte(db: Postgrest, *, texto: str) -> dict[str, Any]:
-    """Captura rápida de un apunte dictado desde Inicio.
+    """Captura rápida desde Inicio / "Tu día".
 
-    Reusa las piezas del Paso C: el system prompt fijo (que ya lleva
-    las reglas de clasificación), el contexto vivo (proyectos/cursos
-    EXISTENTES con sus ids) y la tool `crear_apunte` (que indexa para
-    el RAG y reporta dónde quedó archivado). No es conversación: una
-    sola llamada forzada a `crear_apunte`, sin narración ni loop.
-
-    Devuelve el resultado crudo de la tool:
-    `{"ok": True, "datos": {...}}` o `{"ok": False, ...}`. El router
-    lo traduce a la respuesta HTTP.
+    El texto puede ser una ACCIÓN (verbo: comprar, llamar, estudiar, pasear…)
+    o una IDEA / nota. El cerebro clasifica en UNA llamada y guarda como TAREA
+    o APUNTE — NUNCA como evento (los eventos solo se crean por la ruta
+    explícita con hora fija del usuario). Devuelve:
+        {"tipo": "tarea" | "apunte", "datos": {...}}
     """
     fijo = system_prompt_fijo()
     contexto = await contexto_vivo(db)
 
     instruccion = (
-        "El usuario acaba de dictar una idea para anotar (captura "
-        "rápida desde la pantalla Inicio — NO es una conversación). "
-        "Tu única tarea es guardarla llamando `crear_apunte` una vez: "
-        "un título corto, el contenido con la idea, y la clasificación "
-        "a un proyecto activo o curso que YA exista en el contexto "
-        "vivo solo si encaja claro; ante la duda, déjalo general. No "
-        "inventes proyectos ni cursos.\n\nIdea dictada:\n" + texto
+        "El usuario acaba de dictar algo desde la cápsula de captura rápida "
+        "(Inicio / Tu día). NO es una conversación. Tu única tarea: clasificar "
+        "y guardar en UNA sola llamada a UNA de estas dos tools:\n\n"
+        "- `crear_tarea` cuando es una ACCIÓN o pendiente (verbos como "
+        "comprar, llamar, terminar, estudiar, leer, enviar, pasear, sacar, "
+        "pagar, agendar X, recordar hacer…). Sin `vence_en` a menos que el "
+        "usuario haya dicho una fecha explícita.\n"
+        "- `crear_apunte` cuando es una IDEA, nota, información, definición o "
+        "recordatorio sin verbo claro de acción.\n\n"
+        "REGLA DURA: NO uses `crear_evento` (no está disponible aquí). La "
+        "captura rápida NUNCA agenda eventos en el calendario. Si suena a algo "
+        "para hacer y NO te dio hora explícita, es tarea.\n\n"
+        "Clasifica al proyecto/curso del contexto vivo solo si encaja claro; "
+        "ante la duda, déjalo general. No inventes proyectos ni cursos.\n\n"
+        "Texto dictado:\n" + texto
     )
 
     mensajes: list[dict] = [
@@ -474,21 +481,26 @@ async def capturar_apunte(db: Postgrest, *, texto: str) -> dict[str, Any]:
 
     salida = await llm.responder_con_tools(
         mensajes,
-        TOOL_DEFINITIONS,
+        _tools_para_captura(),
         model=await modelos_llm.modelo_seleccionado(db),
-        tool_choice=_TOOL_CHOICE_CREAR_APUNTE,
+        # `required` fuerza al modelo a llamar UNA tool de la whitelist.
+        tool_choice="required",
     )
 
     if salida["tipo"] != "tool_calls":
-        # Forzamos la tool, así que esto no debería pasar; si el modelo
-        # devolvió texto igual, lo tratamos como fallo claro.
-        raise RuntimeError("El modelo no generó la captura del apunte.")
+        raise RuntimeError("El modelo no generó la captura.")
 
     call = next(
-        (c for c in salida["tool_calls"] if c["nombre"] == "crear_apunte"),
+        (c for c in salida["tool_calls"] if c["nombre"] in _TOOLS_CAPTURA),
         None,
     )
     if call is None:
-        raise RuntimeError("El modelo no llamó a crear_apunte.")
+        raise RuntimeError("El modelo no llamó a una tool válida de captura.")
 
-    return await ejecutar_tool(db, "crear_apunte", call["args"])
+    resultado = await ejecutar_tool(db, call["nombre"], call["args"])
+    # `tipo` arriba del envelope para que el router/app diferencien tarea de
+    # apunte sin acoplarse al shape interno de las tools.
+    return {
+        "tipo": "tarea" if call["nombre"] == "crear_tarea" else "apunte",
+        **resultado,
+    }

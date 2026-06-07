@@ -52,6 +52,7 @@ void main() {
   group('destinoLabel (copy en tú)', () {
     ApunteCapturado conDestino({String? proyecto, String? curso}) =>
         ApunteCapturado(
+          tipo: 'apunte',
           id: '1',
           titulo: 't',
           etiquetas: const [],
@@ -83,6 +84,51 @@ void main() {
         conDestino(proyecto: '').destinoLabel,
         'Guardado como apunte general',
       );
+    });
+  });
+
+  // Bug #2: la captura rápida ahora puede crear TAREA (no solo apunte). El
+  // shape uniforme del cerebro lleva `tipo` arriba y la app debe leerlo.
+  group('captura como tarea (bug Tu día)', () {
+    test('parsea tipo=tarea desde JSON', () {
+      final t = ApunteCapturado.fromJson({
+        'tipo': 'tarea',
+        'id': 't9',
+        'titulo': 'Comprar pan',
+        'general': true,
+      });
+      expect(t.esTarea, isTrue);
+      expect(t.tipo, 'tarea');
+      expect(t.titulo, 'Comprar pan');
+    });
+
+    test('destinoLabel de una tarea sin proyecto', () {
+      const t = ApunteCapturado(
+        tipo: 'tarea',
+        id: 't1',
+        titulo: 'Llamar a Ana',
+        etiquetas: [],
+        general: true,
+      );
+      expect(t.destinoLabel, 'Lo metí como tarea');
+    });
+
+    test('destinoLabel de una tarea con proyecto', () {
+      const t = ApunteCapturado(
+        tipo: 'tarea',
+        id: 't2',
+        titulo: 'Entregar informe',
+        etiquetas: [],
+        general: false,
+        proyectoNombre: 'Tesis',
+      );
+      expect(t.destinoLabel, 'Lo metí como tarea en Tesis');
+    });
+
+    test('default a apunte si el cerebro no manda tipo', () {
+      final a = ApunteCapturado.fromJson({'id': '1', 'titulo': 'x'});
+      expect(a.tipo, 'apunte');
+      expect(a.esTarea, isFalse);
     });
   });
 }

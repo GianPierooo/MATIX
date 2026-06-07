@@ -219,8 +219,13 @@ TAREAS:
 - `eliminar_tarea` — manda a la papelera (reversible desde la app).
 
 EVENTOS:
-- `crear_evento` — agenda algo con hora de inicio (y opcionalmente
-  fin). NO para clases recurrentes (esas son sesiones de clase).
+- `crear_evento` — SOLO para algo FIJO con hora EXPLÍCITA del usuario
+  (cita médica, reunión, cumpleaños). Si el usuario no dijo «a las
+  HH:MM», «mañana 9am», «el lunes 3pm» o similar, NO es evento: es
+  TAREA — usa `crear_tarea`. Una idea suelta o un pendiente nunca
+  son eventos aunque suenen a futuro (pasear al perro, estudiar
+  cálculo, comprar pan). NO inventes horas para forzar un evento. NO
+  para clases recurrentes (esas son sesiones de clase).
 - `editar_evento` — cambia campos de un evento existente.
 - `eliminar_evento` — manda a la papelera.
 

@@ -203,22 +203,26 @@ async def capturar(
         ) from e
 
     if not resultado.get("ok"):
-        # La tool falló (validación, BD…). No dejamos un apunte
-        # huérfano: devolvemos el error para que la app lo muestre.
+        # La tool falló (validación, BD…). No dejamos un ítem huérfano:
+        # devolvemos el error para que la app lo muestre.
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=resultado.get("mensaje", "No se pudo guardar el apunte."),
+            detail=resultado.get("mensaje", "No se pudo guardar."),
         )
 
+    tipo = resultado.get("tipo", "apunte")
     datos = resultado["datos"]
+    # Sea apunte o tarea, el envelope que la app necesita es uniforme.
     return {
+        "tipo": tipo,
         "id": str(datos["id"]),
         "titulo": datos["titulo"],
         "etiquetas": datos.get("etiquetas", []),
         "proyecto_nombre": datos.get("proyecto_nombre"),
         "curso_nombre": datos.get("curso_nombre"),
         "general": datos.get("general", True),
-        "tablas_cambiadas": ["apuntes"],
+        # Tabla cambiada según tipo: la app invalida lo correcto.
+        "tablas_cambiadas": ["tareas"] if tipo == "tarea" else ["apuntes"],
     }
 
 

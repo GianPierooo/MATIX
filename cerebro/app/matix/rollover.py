@@ -212,6 +212,7 @@ async def _ventanas_proximos_dias(
         ventanas = horario.ventanas_libres(
             fijos, despertar_min=despertar, dormir_min=dormir,
             buffer_min=buffer_min, desde_min=desde_min,
+            buffer_pre_sueno_min=int(cfg.get("buffer_pre_sueno_min", 0) or 0),
         )
         out.append((off, ventanas))
     return out, cfg

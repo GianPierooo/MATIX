@@ -1,13 +1,14 @@
 import '../../../api/matix_client.dart';
 
-/// Apunte recién capturado por voz desde Inicio (Capa 3 Paso C2).
+/// Ítem recién creado por la captura rápida desde "Tu día" / Inicio.
 ///
-/// Lo devuelve `POST /api/v1/matix/capturar-apunte`: el cerebro ya
-/// clasificó la idea contra los proyectos/cursos existentes. Con
-/// `destinoLabel` la UI arma el snackbar de una línea, y con `id`
-/// abre el apunte para corregirlo.
+/// Lo devuelve `POST /api/v1/matix/capturar-apunte`: el cerebro CLASIFICA el
+/// texto entre **tarea** (acción / pendiente) o **apunte** (idea / nota), y
+/// guarda en BD el correcto. NUNCA crea evento desde aquí (los eventos solo
+/// vienen por la ruta explícita con hora fija del usuario).
 class ApunteCapturado {
   const ApunteCapturado({
+    required this.tipo,
     required this.id,
     required this.titulo,
     required this.etiquetas,
@@ -16,6 +17,8 @@ class ApunteCapturado {
     this.cursoNombre,
   });
 
+  /// 'tarea' o 'apunte'. Define qué snackbar mostrar y qué providers refrescar.
+  final String tipo;
   final String id;
   final String titulo;
   final List<String> etiquetas;
@@ -23,10 +26,16 @@ class ApunteCapturado {
   final String? proyectoNombre;
   final String? cursoNombre;
 
-  /// Frase de una línea para el snackbar de confirmación, en tú:
-  /// "Guardado en proyecto Tesis" / "Guardado en el curso Cálculo" /
-  /// "Guardado como apunte general".
+  bool get esTarea => tipo == 'tarea';
+
+  /// Frase de una línea para el snackbar de confirmación.
   String get destinoLabel {
+    if (esTarea) {
+      if (proyectoNombre != null && proyectoNombre!.isNotEmpty) {
+        return 'Lo metí como tarea en $proyectoNombre';
+      }
+      return 'Lo metí como tarea';
+    }
     if (proyectoNombre != null && proyectoNombre!.isNotEmpty) {
       return 'Guardado en proyecto $proyectoNombre';
     }
@@ -38,6 +47,7 @@ class ApunteCapturado {
 
   factory ApunteCapturado.fromJson(Map<String, dynamic> j) {
     return ApunteCapturado(
+      tipo: (j['tipo'] as String?) ?? 'apunte',
       id: j['id'].toString(),
       titulo: (j['titulo'] as String?) ?? '',
       etiquetas: (j['etiquetas'] as List? ?? const [])

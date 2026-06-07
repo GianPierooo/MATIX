@@ -97,18 +97,24 @@ class CapturaApunteRequest(BaseModel):
 class CapturaApunteResponse(BaseModel):
     """Respuesta del endpoint `/matix/capturar-apunte`.
 
-    Devuelve el apunte recién creado con su clasificación resuelta
-    (Paso C): `proyecto_nombre` / `curso_nombre` cuando encajó en uno
-    existente, o `general=True` si quedó suelto. La app arma con esto
-    el snackbar de una línea ("Guardado en proyecto Tesis" / "Guardado
-    como apunte general") y usa `id` para abrir/corregir el apunte.
+    Devuelve el ítem recién creado (apunte o tarea) con su clasificación. La
+    captura rápida puede crear:
+      - APUNTE (idea / nota sin acción clara) — el caso histórico.
+      - TAREA (verbo de acción: comprar, llamar, estudiar…) — bug fix de Tu día.
 
-    `tablas_cambiadas` siempre incluye `"apuntes"` para que la app
-    invalide la lista de "Apuntes recientes" al instante.
+    NUNCA crea evento (los eventos solo vienen por la ruta explícita con hora
+    fija del usuario). El campo `tipo` permite a la app pintar el snackbar
+    correcto y refrescar la sección adecuada.
+
+    `tablas_cambiadas` lleva `"apuntes"` o `"tareas"` según corresponda, para
+    que la app invalide los providers correctos.
     """
 
+    # "apunte" (default por compat) o "tarea".
+    tipo: str = "apunte"
     id: str
     titulo: str
+    # Campos de apunte (cuando tipo=="apunte"); vacíos para tarea.
     etiquetas: list[str] = Field(default_factory=list)
     proyecto_nombre: str | None = None
     curso_nombre: str | None = None

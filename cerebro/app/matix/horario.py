@@ -36,6 +36,10 @@ _CFG_DEFAULT: dict[str, Any] = {
     "pico_inicio": 6,
     "pico_fin": 9,
     "buffer_min": 10,
+    # Buffer de cierre: el día útil termina N minutos ANTES del ancla de dormir.
+    # Antes el planificador apuraba cosas hasta las 23:00 si dormías a las 23:00.
+    # Ahora resta este buffer para no proponer "hoy 22:30" como bloque de trabajo.
+    "buffer_pre_sueno_min": 60,
     "dur_trabajo_min": 90,
     "dur_skill_min": 30,
     "dur_tarea_min": 20,
@@ -132,12 +136,17 @@ def ventanas_libres(
     dormir_min: int,
     buffer_min: int,
     desde_min: int | None = None,
+    buffer_pre_sueno_min: int = 0,
 ) -> list[dict[str, int]]:
-    """Huecos reales del día dentro de [despertar, dormir], restando lo fijo (con
-    buffer). Si `desde_min` (replan desde ahora), recorta lo anterior. NUNCA pasa
-    de `dormir_min`. PURO."""
+    """Huecos reales del día dentro de [despertar, fin_util], donde
+    `fin_util = dormir_min - buffer_pre_sueno_min` (no se planifica pegado al
+    sueño). Resta lo fijo (con `buffer_min`). Si `desde_min` (replan desde
+    ahora), recorta lo anterior. NUNCA pasa de `fin_util`. PURO."""
+    # Tope útil: para no proponer "hoy 22:30" si duermes a las 23. El buffer
+    # nunca consume todo el día (siempre quede al menos 30 min hábiles).
+    fin_util = max(despertar_min + 30, dormir_min - max(0, buffer_pre_sueno_min))
     inicio = despertar_min if desde_min is None else max(despertar_min, desde_min)
-    if inicio >= dormir_min:
+    if inicio >= fin_util:
         return []
     ocupados = fusionar_ocupados(compromisos, buffer_min=buffer_min)
     libres: list[dict[str, int]] = []
@@ -146,14 +155,14 @@ def ventanas_libres(
         if of <= cursor:
             continue
         if oi > cursor:
-            fin = min(oi, dormir_min)
+            fin = min(oi, fin_util)
             if fin > cursor:
                 libres.append({"ini": cursor, "fin": fin, "dur": fin - cursor})
         cursor = max(cursor, of)
-        if cursor >= dormir_min:
+        if cursor >= fin_util:
             break
-    if cursor < dormir_min:
-        libres.append({"ini": cursor, "fin": dormir_min, "dur": dormir_min - cursor})
+    if cursor < fin_util:
+        libres.append({"ini": cursor, "fin": fin_util, "dur": fin_util - cursor})
     return [v for v in libres if v["dur"] > 0]
 
 
@@ -591,6 +600,7 @@ async def plan_de_hoy_data(
     ventanas = ventanas_libres(
         fijos, despertar_min=despertar, dormir_min=dormir,
         buffer_min=buffer_min, desde_min=desde_min,
+        buffer_pre_sueno_min=int(cfg.get("buffer_pre_sueno_min", 0) or 0),
     )
 
     # Títulos de los compromisos fijos de hoy (normalizados) → una skill cuya

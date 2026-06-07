@@ -243,10 +243,14 @@ class _PresenciaMatixState extends ConsumerState<PresenciaMatix> {
     ctrl.dispose();
     if (texto == null || texto.trim().isEmpty || !mounted) return;
     try {
-      final apunte =
+      final item =
           await ref.read(capturaApunteRepoProvider).capturar(texto.trim());
+      // El cerebro pudo crear tarea o apunte: invalidamos el hub completo
+      // (tareas + plan del día + rollover) para que la captura se vea al
+      // instante en Tu día / Tareas y, si fue apunte, también en su lista.
+      invalidarHub(ref);
       ref.invalidate(apuntesListProvider);
-      _aviso(apunte.destinoLabel);
+      _aviso(item.destinoLabel);
     } catch (e) {
       _aviso('No pude guardar: $e');
     }
