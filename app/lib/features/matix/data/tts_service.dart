@@ -173,11 +173,17 @@ class TtsService implements TtsBase {
   Completer<void>? _completer;
   void Function()? _onInicio;
   bool _inicioNotificado = false;
+  // Época de narración: cada `narrar`/`hablar`/`detener` la incrementa. Una
+  // descarga en vuelo que termina con época vieja YA fue superada por una
+  // narración más nueva → NO se reproduce (evita encolar audio atrasado en la
+  // cámara en vivo: la última narración manda, nada de minutos de audio viejo).
+  int _epoca = 0;
 
   @override
   Future<void> hablar(String texto, {void Function()? onInicio}) async {
     final t = texto.trim();
     if (t.isEmpty) return;
+    _epoca++; // esta narración supera a cualquier descarga en vuelo
 
     // Si veníamos reproduciendo, cortamos y limpiamos.
     if (_completer != null && !_completer!.isCompleted) {
@@ -232,6 +238,7 @@ class TtsService implements TtsBase {
     void Function()? onFallo,
     void Function()? onDispositivo,
   ) async {
+    final miEpoca = ++_epoca; // reservo mi turno: si llega otra, quedo obsoleto
     try {
       if (_completer != null && !_completer!.isCompleted) {
         _completer!.complete();
@@ -241,10 +248,16 @@ class TtsService implements TtsBase {
       _onInicio = null;
       _inicioNotificado = false;
       final mp3 = await _descargar(t);
+      // Mientras descargaba pudo llegar una narración MÁS nueva: si así fue, no
+      // reproduzco esta (audio desfasado). La última gana; nada de cola vieja.
+      if (miEpoca != _epoca) return;
       _completer = Completer<void>();
       await _rep.reproducir(mp3);
       // NO esperamos el fin del audio: el caller (cámara) sigue su ritmo.
     } catch (_) {
+      // Si ya me superó una narración más nueva, no hablo lo viejo ni por el
+      // respaldo del teléfono.
+      if (miEpoca != _epoca) return;
       // Cloud TTS caído → voz NATIVA del teléfono (piso siempre disponible).
       // Solo si el dispositivo TAMPOCO habla nos quedamos en texto.
       final hablo = await _voz.hablar(t);
@@ -258,6 +271,7 @@ class TtsService implements TtsBase {
 
   @override
   Future<void> detener() async {
+    _epoca++; // invalida cualquier descarga en vuelo: tras parar, nada suena
     await _rep.detener();
     await _voz.detener();
     _completar();

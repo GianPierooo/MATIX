@@ -122,6 +122,41 @@ void main() {
     // No necesita completar() para "terminar": es fire-and-forget.
   });
 
+  test('narrar: una descarga superada NO reproduce (última gana, sin cola)',
+      () async {
+    final rep = _FakeReproductor();
+    // La descarga de "viejo" tarda; la de "nuevo" es instantánea.
+    final inner = MockClient((req) async {
+      if (req.body.contains('viejo')) {
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+      }
+      return http.Response.bytes([1, 2, 3], 200);
+    });
+    final tts = TtsService(inner: inner, reproductor: rep);
+
+    tts.narrar('viejo'); // arranca su descarga lenta
+    tts.narrar('nuevo'); // la supera de inmediato
+
+    // Espera a que AMBAS descargas resuelvan.
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    // Solo la última ("nuevo") sonó; la vieja, al volver tarde, se descartó.
+    expect(rep.reproducirCount, 1);
+  });
+
+  test('detener invalida una descarga en vuelo (no suena tras parar)', () async {
+    final rep = _FakeReproductor();
+    final inner = MockClient((req) async {
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      return http.Response.bytes([1, 2, 3], 200);
+    });
+    final tts = TtsService(inner: inner, reproductor: rep);
+
+    tts.narrar('algo'); // descarga lenta en vuelo
+    await tts.detener(); // paramos ANTES de que termine la descarga
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(rep.reproducirCount, 0); // la descarga tardía ya no reproduce
+  });
+
   test('narrar NUNCA lanza y avisa onFallo si la voz no sale (502 persistente)',
       () async {
     final rep = _FakeReproductor();

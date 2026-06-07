@@ -29,6 +29,14 @@ SOLO-BACKEND (existe en el cerebro, sin pantalla propia en la app).
   corta → TTS onyx. Endpoint `/matix/narrar-frame`; muestreo y topes en la app
   (`features/live_camara`). Además sigue la visión por FOTO/galería (recibos,
   pizarras, documentos) → OCR/extracción. No promete tiempo real frame-perfect.
+  Ritmo en vivo (2026-06-07): loop de captura y visión DESACOPLADOS — la captura
+  deja el frame más fresco que pasó el muestreo (ÚLTIMO GANA, sin cola) y la
+  visión procesa una sola petición a la vez tomando siempre el más reciente; el
+  TTS es interrumpible (época: una descarga superada no suena → sin audio viejo
+  acumulado); timeout agresivo por proveedor (~3.5 s) con failover rápido, y se
+  respeta el proveedor pinneado (si está en Claude, no intenta OpenAI).
+  Indicador honesto "mirando…" mientras la visión piensa. Topes de costo y
+  auto-stop intactos.
 - Teléfono Tier B: NO. Solo hay Fase 1 (intents), Tier C.0 (leer pantalla, solo
   lectura) y Tier C.1 (enviar WhatsApp tras confirmación). No hay automatización
   libre de tocar/escribir en apps arbitrarias.

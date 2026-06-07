@@ -55,6 +55,16 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
   String _narracionActual = '';
   RazonCorte? _razonCorte;
 
+  // ── Concurrencia del loop (último frame gana, sin cola) ──────────────────
+  // El frame MÁS fresco que pasó el muestreo y espera visión. El loop de
+  // captura lo SOBREESCRIBE (no encola): cuando la visión se libera, narra el
+  // más reciente y descarta los intermedios viejos.
+  ({Uint8List bytes, List<int> firma, DateTime t})? _pendiente;
+  // Hay una petición de visión EN VUELO (una sola a la vez).
+  bool _enVuelo = false;
+  // "mirando…": indicador honesto mientras la visión piensa (no congelado).
+  bool _pensando = false;
+
   Duration get _transcurrido =>
       _inicioSesion == null ? Duration.zero : DateTime.now().difference(_inicioSesion!);
   double get _costo =>
@@ -119,6 +129,11 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
         _activa = true;
         _fase = _Fase.observando;
         _inicioSesion = DateTime.now();
+        // Arranque limpio del loop (también al REANUDAR): sin frame pendiente
+        // viejo ni indicadores colgados de una sesión anterior.
+        _pendiente = null;
+        _enVuelo = false;
+        _pensando = false;
       });
       // Saludo de apertura en SEGUNDO PLANO (no bloqueante, nunca lanza): antes
       // un TTS 502 acá caía en el catch y mataba la cámara con "No pude abrir la
@@ -128,7 +143,11 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
         onFallo: _avisarSinVoz,
         onDispositivo: _avisarVozTelefono,
       );
-      unawaited(_loop());
+      // Dos loops DESACOPLADOS (no en serie): la captura nunca espera a la
+      // visión, y la visión nunca espera al audio. Así el ritmo es humano y
+      // no se acumula cola ni se narran escenas viejas.
+      unawaited(_loopCaptura());
+      unawaited(_loopVision());
     } catch (e) {
       _fallar('No pude abrir la cámara: $e');
     }
@@ -148,11 +167,15 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
     }
   }
 
-  Future<void> _loop() async {
+  /// Loop de CAPTURA: muestrea a ritmo humano y deja el frame más fresco que
+  /// pasó el filtro en `_pendiente` (ÚLTIMO GANA: sobreescribe, no encola).
+  /// Nunca espera a la visión ni al audio. Reusa el muestreo y los topes ya
+  /// existentes (intervalo, cambio de escena, frames/min) y el auto-corte.
+  Future<void> _loopCaptura() async {
     while (_activa && mounted) {
       final t = DateTime.now();
       try {
-        await _tick(t);
+        await _capturar(t);
       } catch (_) {
         // Best-effort: un frame que falla no tumba la sesión.
       }
@@ -162,11 +185,12 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
     }
   }
 
-  Future<void> _tick(DateTime ahora) async {
+  Future<void> _capturar(DateTime ahora) async {
     final c = _camara;
     if (c == null || !c.value.isInitialized || c.value.isTakingPicture) return;
 
-    // Corte por topes (duración / sin cambios) ANTES de gastar otro frame.
+    // Corte por topes (duración / sin cambios) ANTES de gastar otro frame:
+    // los guardrails de costo y el auto-stop se mantienen intactos.
     final corte = debeCortar(
       inicio: _inicioSesion!,
       ahora: ahora,
@@ -199,32 +223,72 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
       return;
     }
 
-    // Pasó el filtro: este frame SÍ va al modelo.
-    _ultimoEnvio = ahora;
-    _envios.add(ahora);
-    _firmaPrevia = firma;
-    _framesEnviados++;
-    if (mounted) setState(() => _fase = _Fase.narrando);
+    // Pasó el filtro: queda como el frame más fresco a narrar. Si ya había uno
+    // pendiente sin procesar, lo PISA (último gana — descarta el viejo).
+    _pendiente = (bytes: bytes, firma: firma, t: ahora);
+  }
 
-    final dataUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
-    final narracion = await _repo.narrarFrame(dataUrl, previa: _narracionPrevia);
-
-    if (narracion.isEmpty) {
-      _estaticos++; // el modelo dijo "sin cambios"
-    } else {
-      _estaticos = 0;
-      _narracionPrevia = narracion;
-      _caracteresTts += narracion.length;
-      // El TEXTO se muestra YA; la voz va en segundo plano y nunca bloquea el
-      // loop ni lo tumba. Si la voz falla, seguimos narrando en texto.
-      if (mounted) setState(() => _narracionActual = narracion);
-      _tts.narrar(
-        narracion,
-        onFallo: _avisarSinVoz,
-        onDispositivo: _avisarVozTelefono,
-      );
+  /// Loop de VISIÓN: una sola petición en vuelo. Cuando se libera, toma el
+  /// frame MÁS fresco disponible, narra, y vuelve a tomar el siguiente más
+  /// fresco. Nunca espera al audio (el TTS va en segundo plano e interrumpible).
+  Future<void> _loopVision() async {
+    while (_activa && mounted) {
+      final frame = _pendiente;
+      if (frame == null || _enVuelo) {
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        continue;
+      }
+      _pendiente = null; // lo tomo; lo que llegue después será el próximo
+      await _narrarFrame(frame);
     }
-    if (mounted && _activa) setState(() => _fase = _Fase.observando);
+  }
+
+  Future<void> _narrarFrame(
+    ({Uint8List bytes, List<int> firma, DateTime t}) frame,
+  ) async {
+    _enVuelo = true;
+    // Contabilidad de costo: cuenta como envío real recién ahora (no en captura).
+    _ultimoEnvio = frame.t;
+    _envios.add(frame.t);
+    _firmaPrevia = frame.firma;
+    _framesEnviados++;
+    if (mounted) {
+      setState(() {
+        _fase = _Fase.narrando;
+        _pensando = true; // "mirando…": honesto mientras el modelo piensa
+      });
+    }
+    try {
+      final dataUrl = 'data:image/jpeg;base64,${base64Encode(frame.bytes)}';
+      final narracion =
+          await _repo.narrarFrame(dataUrl, previa: _narracionPrevia);
+      if (!_activa || !mounted) return;
+      if (narracion.isEmpty) {
+        _estaticos++; // el modelo dijo "sin cambios" (o se saltó el frame)
+      } else {
+        _estaticos = 0;
+        _narracionPrevia = narracion;
+        _caracteresTts += narracion.length;
+        // El TEXTO se muestra YA; la voz va en segundo plano, interrumpible, y
+        // nunca bloquea el loop. Si la voz falla, seguimos narrando en texto.
+        setState(() => _narracionActual = narracion);
+        _tts.narrar(
+          narracion,
+          onFallo: _avisarSinVoz,
+          onDispositivo: _avisarVozTelefono,
+        );
+      }
+    } catch (_) {
+      // Un frame que falla (timeout/red) no tumba la sesión: se salta.
+    } finally {
+      _enVuelo = false;
+      if (mounted && _activa) {
+        setState(() {
+          _fase = _Fase.observando;
+          _pensando = false;
+        });
+      }
+    }
   }
 
   /// Firma del frame: thumbnail 16x16 en gris (256 valores), vía dart:ui.
@@ -321,6 +385,15 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
                   )
                 else if (_narracionActual.isNotEmpty)
                   _Narracion(_narracionActual),
+                // Indicador honesto de que sigue vivo mientras la visión piensa
+                // (no congelado). Solo en vivo y cuando hay una petición en vuelo.
+                if (_activa &&
+                    _pensando &&
+                    _fase != _Fase.terminado &&
+                    _fase != _Fase.error) ...[
+                  const SizedBox(height: 10),
+                  const _Mirando(),
+                ],
                 if (_activa && _sinVoz) ...[
                   const SizedBox(height: 8),
                   const _AvisoSinVoz(),
@@ -437,6 +510,51 @@ class _Narracion extends StatelessWidget {
           height: 1.3,
           shadows: [Shadow(color: Colors.black, blurRadius: 8)],
         ),
+      ),
+    );
+  }
+}
+
+/// Indicador honesto "mirando…": un puntito que late mientras la visión piensa,
+/// para que la sesión no se sienta congelada entre narraciones.
+class _Mirando extends StatefulWidget {
+  const _Mirando();
+  @override
+  State<_Mirando> createState() => _MirandoState();
+}
+
+class _MirandoState extends State<_Mirando>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween(begin: 0.35, end: 1.0).animate(_ctrl),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: const [
+          Icon(Icons.visibility_outlined, color: Colors.white70, size: 16),
+          SizedBox(width: 6),
+          Text(
+            'mirando…',
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 13,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
       ),
     );
   }

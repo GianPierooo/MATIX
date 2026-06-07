@@ -52,6 +52,10 @@ Marcas: ✅ Hecho · ⚠️ Parcial (sirve pero le falta algo concreto) · ❌ F
   frames/min, duración, auto-stop).
 - ✅ Narración por frame (gpt-4o-mini detail=low) + TTS no bloqueante.
 - ✅ Reintentos transitorios en `narrar-frame` y en TTS (502/timeout no la matan).
+- ✅ Ritmo en vivo sin trabas: captura/visión desacopladas (último frame gana,
+  sin cola), una sola petición de visión en vuelo, TTS interrumpible por época
+  (nada de audio viejo acumulado), timeout agresivo por proveedor (~3.5 s) +
+  failover rápido respetando el proveedor pinneado, e indicador "mirando…".
 
 ### Planificación / scheduling
 - ✅ Vista «Hoy» (timeline del plan) en Inicio.

@@ -8,10 +8,14 @@ class NarracionRepository {
   final MatixClient _client;
 
   Future<String> narrarFrame(String imagenDataUrl, {String? previa}) async {
+    // Timeout ACOTADO: el cerebro ya tiene timeout agresivo por proveedor y
+    // failover rápido, así que un frame jamás debería tardar 20s. Si igual
+    // cuelga, lo soltamos y el siguiente frame (más fresco) lo reintenta — la
+    // cámara va en tiempo real, no se queda pegada esperando.
     final j = await _client.post(
       '/api/v1/matix/narrar-frame',
       {'imagen': imagenDataUrl, 'narracion_previa': ?previa},
-      timeout: const Duration(seconds: 20),
+      timeout: const Duration(seconds: 12),
     );
     return (j['narracion'] as String?)?.trim() ?? '';
   }

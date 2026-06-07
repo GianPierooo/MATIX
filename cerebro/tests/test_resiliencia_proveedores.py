@@ -138,6 +138,65 @@ async def test_narrar_frame_failover_a_claude(monkeypatch):
     assert out == "veo un escritorio con una laptop"
 
 
+def test_timeout_amerita_failover():
+    # Un `asyncio.wait_for` agotado lanza `TimeoutError`: debe contarse como
+    # transitorio (cuelga el proveedor) y ameritar failover.
+    import asyncio
+    assert llm._es_error_de_proveedor(asyncio.TimeoutError()) is True
+    assert llm._amerita_failover(TimeoutError()) is True
+
+
+async def test_narrar_frame_timeout_primario_cae_al_otro(monkeypatch):
+    # El primario CUELGA (más que el timeout agresivo) → no congela la cámara:
+    # se corta y cae al otro proveedor al instante (preferencia 'auto').
+    import asyncio
+    monkeypatch.setattr(modelos_llm, "proveedor_preferido", lambda: "auto")
+    monkeypatch.setattr(llm, "_NARRACION_TIMEOUT_S", 0.05)
+
+    async def fake_vision(model, system, pedido, imagen, *, max_tokens):
+        if modelos_llm.proveedor_de_id(model) == "openai":
+            await asyncio.sleep(1)  # cuelga: supera el timeout agresivo
+            return "no debería llegar"
+        return "ahora veo a Claude respondiendo rápido"
+
+    monkeypatch.setattr(llm, "_vision_en", fake_vision)
+    out = await llm.narrar_frame("data:image/jpeg;base64,xxx")
+    assert out == "ahora veo a Claude respondiendo rápido"
+
+
+async def test_narrar_frame_pinned_no_cruza_de_proveedor(monkeypatch):
+    # Si el usuario FIJÓ un proveedor (Claude), un fallo NO debe cruzar a OpenAI:
+    # se respeta la preferencia y el frame queda sin frase (la cámara sigue).
+    monkeypatch.setattr(modelos_llm, "proveedor_preferido", lambda: "anthropic")
+    vistos: list[str] = []
+
+    async def fake_vision(model, system, pedido, imagen, *, max_tokens):
+        vistos.append(model)
+        raise _ErrTransitorio()  # incluso un 5xx: NO cruzamos cuando está pinneado
+
+    monkeypatch.setattr(llm, "_vision_en", fake_vision)
+    out = await llm.narrar_frame("data:image/jpeg;base64,xxx")
+    assert out == ""  # degradó sin frase
+    assert vistos, "debió intentar el proveedor preferido"
+    assert all(modelos_llm.proveedor_de_id(m) == "anthropic" for m in vistos)
+    assert not any(modelos_llm.proveedor_de_id(m) == "openai" for m in vistos)
+
+
+async def test_narrar_frame_pinned_ok_no_toca_el_otro(monkeypatch):
+    # Pinneado a Claude y responde: jamás se intenta OpenAI.
+    monkeypatch.setattr(modelos_llm, "proveedor_preferido", lambda: "anthropic")
+    vistos: list[str] = []
+
+    async def fake_vision(model, system, pedido, imagen, *, max_tokens):
+        vistos.append(model)
+        return "veo a Claude narrando la escena"
+
+    monkeypatch.setattr(llm, "_vision_en", fake_vision)
+    out = await llm.narrar_frame("data:image/jpeg;base64,xxx")
+    assert out == "veo a Claude narrando la escena"
+    assert all(modelos_llm.proveedor_de_id(m) == "anthropic" for m in vistos)
+
+
 # ── TTS: cadena ElevenLabs → OpenAI ──────────────────────────────────────────
 
 

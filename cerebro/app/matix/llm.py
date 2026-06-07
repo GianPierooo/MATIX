@@ -65,6 +65,9 @@ def _es_error_de_proveedor(e: Exception) -> bool:
         "ServiceUnavailableError",
         "OverloadedError",
         "Timeout",
+        # `asyncio.wait_for` agota → `TimeoutError` (builtin en 3.11+): es un
+        # proveedor que cuelga → transitorio, amerita failover/reintento.
+        "TimeoutError",
         "ConnectError",
         "ReadTimeout",
     }
@@ -1482,6 +1485,12 @@ _NARRACION_SYSTEM = (
     "esencialmente la MISMA que la narración previa, responde EXACTAMENTE: SIN CAMBIOS."
 )
 
+# Timeout AGRESIVO por intento de visión en la cámara en vivo: si el proveedor
+# primario cuelga, no congelamos la narración esperándolo — se corta a los pocos
+# segundos y (si la preferencia es 'auto') cae al otro al instante. La cámara va
+# en tiempo real: más vale saltar un frame que quedarse pegado describiéndolo.
+_NARRACION_TIMEOUT_S = 3.5
+
 
 async def _openai_vision(
     model: str, system: str, pedido: str, imagen_data_url: str, *, max_tokens: int
@@ -1566,15 +1575,26 @@ async def narrar_frame(
         if not previa
         else f"Narración previa: «{previa}». Di qué cambió o qué ves ahora."
     )
-    # Modelo de visión barato del proveedor preferido; failover al otro.
+    # Modelo de visión barato del proveedor preferido.
     model = _modelo_efectivo("gpt-4o-mini")
-    try:
-        out, _efectivo, _hubo = await _con_failover(
-            model,
-            lambda m: _vision_en(m, _NARRACION_SYSTEM, pedido, imagen_data_url, max_tokens=60),
+    # Cada intento con TIMEOUT AGRESIVO: si cuelga, no congela la cámara. Solo
+    # cruzamos de proveedor cuando la preferencia es 'auto'; si el usuario fijó
+    # uno (p. ej. Claude), respetamos su elección y NO intentamos el otro.
+    permitir_failover = modelos_llm.proveedor_preferido() == "auto"
+
+    async def _intento(m: str) -> str:
+        return await asyncio.wait_for(
+            _vision_en(m, _NARRACION_SYSTEM, pedido, imagen_data_url, max_tokens=60),
+            timeout=_NARRACION_TIMEOUT_S,
         )
+
+    try:
+        if permitir_failover:
+            out, _efectivo, _hubo = await _con_failover(model, _intento)
+        else:
+            out = await _intento(model)
     except Exception:  # noqa: BLE001 — la cámara sigue; este frame queda sin frase
-        logger.warning("narrar_frame: visión no disponible en ningún proveedor")
+        logger.warning("narrar_frame: visión no disponible (timeout/proveedor)")
         return ""
     out = out.strip()
     if out.upper().strip(" .!¡¿?\"'") == "SIN CAMBIOS":
