@@ -225,6 +225,10 @@ class _MatixAppState extends ConsumerState<MatixApp>
       //   `resumed` espurio: eso era lo que lo mataba a los 0 s.
       // - "segundo plano" OFF → pipeline in-app.
       unawaited(wake.alFrente());
+      // Widget al frente: re-empuja con el reloj ACTUAL (recalcula "próximo" sin
+      // datos rancios) y, si el plan cacheado es de otro día, lo refetch (el
+      // listener de `planDiaProvider` empuja al widget cuando llegue el nuevo).
+      _refrescarWidgetEnResume();
     } else if (estado == AppLifecycleState.paused ||
         estado == AppLifecycleState.detached) {
       // A segundo plano. Con "segundo plano" ON el FGS YA está corriendo y
@@ -423,6 +427,24 @@ class _MatixAppState extends ConsumerState<MatixApp>
       );
     } catch (e) {
       if (kDebugMode) debugPrint('Deep link evento falló: $e');
+    }
+  }
+
+  /// Al volver al frente: empuja el widget con el reloj ACTUAL (recalcula el
+  /// "próximo", que es time-dependent y se vuelve rancio entre refrescos) y, si
+  /// el plan cacheado es de OTRO día, lo invalida para refetch (cubre "día
+  /// nuevo"); el listener de `planDiaProvider` empuja la versión fresca al llegar.
+  void _refrescarWidgetEnResume() {
+    final plan = ref.read(planDiaProvider).valueOrNull;
+    final ahora = DateTime.now();
+    final hoyIso = '${ahora.year.toString().padLeft(4, '0')}-'
+        '${ahora.month.toString().padLeft(2, '0')}-'
+        '${ahora.day.toString().padLeft(2, '0')}';
+    if (plan == null || plan.fecha != hoyIso) {
+      ref.invalidate(planDiaProvider);
+    }
+    if (plan != null) {
+      unawaited(WidgetService.actualizar(plan, ahora));
     }
   }
 

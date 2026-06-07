@@ -43,6 +43,7 @@ class WidgetService {
 
     await s('vacio', d.vacio ? '1' : '0');
     await s('sin_pendientes', d.sinPendientes ? '1' : '0');
+    await s('fecha', d.fecha);
     await s('actualizado', d.actualizado);
 
     // Próximo (una sola cosa, glanceable).
@@ -51,22 +52,25 @@ class WidgetService {
     await s('prox_hora', p?.hora ?? '');
     await s('prox_titulo', p?.titulo ?? '');
     await s('prox_sub', p?.sub ?? '');
+    await s('prox_rel', d.proximoRel);
     await s('prox_color', p?.colorHex ?? '#2D7FF9');
     await s('prox_fijo', (p?.fijo ?? false) ? '1' : '0');
     await s('prox_payload', p?.payload ?? 'hoy');
 
-    // Hoy (lista capada + overflow).
+    // Hoy (lista capada + overflow). El "+X más" lo arma el nativo combinando
+    // este overflow con las filas que oculte por tamaño del widget.
     await s('hoy_count', d.hoy.length.toString());
     for (var i = 0; i < d.hoy.length; i++) {
       final it = d.hoy[i];
       await s('hoy_${i}_hora', it.hora);
       await s('hoy_${i}_titulo', it.titulo);
       await s('hoy_${i}_sub', it.sub);
+      await s('hoy_${i}_rel', i == 0 ? d.proximoRel : '');
       await s('hoy_${i}_color', it.colorHex);
       await s('hoy_${i}_fijo', it.fijo ? '1' : '0');
       await s('hoy_${i}_payload', it.payload);
     }
-    await s('hoy_overflow', d.overflow > 0 ? '+${d.overflow} más' : '');
+    await s('hoy_overflow_n', d.overflow.toString());
   }
 
   /// Registra el refresco periódico en background (WorkManager). Intervalo

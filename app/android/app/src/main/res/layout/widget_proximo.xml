@@ -1,26 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Widget "Próximo": compacto, una sola cosa (lo que toca ahora o lo
-     siguiente). El nativo SOLO renderiza las claves que empuja la app. -->
+<!-- Widget "Próximo": compacto y glanceable, una sola cosa con jerarquía fuerte
+     (hora grande monospace, título claro, relativo "en X min"). El nativo SOLO
+     renderiza las claves que empuja la app. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/prox_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@drawable/widget_bg"
-    android:padding="14dp">
+    android:padding="16dp">
 
-    <TextView
-        android:id="@+id/prox_label"
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="PRÓXIMO"
-        android:textColor="@color/matix_muted"
-        android:textSize="11sp"
-        android:textStyle="bold"
-        android:letterSpacing="0.1"
-        android:layout_marginBottom="6dp" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="8dp">
+        <TextView
+            android:id="@+id/prox_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="PRÓXIMO"
+            android:textColor="@color/matix_muted"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.12" />
+        <TextView
+            android:id="@+id/prox_rel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="@color/matix_accent"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 
-    <!-- Contenido cuando hay algo. -->
+    <!-- Contenido: barra de color + hora grande + título + sub. -->
     <LinearLayout
         android:id="@+id/prox_content"
         android:layout_width="match_parent"
@@ -29,18 +45,19 @@
         android:orientation="horizontal"
         android:gravity="center_vertical">
 
-        <TextView
+        <View
             android:id="@+id/prox_bar"
-            android:layout_width="4dp"
-            android:layout_height="38dp"
-            android:background="@color/matix_accent"
-            android:text=""
-            android:layout_marginEnd="10dp" />
+            android:layout_width="5dp"
+            android:layout_height="match_parent"
+            android:layout_marginTop="2dp"
+            android:layout_marginBottom="2dp"
+            android:background="@color/matix_accent" />
 
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:layout_marginStart="12dp"
             android:orientation="vertical">
 
             <TextView
@@ -49,8 +66,10 @@
                 android:layout_height="wrap_content"
                 android:text="--:--"
                 android:textColor="@color/matix_text"
-                android:textSize="15sp"
-                android:textStyle="bold" />
+                android:textSize="30sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:includeFontPadding="false" />
 
             <TextView
                 android:id="@+id/prox_titulo"
@@ -58,9 +77,11 @@
                 android:layout_height="wrap_content"
                 android:text=""
                 android:textColor="@color/matix_text"
-                android:textSize="15sp"
+                android:textSize="16sp"
+                android:textStyle="bold"
                 android:maxLines="2"
-                android:ellipsize="end" />
+                android:ellipsize="end"
+                android:layout_marginTop="2dp" />
 
             <TextView
                 android:id="@+id/prox_sub"
@@ -70,7 +91,8 @@
                 android:textColor="@color/matix_muted"
                 android:textSize="12sp"
                 android:maxLines="1"
-                android:ellipsize="end" />
+                android:ellipsize="end"
+                android:layout_marginTop="1dp" />
         </LinearLayout>
     </LinearLayout>
 

@@ -201,6 +201,21 @@ gestión agresiva — reusa la exención de batería (`entrega_background_servic
 Render nativo: validación en DISPOSITIVO (el unit local no lo prueba); la lógica
 de empuje sí está testeada.
 
+Pulido (2026-06-07): se corrigió la CAUSA real del deep link roto en "Hoy" — el
+helper `HomeWidgetLaunchIntent` hardcodea requestCode=0 y la igualdad de
+PendingIntent ignora el `data`, así que todas las filas colapsaban en un solo
+intent (abrían el mismo destino). Ahora un `deepLink(payload, requestCode único)`
+por ítem/widget hace que cada fila aterrice en su pantalla. Frescura: además del
+push on-change + WorkManager, se re-empuja al volver al frente (recalcula el
+"próximo" contra el reloj) y se invalida el plan si cambió la fecha (cubre "día
+nuevo"). Diseño: jerarquía fuerte (hora grande monospace + relativo "en X min"),
+barra de color por semántica (proyecto azul, evento fijo verde, vencido rojo,
+práctica tentativa ámbar), encabezado "HOY · fecha" con distintivo, primer ítem
+destacado y resto sobrio, estado celebratorio "¡Todo hecho!", y responsive de
+verdad (`onAppWidgetOptionsChanged`: chico = solo el próximo, grande = la lista).
+Fuente: monospace del sistema para la hora (Inter/JetBrains Mono no se pueden
+bundlear nativo sin GMS en el Honor; documentado).
+
 ### Capa 6 — Agente de PC (6.0a cimiento · 6.0b lectura · 6.1 organización)
 
 Daemon local `agente_pc/` (Python) que corre en la PC del usuario y abre una

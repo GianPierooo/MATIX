@@ -1,63 +1,102 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Widget "Hoy": lista de los ítems del día (actual + próximos), capada a 4
-     filas con "+X más". Filas FIJAS (RemoteViews-safe): la app empuja hasta 4 y
-     el nativo oculta las que sobran. Diferencia fijo (icono candado) de
-     tentativo (barra de color). -->
+<!-- Widget "Hoy": encabezado (HOY + fecha + distintivo de Matix), el PRÓXIMO
+     ítem destacado, y el resto más sobrio. Capado a 4 con "+X más". Filas FIJAS
+     (RemoteViews-safe); el provider oculta las que sobran (también según el
+     tamaño del widget). Estado celebratorio "todo hecho". -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/hoy_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@drawable/widget_bg"
-    android:padding="14dp">
+    android:padding="16dp">
 
     <LinearLayout
         android:id="@+id/hoy_header"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:layout_marginBottom="8dp">
+        android:gravity="center_vertical"
+        android:layout_marginBottom="10dp">
+        <View
+            android:layout_width="9dp"
+            android:layout_height="9dp"
+            android:background="@drawable/widget_dot"
+            android:layout_marginEnd="8dp" />
         <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="HOY"
+            android:textColor="@color/matix_text"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.1" />
+        <TextView
+            android:id="@+id/hoy_fecha"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="HOY"
+            android:text=""
             android:textColor="@color/matix_muted"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:letterSpacing="0.1" />
+            android:textSize="12sp"
+            android:layout_marginStart="8dp" />
         <TextView
             android:id="@+id/hoy_actualizado"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text=""
             android:textColor="@color/matix_muted"
-            android:textSize="11sp" />
+            android:textSize="11sp"
+            android:fontFamily="monospace" />
     </LinearLayout>
 
-    <!-- Fila 0 -->
-    <LinearLayout android:id="@+id/hoy_row_0" android:layout_width="match_parent"
-        android:layout_height="wrap_content" android:orientation="horizontal"
-        android:gravity="center_vertical" android:paddingTop="3dp" android:paddingBottom="3dp">
-        <TextView android:id="@+id/hoy_bar_0" android:layout_width="4dp" android:layout_height="26dp"
-            android:background="@color/matix_accent" android:layout_marginEnd="9dp" android:text="" />
-        <TextView android:id="@+id/hoy_hora_0" android:layout_width="42dp" android:layout_height="wrap_content"
-            android:text="" android:textColor="@color/matix_text" android:textSize="13sp" android:textStyle="bold" />
-        <TextView android:id="@+id/hoy_titulo_0" android:layout_width="0dp" android:layout_height="wrap_content"
-            android:layout_weight="1" android:text="" android:textColor="@color/matix_text" android:textSize="13sp"
-            android:maxLines="1" android:ellipsize="end" />
-        <TextView android:id="@+id/hoy_sub_0" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="" android:textColor="@color/matix_muted" android:textSize="11sp" android:layout_marginStart="6dp" />
+    <!-- Próximo DESTACADO (fila 0). -->
+    <LinearLayout
+        android:id="@+id/hoy_row_0"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/widget_row_hi"
+        android:padding="10dp"
+        android:layout_marginBottom="6dp">
+        <View android:id="@+id/hoy_bar_0" android:layout_width="5dp"
+            android:layout_height="match_parent" android:minHeight="34dp"
+            android:background="@color/matix_accent" android:layout_marginEnd="10dp" />
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:orientation="vertical">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical">
+                <TextView android:id="@+id/hoy_hora_0" android:layout_width="0dp"
+                    android:layout_height="wrap_content" android:layout_weight="1" android:text=""
+                    android:textColor="@color/matix_text" android:textSize="15sp"
+                    android:textStyle="bold" android:fontFamily="monospace" />
+                <TextView android:id="@+id/hoy_rel_0" android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" android:text=""
+                    android:textColor="@color/matix_accent" android:textSize="11sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+            <TextView android:id="@+id/hoy_titulo_0" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:text=""
+                android:textColor="@color/matix_text" android:textSize="14sp"
+                android:textStyle="bold" android:maxLines="1" android:ellipsize="end"
+                android:layout_marginTop="1dp" />
+            <TextView android:id="@+id/hoy_sub_0" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:text=""
+                android:textColor="@color/matix_muted" android:textSize="11sp" />
+        </LinearLayout>
     </LinearLayout>
 
-    <!-- Fila 1 -->
+    <!-- Resto, más sobrio (filas 1–3). -->
     <LinearLayout android:id="@+id/hoy_row_1" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:orientation="horizontal"
-        android:gravity="center_vertical" android:paddingTop="3dp" android:paddingBottom="3dp">
-        <TextView android:id="@+id/hoy_bar_1" android:layout_width="4dp" android:layout_height="26dp"
-            android:background="@color/matix_accent" android:layout_marginEnd="9dp" android:text="" />
-        <TextView android:id="@+id/hoy_hora_1" android:layout_width="42dp" android:layout_height="wrap_content"
-            android:text="" android:textColor="@color/matix_text" android:textSize="13sp" android:textStyle="bold" />
+        android:gravity="center_vertical" android:paddingTop="4dp" android:paddingBottom="4dp"
+        android:paddingStart="10dp" android:paddingEnd="2dp">
+        <View android:id="@+id/hoy_bar_1" android:layout_width="4dp" android:layout_height="24dp"
+            android:background="@color/matix_accent" android:layout_marginEnd="10dp" />
+        <TextView android:id="@+id/hoy_hora_1" android:layout_width="44dp" android:layout_height="wrap_content"
+            android:text="" android:textColor="@color/matix_text" android:textSize="13sp"
+            android:fontFamily="monospace" />
         <TextView android:id="@+id/hoy_titulo_1" android:layout_width="0dp" android:layout_height="wrap_content"
             android:layout_weight="1" android:text="" android:textColor="@color/matix_text" android:textSize="13sp"
             android:maxLines="1" android:ellipsize="end" />
@@ -65,14 +104,15 @@
             android:text="" android:textColor="@color/matix_muted" android:textSize="11sp" android:layout_marginStart="6dp" />
     </LinearLayout>
 
-    <!-- Fila 2 -->
     <LinearLayout android:id="@+id/hoy_row_2" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:orientation="horizontal"
-        android:gravity="center_vertical" android:paddingTop="3dp" android:paddingBottom="3dp">
-        <TextView android:id="@+id/hoy_bar_2" android:layout_width="4dp" android:layout_height="26dp"
-            android:background="@color/matix_accent" android:layout_marginEnd="9dp" android:text="" />
-        <TextView android:id="@+id/hoy_hora_2" android:layout_width="42dp" android:layout_height="wrap_content"
-            android:text="" android:textColor="@color/matix_text" android:textSize="13sp" android:textStyle="bold" />
+        android:gravity="center_vertical" android:paddingTop="4dp" android:paddingBottom="4dp"
+        android:paddingStart="10dp" android:paddingEnd="2dp">
+        <View android:id="@+id/hoy_bar_2" android:layout_width="4dp" android:layout_height="24dp"
+            android:background="@color/matix_accent" android:layout_marginEnd="10dp" />
+        <TextView android:id="@+id/hoy_hora_2" android:layout_width="44dp" android:layout_height="wrap_content"
+            android:text="" android:textColor="@color/matix_text" android:textSize="13sp"
+            android:fontFamily="monospace" />
         <TextView android:id="@+id/hoy_titulo_2" android:layout_width="0dp" android:layout_height="wrap_content"
             android:layout_weight="1" android:text="" android:textColor="@color/matix_text" android:textSize="13sp"
             android:maxLines="1" android:ellipsize="end" />
@@ -80,14 +120,15 @@
             android:text="" android:textColor="@color/matix_muted" android:textSize="11sp" android:layout_marginStart="6dp" />
     </LinearLayout>
 
-    <!-- Fila 3 -->
     <LinearLayout android:id="@+id/hoy_row_3" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:orientation="horizontal"
-        android:gravity="center_vertical" android:paddingTop="3dp" android:paddingBottom="3dp">
-        <TextView android:id="@+id/hoy_bar_3" android:layout_width="4dp" android:layout_height="26dp"
-            android:background="@color/matix_accent" android:layout_marginEnd="9dp" android:text="" />
-        <TextView android:id="@+id/hoy_hora_3" android:layout_width="42dp" android:layout_height="wrap_content"
-            android:text="" android:textColor="@color/matix_text" android:textSize="13sp" android:textStyle="bold" />
+        android:gravity="center_vertical" android:paddingTop="4dp" android:paddingBottom="4dp"
+        android:paddingStart="10dp" android:paddingEnd="2dp">
+        <View android:id="@+id/hoy_bar_3" android:layout_width="4dp" android:layout_height="24dp"
+            android:background="@color/matix_accent" android:layout_marginEnd="10dp" />
+        <TextView android:id="@+id/hoy_hora_3" android:layout_width="44dp" android:layout_height="wrap_content"
+            android:text="" android:textColor="@color/matix_text" android:textSize="13sp"
+            android:fontFamily="monospace" />
         <TextView android:id="@+id/hoy_titulo_3" android:layout_width="0dp" android:layout_height="wrap_content"
             android:layout_weight="1" android:text="" android:textColor="@color/matix_text" android:textSize="13sp"
             android:maxLines="1" android:ellipsize="end" />
@@ -103,10 +144,10 @@
         android:textColor="@color/matix_accent"
         android:textSize="12sp"
         android:paddingTop="4dp"
-        android:paddingStart="13dp"
+        android:paddingStart="14dp"
         android:visibility="gone" />
 
-    <!-- Estado vacío / día cerrado. -->
+    <!-- Estado vacío (sin plan). -->
     <TextView
         android:id="@+id/hoy_empty"
         android:layout_width="match_parent"
@@ -117,4 +158,29 @@
         android:textColor="@color/matix_muted"
         android:textSize="13sp"
         android:visibility="gone" />
+
+    <!-- Estado celebratorio "todo hecho". -->
+    <LinearLayout
+        android:id="@+id/hoy_hecho"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="¡Todo hecho!"
+            android:textColor="@color/matix_green"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Nada pendiente por hoy. Disfruta."
+            android:textColor="@color/matix_muted"
+            android:textSize="12sp"
+            android:layout_marginTop="2dp" />
+    </LinearLayout>
 </LinearLayout>

@@ -1,3 +1,5 @@
+import 'package:flutter/painting.dart' show Color;
+
 import '../../horario/domain/plan_dia.dart';
 import '../../mascota/domain/presencia.dart' show bloqueActual, bloqueSiguiente;
 import '../../../theme/matix_colors.dart';
@@ -6,20 +8,45 @@ import '../../../theme/matix_colors.dart';
 /// plan del día YA determinista (fuente única) y los empuja al almacenamiento
 /// del widget; el nativo solo lee y pinta. Sin lógica de negocio en el nativo.
 
-/// `#RRGGBB` del color de Matix para un `tipo` de bloque. Espeja el `_colorTipo`
-/// de `plan_dia_section.dart` (misma fuente de tokens), pero como hex para el
-/// nativo. PURO.
-String colorHexTipo(String tipo) {
-  final c = switch (tipo) {
-    'clase' => MatixColors.teal,
-    'evento' => MatixColors.purple,
-    'ancla' => MatixColors.muted,
-    'transicion' => MatixColors.muted,
-    'skill' => MatixColors.pink,
-    'tarea' => MatixColors.amber,
-    _ => MatixColors.accent, // trabajo y default
-  };
-  return '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
+String _hex(Color c) =>
+    '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
+
+/// Color de la barra del ítem según su semántica (igual que la app, pero
+/// simplificado para el widget): proyecto/trabajo en AZUL, eventos fijos en
+/// VERDE, vencidos/urgentes en ROJO, prácticas tentativas en ÁMBAR. PURO.
+String colorWidget(String tipo, bool fijo, {bool vencido = false}) {
+  final c = vencido
+      ? MatixColors.red
+      : fijo
+          ? MatixColors.green // clase / evento / ancla (fijo)
+          : tipo == 'skill'
+              ? MatixColors.amber // práctica tentativa
+              : MatixColors.accent; // proyecto / trabajo / tarea (azul)
+  return _hex(c);
+}
+
+/// Texto relativo del próximo ítem: "Ahora" si ya empezó, si no "en X min" /
+/// "en X h Y min". Se calcula al empujar (es aproximado entre refrescos). PURO.
+String relativoDe(BloquePlan b, int ahoraMin) {
+  if (b.inicioMin <= ahoraMin) return 'Ahora';
+  final m = b.inicioMin - ahoraMin;
+  if (m >= 60) {
+    final h = m ~/ 60;
+    final mm = m % 60;
+    return mm > 0 ? 'en $h h $mm min' : 'en $h h';
+  }
+  return 'en $m min';
+}
+
+/// Fecha corta en español, sin depender de `initializeDateFormatting` (para que
+/// el cálculo sea PURO y testeable sin init de locale). Ej: "lun 8 jun".
+String fechaCorta(DateTime d) {
+  const dias = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
+  const meses = [
+    'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+    'jul', 'ago', 'sep', 'oct', 'nov', 'dic',
+  ];
+  return '${dias[d.weekday - 1]} ${d.day} ${meses[d.month - 1]}';
 }
 
 /// Un ítem del widget (próximo o fila de hoy). Todo precalculado en Dart.
@@ -45,7 +72,9 @@ class WidgetItem {
 class DatosWidget {
   const DatosWidget({
     required this.vacio,
+    required this.fecha,
     required this.proximo,
+    required this.proximoRel,
     required this.hoy,
     required this.overflow,
     required this.actualizado,
@@ -55,8 +84,14 @@ class DatosWidget {
   /// día" (nunca en blanco ni roto).
   final bool vacio;
 
+  /// Fecha legible para el encabezado ("lun 8 jun").
+  final String fecha;
+
   /// Lo que toca AHORA o lo siguiente. `null` si ya no queda nada hoy.
   final WidgetItem? proximo;
+
+  /// Texto relativo del próximo ("Ahora" / "en 25 min"). Vacío si no hay.
+  final String proximoRel;
 
   /// Ítems del día desde ahora (actual + próximos), capados.
   final List<WidgetItem> hoy;
@@ -69,22 +104,26 @@ class DatosWidget {
 
   const DatosWidget.vacioInicial()
       : vacio = true,
+        fecha = '',
         proximo = null,
+        proximoRel = '',
         hoy = const [],
         overflow = 0,
         actualizado = '';
 
-  /// `true` cuando hay plan pero no queda nada pendiente hoy (día cerrado).
+  /// `true` cuando hay plan pero no queda nada pendiente hoy (día cerrado) →
+  /// estado celebratorio "todo hecho", no un widget vacío triste.
   bool get sinPendientes => !vacio && proximo == null && hoy.isEmpty;
 }
 
-WidgetItem _item(BloquePlan b) {
+WidgetItem _item(BloquePlan b, int ahoraMin) {
   final ctx = b.proyecto ?? b.skill;
+  final vencido = b.finMin <= ahoraMin; // (no aparece con selección de upcoming)
   return WidgetItem(
     hora: b.inicio,
     titulo: b.titulo,
     fijo: b.esFijo,
-    colorHex: colorHexTipo(b.tipo),
+    colorHex: colorWidget(b.tipo, b.esFijo, vencido: vencido),
     sub: b.esFijo ? 'Fijo' : (ctx ?? 'Tentativo'),
     payload: b.tareaId != null ? 'tarea:${b.tareaId}' : 'hoy',
   );
@@ -95,7 +134,7 @@ WidgetItem _item(BloquePlan b) {
 ///
 /// - Sin plan o sin bloques → estado vacío ("Abre Matix…").
 /// - "Próximo" = el bloque que cubre AHORA, o el siguiente; `null` si ya no
-///   queda nada (día cerrado).
+///   queda nada (día cerrado → estado "todo hecho").
 /// - "Hoy" = actual + próximos (de ahora en adelante), capado a [maxHoy] con
 ///   "+X más" para el resto.
 DatosWidget construirDatosWidget(
@@ -104,7 +143,15 @@ DatosWidget construirDatosWidget(
   int maxHoy = 4,
 }) {
   if (plan == null || plan.bloques.isEmpty) {
-    return const DatosWidget.vacioInicial();
+    return DatosWidget(
+      vacio: true,
+      fecha: fechaCorta(ahora),
+      proximo: null,
+      proximoRel: '',
+      hoy: const [],
+      overflow: 0,
+      actualizado: '',
+    );
   }
   final ahoraMin = ahora.hour * 60 + ahora.minute;
 
@@ -118,12 +165,14 @@ DatosWidget construirDatosWidget(
   final siguiente = bloqueSiguiente(plan.bloques, ahoraMin);
   final prox = actual ?? siguiente;
 
-  final hoy = relevantes.take(maxHoy).map(_item).toList();
+  final hoy = relevantes.take(maxHoy).map((b) => _item(b, ahoraMin)).toList();
   final overflow = relevantes.length - hoy.length;
 
   return DatosWidget(
     vacio: false,
-    proximo: prox == null ? null : _item(prox),
+    fecha: fechaCorta(ahora),
+    proximo: prox == null ? null : _item(prox, ahoraMin),
+    proximoRel: prox == null ? '' : relativoDe(prox, ahoraMin),
     hoy: hoy,
     overflow: overflow < 0 ? 0 : overflow,
     actualizado: hhmmDesdeMin(ahoraMin),

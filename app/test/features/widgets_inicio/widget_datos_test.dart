@@ -62,9 +62,11 @@ void main() {
       expect(d.proximo!.fijo, isFalse);
       expect(d.proximo!.sub, 'OneXotic');
       expect(d.proximo!.payload, 'tarea:t1'); // deep link a la tarea
+      expect(d.proximoRel, 'Ahora'); // 08:30–10:00 cubre las 09:00
+      expect(d.fecha, 'lun 8 jun'); // 2026-06-08 es lunes
     });
 
-    test('si nada cubre ahora, toma el SIGUIENTE', () {
+    test('si nada cubre ahora, toma el SIGUIENTE con su relativo', () {
       final d = construirDatosWidget(
         _plan([_b(inicio: '11:00', fin: '12:00', titulo: 'Gym', tipo: 'evento',
             tentativo: false)]),
@@ -74,6 +76,7 @@ void main() {
       expect(d.proximo!.fijo, isTrue);
       expect(d.proximo!.sub, 'Fijo');
       expect(d.proximo!.payload, 'hoy'); // sin tareaId → abre Inicio
+      expect(d.proximoRel, 'en 2 h'); // 09:00 → 11:00
     });
 
     test('día cerrado (nada por delante) → sin pendientes', () {
@@ -113,13 +116,23 @@ void main() {
     });
   });
 
-  group('colorHexTipo (tokens de Matix por tipo)', () {
-    test('mapea cada tipo a su hex', () {
-      expect(colorHexTipo('clase'), '#3CCFCF'); // teal
-      expect(colorHexTipo('evento'), '#9B7BFF'); // purple
-      expect(colorHexTipo('tarea'), '#E0A33A'); // amber
-      expect(colorHexTipo('trabajo'), '#2D7FF9'); // accent
-      expect(colorHexTipo('desconocido'), '#2D7FF9'); // default accent
+  group('colorWidget (semántica de barra por ítem)', () {
+    test('proyecto/trabajo → azul; práctica tentativa → ámbar', () {
+      expect(colorWidget('trabajo', false), '#2D7FF9'); // proyecto azul
+      expect(colorWidget('tarea', false), '#2D7FF9'); // tarea tentativa azul
+      expect(colorWidget('skill', false), '#E0A33A'); // práctica ámbar
+    });
+    test('evento fijo → verde; vencido → rojo', () {
+      expect(colorWidget('clase', true), '#21D07A'); // fijo verde
+      expect(colorWidget('evento', true), '#21D07A');
+      expect(colorWidget('tarea', false, vencido: true), '#FF4D5E'); // rojo
+    });
+  });
+
+  group('fechaCorta', () {
+    test('formatea en español sin init de locale', () {
+      expect(fechaCorta(DateTime(2026, 6, 8)), 'lun 8 jun'); // lunes
+      expect(fechaCorta(DateTime(2026, 12, 25)), 'vie 25 dic'); // viernes
     });
   });
 }
