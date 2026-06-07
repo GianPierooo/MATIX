@@ -65,6 +65,15 @@ async def _run(config: ConfigAgente) -> int:
 
 
 def main() -> int:
+    # Línea a línea aunque la salida esté redirigida (no solo en TTY): así los
+    # mensajes de diagnóstico ("conectado al cerebro", errores) aparecen al
+    # instante en cualquier terminal o log.
+    for flujo in (sys.stdout, sys.stderr):
+        try:
+            flujo.reconfigure(line_buffering=True)  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            pass
+
     config = cargar_config()
 
     if not config.agente_pc_token:
