@@ -403,6 +403,18 @@ async def revisar_rituales(db: Postgrest, *, ahora: datetime | None = None) -> d
             except Exception:  # noqa: BLE001
                 logger.debug("ritual ya marcado en su período: %s", ritual)
 
+        # Al cerrar el día disparamos UNA primera ronda de rendición de cuentas
+        # con sus botones de acción, justo cuando el usuario revisa lo del día.
+        # Best-effort: si falla, el ritual ya quedó marcado y el tick periódico
+        # lo recogerá igual en pasadas siguientes.
+        if ritual == "cierre" and algun_ok:
+            try:
+                from . import rendicion_cuentas
+
+                await rendicion_cuentas.revisar_rendicion_cuentas(db, ahora=ahora)
+            except Exception:  # noqa: BLE001
+                logger.exception("rendicion_cuentas tras cierre: fallo")
+
     if enviados_ok:
         logger.info("scheduler: %d ritual(es) enviado(s) por push", enviados_ok)
     return {"rituales": enviados_ok}
@@ -676,6 +688,13 @@ def iniciar(db: Postgrest) -> None:
         await correr_job("recordatorios", revisar_y_enviar(db))
         await correr_job("rituales", revisar_rituales(db))
         await correr_job("nudges", revisar_nudges(db))
+        # Rendición de cuentas (Push con botones de acción): chequeo periódico
+        # cada minuto, con dedup por tarea + tope de niveles + silencio nocturno.
+        from . import rendicion_cuentas
+        await correr_job(
+            "rendicion_cuentas",
+            rendicion_cuentas.revisar_rendicion_cuentas(db),
+        )
         await correr_job(
             "automatizaciones", automatizaciones.revisar_automatizaciones(db)
         )

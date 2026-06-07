@@ -29,6 +29,7 @@ import '../features/proactividad/domain/nivel_proactividad.dart';
 import '../features/proactividad/providers/proactividad_providers.dart';
 import '../features/planificador/application/plan_dia_controller.dart';
 import '../features/planificador/domain/disponibilidad.dart';
+import '../features/push/application/entrega_background_service.dart';
 import '../features/push/data/push_repository.dart';
 import '../features/repaso/presentation/repaso_semanal_screen.dart';
 import '../features/repaso/providers/repaso_providers.dart';
@@ -354,6 +355,53 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
             icon: Icons.notifications_off_outlined,
             onTap: _cancelarTodas,
             destructive: true,
+          ),
+
+          // Entrega en background — crítico en MagicOS/Honor, donde el SO
+          // mata apps de fondo agresivamente y los pushes / botones de
+          // acción se vuelven poco confiables sin esta exención.
+          Consumer(
+            builder: (context, ref, _) {
+              final estado = ref.watch(exencionBateriaProvider);
+              return estado.when(
+                data: (exenta) => _Accion(
+                  label: exenta
+                      ? 'Entrega en background: OK'
+                      : 'Entrega en background: optimizada',
+                  icon: exenta
+                      ? Icons.battery_charging_full
+                      : Icons.battery_alert_outlined,
+                  subtitle: exenta
+                      ? 'Matix puede entregar pushes y los botones de acción '
+                          'funcionan aunque la app esté cerrada.'
+                      : 'En Honor/MagicOS y otros OEM, el SO puede atrasar o '
+                          'cancelar pushes y los botones de acción si Matix '
+                          'está optimizada. Toca para conceder la exención.',
+                  subtitleColor:
+                      exenta ? MatixColors.green : MatixColors.amber,
+                  onTap: exenta
+                      ? null
+                      : () async {
+                          await ref
+                              .read(entregaBackgroundServiceProvider)
+                              .pedirExencion();
+                          ref.invalidate(exencionBateriaProvider);
+                        },
+                ),
+                loading: () => const _Accion(
+                  label: 'Entrega en background',
+                  icon: Icons.battery_unknown,
+                  subtitle: 'Comprobando…',
+                  onTap: null,
+                ),
+                error: (_, _) => const _Accion(
+                  label: 'Entrega en background',
+                  icon: Icons.battery_unknown,
+                  subtitle: 'No pude comprobar el estado.',
+                  onTap: null,
+                ),
+              );
+            },
           ),
 
           const _Seccion('Probar notificaciones (diagnóstico)'),

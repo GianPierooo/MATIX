@@ -8,6 +8,32 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
+import '../features/push/application/rendicion_cuentas_background.dart'
+    show manejarTapRendicionCuentas;
+
+/// Handler de tap en BACKGROUND / app cerrada.
+///
+/// El plugin `flutter_local_notifications` lo llama en un isolate aparte
+/// cuando el usuario toca un BOTÓN DE ACCIÓN de la notificación con la app
+/// cerrada. Debe ser top-level con `@pragma('vm:entry-point')`. Decide qué
+/// hacer según el `actionId` y el `payload`.
+///
+/// Caso rendición de cuentas: el `payload` viene como `rc:<tarea_id>` y el
+/// `actionId` es `hecho`/`manana`/`mas_tarde`. Llamamos al cerebro vía HTTP
+/// y NO abrimos la app — el botón actúa con la app cerrada.
+@pragma('vm:entry-point')
+void manejarTapNotificacionEnBackground(NotificationResponse resp) {
+  final accion = resp.actionId;
+  final payload = resp.payload;
+  if (accion == null || payload == null) return;
+  if (payload.startsWith('rc:')) {
+    final tareaId = payload.substring('rc:'.length);
+    // Fire-and-forget: el isolate de background tiene timeout corto. El handler
+    // valida y llama al cerebro; nunca lanza.
+    manejarTapRendicionCuentas(tareaId: tareaId, accion: accion);
+  }
+}
+
 /// Servicio de notificaciones locales del Paso 11.
 ///
 /// Modelo simple: el cerebro no envía push. La app programa una
@@ -81,8 +107,21 @@ class NotificacionesService {
       await _plugin.initialize(
         settings,
         onDidReceiveNotificationResponse: (resp) {
-          _onTapHandler?.call(resp.payload);
+          // App en foreground: ¿es un botón de rendición de cuentas?
+          final accion = resp.actionId;
+          final payload = resp.payload;
+          if (accion != null && payload != null && payload.startsWith('rc:')) {
+            manejarTapRendicionCuentas(
+              tareaId: payload.substring('rc:'.length),
+              accion: accion,
+            );
+            return;
+          }
+          _onTapHandler?.call(payload);
         },
+        // App CERRADA / background: top-level handler para actions de notif.
+        onDidReceiveBackgroundNotificationResponse:
+            manejarTapNotificacionEnBackground,
       );
 
       // 3) Crear el canal explícitamente. Aunque el plugin lo crea al
@@ -299,6 +338,63 @@ class NotificacionesService {
       debugPrint('Notif: no pude mostrar ahora ($e).');
     }
   }
+
+  /// Muestra una notificación con BOTONES DE ACCIÓN.
+  ///
+  /// `acciones` es la lista de IDs en orden visible. Cada ID debe estar en
+  /// `_ETIQUETAS_ACCIONES` (mapeadas a texto legible). El handler de tap
+  /// (foreground y background) recibe `actionId` + `payload` y decide qué
+  /// hacer — funciona con la app cerrada.
+  ///
+  /// Usado por la rendición de cuentas: "hecho" / "mas_tarde" / "manana".
+  Future<void> mostrarConAcciones({
+    required int id,
+    required String titulo,
+    required String cuerpo,
+    required List<String> acciones,
+    required String payload,
+  }) async {
+    if (!_inicializado) await inicializar();
+    final botones = <AndroidNotificationAction>[];
+    for (final a in acciones) {
+      final etiqueta = _etiquetasAcciones[a];
+      if (etiqueta == null) continue;
+      botones.add(AndroidNotificationAction(
+        a,
+        etiqueta,
+        // showsUserInterface=false: el tap NO abre la app — el botón actúa
+        // por sí solo. `cancelNotification=true`: la notif se cierra tras el
+        // tap (el cerebro confirmará la acción aparte si hace falta).
+        showsUserInterface: false,
+        cancelNotification: true,
+      ));
+    }
+    final detalles = NotificationDetails(
+      android: AndroidNotificationDetails(
+        _canalId,
+        _canalNombre,
+        channelDescription: _canalDescripcion,
+        importance: Importance.high,
+        priority: Priority.high,
+        actions: botones,
+        // Cuerpo expandible (la lista de tareas puede ser larga).
+        styleInformation: BigTextStyleInformation(cuerpo),
+      ),
+    );
+    try {
+      await _plugin.show(id, titulo, cuerpo, detalles, payload: payload);
+    } catch (e) {
+      debugPrint('Notif: no pude mostrar con acciones ($e).');
+    }
+  }
+
+  /// Mapa de IDs → etiqueta visible del botón. Sincronizado con el cerebro:
+  /// `cerebro/app/matix/rendicion_cuentas.py:armar_contenido`.
+  static const _etiquetasAcciones = <String, String>{
+    'hecho': 'Sí, lo hice',
+    'mas_tarde': 'Más tarde hoy',
+    'manana': 'Mañana',
+  };
 
   /// Cuántas notificaciones hay programadas (diagnóstico). 0 si la lectura
   /// falla.

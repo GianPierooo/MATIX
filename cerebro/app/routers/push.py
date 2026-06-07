@@ -11,9 +11,13 @@ from __future__ import annotations
 
 import asyncio
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 
 from ..db import Postgrest, get_db
+from ..matix import horario, rendicion_cuentas, rollover
 from ..matix.push_fcm import TokenInvalido, enviar_push
 from ..schemas.push import (
     ProbarPushRequest,
@@ -104,10 +108,10 @@ async def probar(
 
 @router.post("/revisar")
 async def revisar(db: Postgrest = Depends(get_db)) -> dict:
-    """Corre AHORA un tick del scheduler (recordatorios + rituales), sin
-    esperar el minuto. Útil para probar: crea un evento/tarea con
-    recordatorio cercano (o pon la hora del ritual al minuto actual) y llama
-    a esto. Devuelve cuántos mandó."""
+    """Corre AHORA un tick del scheduler (recordatorios + rituales + rendición
+    de cuentas), sin esperar el minuto. Útil para probar: crea un evento/tarea
+    con recordatorio cercano (o pon la hora del ritual al minuto actual) y
+    llama a esto. Devuelve cuántos mandó."""
     from ..matix.recordatorios import (
         revisar_nudges,
         revisar_rituales,
@@ -117,4 +121,122 @@ async def revisar(db: Postgrest = Depends(get_db)) -> dict:
     recordatorios = await revisar_y_enviar(db)
     rituales = await revisar_rituales(db)
     nudges = await revisar_nudges(db)
-    return {"recordatorios": recordatorios, "rituales": rituales, "nudges": nudges}
+    rendicion = await rendicion_cuentas.revisar_rendicion_cuentas(db)
+    return {
+        "recordatorios": recordatorios,
+        "rituales": rituales,
+        "nudges": nudges,
+        "rendicion_cuentas": rendicion,
+    }
+
+
+# ── Acción del usuario tocando un botón de la notificación ──────────────────
+
+
+class AccionRendicionCuentas(BaseModel):
+    tarea_id: str
+    # 'hecho' | 'manana' | 'mas_tarde'
+    accion: str
+
+
+@router.post("/rendicion-cuentas/accion")
+async def aplicar_accion(
+    body: AccionRendicionCuentas, db: Postgrest = Depends(get_db)
+) -> dict:
+    """Aplica la acción que el usuario tocó en la notificación de rendición de
+    cuentas. Idempotente, robusto al re-touch del mismo botón. El handler de
+    background de la app llama aquí — la app no necesita estar abierta.
+
+    Acciones:
+    - 'hecho'     → marca la tarea como completada.
+    - 'manana'    → reusa `rollover.aplicar_rollover(decision="otro_dia")`.
+    - 'mas_tarde' → mueve el `bloque_inicio/bloque_fin` al próximo hueco real
+                    de HOY (reusando el cálculo de ventana útil de B). Si ya
+                    no hay ventana útil, responde con `tipo=sin_ventana` y la
+                    app degrada al "mañana".
+    """
+    accion = (body.accion or "").strip().lower()
+    if accion not in ("hecho", "manana", "mas_tarde"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Acción desconocida: {body.accion!r}",
+        )
+    tarea = await db.get("tareas", body.tarea_id)
+    if tarea is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No existe esa tarea.",
+        )
+
+    ahora = datetime.now(timezone.utc)
+
+    if accion == "hecho":
+        await db.update(
+            "tareas", body.tarea_id, {"completada": True}
+        )
+        await rendicion_cuentas.marcar_resuelta(
+            db, tarea_id=body.tarea_id, accion=accion, ahora=ahora
+        )
+        return {"ok": True, "accion": "hecho"}
+
+    if accion == "manana":
+        resultado = await rollover.aplicar_rollover(
+            db, tarea_id=body.tarea_id, decision="otro_dia", ahora=ahora
+        )
+        await rendicion_cuentas.marcar_resuelta(
+            db, tarea_id=body.tarea_id, accion=accion, ahora=ahora
+        )
+        return {"ok": True, "accion": "manana", "rollover": resultado}
+
+    # mas_tarde: próximo hueco real de HOY antes del ancla de dormir.
+    cfg_h = await horario._config(db)
+    local = ahora.astimezone(rendicion_cuentas.LIMA)
+    fijos = await horario._compromisos_fijos(
+        db, fecha=local.date(), anclas=cfg_h.get("anclas") or []
+    )
+    dur = int(cfg_h.get("dur_tarea_min", 20))
+    ini_min = rendicion_cuentas.proximo_slot_hoy_min(
+        fijos,
+        ahora_local=local,
+        despertar_min=int(cfg_h["hora_despertar"]) * 60,
+        dormir_min=int(cfg_h["hora_dormir"]) * 60,
+        buffer_min=int(cfg_h["buffer_min"]),
+        buffer_pre_sueno_min=int(cfg_h.get("buffer_pre_sueno_min", 0) or 0),
+        dur_min=dur,
+    )
+    if ini_min is None:
+        # Ya no hay ventana útil hoy. La app degrada al botón "mañana".
+        return {
+            "ok": False,
+            "tipo": "sin_ventana",
+            "mensaje": "Ya no queda ventana útil hoy antes de tu ancla de dormir.",
+        }
+    # Movemos el bloque a hoy al hueco encontrado (preservando la duración).
+    fecha = local.date()
+    fin_min = ini_min + dur
+    bloque_ini = datetime(
+        fecha.year, fecha.month, fecha.day, ini_min // 60, ini_min % 60,
+        tzinfo=rendicion_cuentas.LIMA,
+    ).astimezone(timezone.utc)
+    bloque_fin = datetime(
+        fecha.year, fecha.month, fecha.day, fin_min // 60, fin_min % 60,
+        tzinfo=rendicion_cuentas.LIMA,
+    ).astimezone(timezone.utc)
+    await db.update(
+        "tareas",
+        body.tarea_id,
+        {
+            "bloque_inicio": bloque_ini.isoformat(),
+            "bloque_fin": bloque_fin.isoformat(),
+            "vence_en": bloque_fin.isoformat(),
+        },
+    )
+    await rendicion_cuentas.marcar_resuelta(
+        db, tarea_id=body.tarea_id, accion=accion, ahora=ahora
+    )
+    return {
+        "ok": True,
+        "accion": "mas_tarde",
+        "bloque_inicio": bloque_ini.isoformat(),
+        "bloque_fin": bloque_fin.isoformat(),
+    }

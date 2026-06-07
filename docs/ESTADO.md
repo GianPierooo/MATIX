@@ -88,6 +88,26 @@ pc_buscar_archivos, pc_leer_archivo, pc_resumir_documento · organización (6.1,
 proponen y la app confirma) pc_mover_archivo, pc_renombrar_archivo,
 pc_crear_carpeta, pc_organizar_carpeta. (conf) = pide confirmación por ser destructiva.
 
+### Rendición de cuentas — push con botones de acción
+
+Notificaciones push del SISTEMA con 3 botones ("Sí, lo hice" / "Más tarde hoy"
+/ "Mañana") que funcionan con la app cerrada. Contenido determinista
+(plantilla, cero LLM/tokens). El botón "Más tarde hoy" aparece SOLO si hay
+ventana útil real antes del ancla de dormir (reusa `horario.ventanas_libres`
+con `buffer_pre_sueno_min`). Escalada con tope (3 niveles, dedup por tarea,
+cooldown 20h; una tarea resuelta no vuelve a aparecer). Silencio nocturno
+respetado vía `permitido_ahora` (config_nudges + anclas). Disparo: enganchado
+al ritual del cierre (primera ronda) + tick periódico del scheduler cada
+minuto. Lado app: el push viene con `data.tipo=rendicion_cuentas`, el handler
+de background de FCM repinta con `flutter_local_notifications` (que sí soporta
+actions); los taps disparan `manejarTapNotificacionEnBackground` (top-level
+`@pragma('vm:entry-point')`) → POST `/push/rendicion-cuentas/accion` (el
+cerebro hace completar / rollover.otro_dia / mover al próximo hueco real).
+MagicOS/Honor: tile en Ajustes para conceder exención de optimización de
+batería (`permission_handler` + `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`); si
+el OEM bloquea el diálogo, abre Ajustes de la app. Migración 0041
+(`pings_rendicion_cuentas`). Detalle en `docs/Rendicion_Cuentas.md`.
+
 ### Capa 6 — Agente de PC (6.0a cimiento · 6.0b lectura · 6.1 organización)
 
 Daemon local `agente_pc/` (Python) que corre en la PC del usuario y abre una

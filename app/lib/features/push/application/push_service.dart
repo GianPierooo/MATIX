@@ -5,14 +5,42 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/notificaciones_service.dart';
 import '../data/push_repository.dart';
 
-/// Handler de push en BACKGROUND / app terminada. Debe ser una función
-/// top-level con `@pragma('vm:entry-point')` porque corre en un isolate
-/// aparte. En Push Capa 1 no hace nada: los mensajes con bloque
-/// `notification` los muestra el sistema solo (esa es justamente la gracia
-/// del push frente a la notificación local que el OEM mata).
+/// Handler de push en BACKGROUND / app terminada. Top-level con
+/// `@pragma('vm:entry-point')` porque corre en un isolate aparte.
+///
+/// Caso rendición de cuentas (`data.tipo == 'rendicion_cuentas'`): los pushes
+/// del cerebro vienen como **data + notification** (la `notification` es el
+/// fallback que el sistema muestra solo, sin botones). En este isolate sí
+/// podemos repintar la notificación con `flutter_local_notifications` y sus
+/// botones de acción → el usuario los ve aunque la app esté cerrada.
 @pragma('vm:entry-point')
 Future<void> manejarPushEnBackground(RemoteMessage message) async {
-  // Intencionalmente vacío (Capa 1).
+  try {
+    final data = message.data;
+    if (data['tipo'] != 'rendicion_cuentas') return;
+    final tareasIds = (data['tareas_ids'] as String?) ?? '';
+    final acciones = ((data['acciones'] as String?) ?? '').split(',')
+        .where((a) => a.isNotEmpty).toList();
+    final titulo = message.notification?.title ?? 'Matix';
+    final cuerpo = message.notification?.body ?? '';
+    if (tareasIds.isEmpty || acciones.isEmpty) return;
+    // Una notificación por tarea (los botones actúan sobre UNA tarea — si la
+    // lista trae varias, mostramos una con los botones para la primera; las
+    // demás caen por el push periódico siguiente. Esto es deliberado: que
+    // sean acciones únicas y atómicas, no batch).
+    final primera = tareasIds.split(',').first;
+    final notif = NotificacionesService();
+    await notif.inicializar();
+    await notif.mostrarConAcciones(
+      id: 990300,
+      titulo: titulo,
+      cuerpo: cuerpo,
+      acciones: acciones,
+      payload: 'rc:$primera',
+    );
+  } catch (e) {
+    debugPrint('Push BG: no pude repintar notif ($e).');
+  }
 }
 
 /// Inicializa FCM: pide permiso, escucha mensajes en foreground (que FCM
@@ -39,6 +67,23 @@ class PushService {
       FirebaseMessaging.onMessage.listen((m) {
         final n = m.notification;
         if (n == null) return;
+        // Push de rendición de cuentas → notif CON botones de acción.
+        if (m.data['tipo'] == 'rendicion_cuentas') {
+          final tareasIds = (m.data['tareas_ids'] as String?) ?? '';
+          final acciones = ((m.data['acciones'] as String?) ?? '')
+              .split(',').where((a) => a.isNotEmpty).toList();
+          if (tareasIds.isNotEmpty && acciones.isNotEmpty) {
+            final primera = tareasIds.split(',').first;
+            _notif.mostrarConAcciones(
+              id: 990300,
+              titulo: n.title ?? 'Matix',
+              cuerpo: n.body ?? '',
+              acciones: acciones,
+              payload: 'rc:$primera',
+            );
+            return;
+          }
+        }
         _notif.mostrarAhora(
           id: 990200,
           titulo: n.title ?? 'Matix',
