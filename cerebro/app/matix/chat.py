@@ -318,8 +318,10 @@ async def conversar(
         salida = await llm.responder_con_tools(
             mensajes, TOOL_DEFINITIONS, model=modelo
         )
+        # El modelo REAL que respondió (puede diferir por proveedor preferido
+        # o por failover). Lo surfaceamos siempre como `modelo_usado`.
+        modelo_efectivo = salida.get("modelo_efectivo", modelo_efectivo)
         if salida.get("failover"):
-            modelo_efectivo = salida.get("modelo_efectivo", modelo)
             hubo_failover = True
 
         if salida["tipo"] == "texto":

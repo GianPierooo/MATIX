@@ -521,9 +521,11 @@ async def responder_con_tools(
             m, messages, tools, temperature=temperature, tool_choice=tool_choice
         ),
     )
-    if hubo:
-        resultado["failover"] = True
-        resultado["modelo_efectivo"] = efectivo
+    # SIEMPRE reportamos el modelo REAL que respondió: puede diferir del pedido
+    # por el proveedor preferido (swap) o por failover. `failover` solo cuando
+    # hubo caída del primario (para la nota "respondiendo con … (respaldo)").
+    resultado["modelo_efectivo"] = efectivo
+    resultado["failover"] = hubo
     return resultado
 
 

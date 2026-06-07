@@ -65,10 +65,13 @@ async def test_primario_ok_sin_failover(monkeypatch):
         return {"tipo": "texto", "contenido": "ok", "raw": {"m": model}}
 
     monkeypatch.setattr(llm, "_con_tools_en", fake_en)
+    # Pin a 'auto' para que no haya swap por proveedor preferido en este test.
+    monkeypatch.setattr(llm.modelos_llm, "proveedor_preferido", lambda: "auto")
     res = await llm.responder_con_tools([], [], model="gpt-4o-mini")
     assert res["contenido"] == "ok"
-    assert "failover" not in res
-    assert "modelo_efectivo" not in res
+    # Contrato nuevo: SIEMPRE se reporta el modelo real; sin failover -> False.
+    assert res["failover"] is False
+    assert res["modelo_efectivo"] == "gpt-4o-mini"
 
 
 @pytest.mark.asyncio
