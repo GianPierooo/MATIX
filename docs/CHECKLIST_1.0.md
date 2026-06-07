@@ -28,6 +28,10 @@ Marcas: ✅ Hecho · ⚠️ Parcial (sirve pero le falta algo concreto) · ❌ F
   cursos/clases, evaluaciones, cuadernos, categorías.
 - ✅ Papelera + restaurar + borrado permanente para tareas/eventos/apuntes.
 - ✅ Notificaciones locales + push (FCM) con scheduler cada minuto.
+- ✅ Widgets de pantalla de inicio Android ("Próximo" + "Hoy", RemoteViews):
+  la app empuja el plan determinista vía home_widget; solo lectura + deep link
+  (marcar hecho es Fase 2). Refresco on-change + WorkManager. Render nativo se
+  valida en dispositivo.
 - ✅ Rendición de cuentas con botones de acción (app cerrada): tareas
   "¿Hiciste X?" (Sí / No, mañana / No, más tarde) + asistencia a eventos fuera
   de casa "¿Fuiste a X?" (Sí fui / No fui / Reprogramar). Alimentan el motor de

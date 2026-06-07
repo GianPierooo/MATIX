@@ -181,6 +181,26 @@ Extensión (2026-06-07, migración 0044):
   `wakeword_bg_service`. Lo nativo (heads-up/full-screen/ongoing real) es de
   DISPOSITIVO: no corre en CI; cubierto por tests puros del mapeo + contratos.
 
+### Widgets de pantalla de inicio (Android · 2026-06-07)
+
+Dos widgets nativos: **"Próximo"** (compacto, una sola cosa: lo que toca ahora o
+lo siguiente) y **"Hoy"** (lista del día desde ahora, capada a 4 con "+X más",
+diferenciando fijo de tentativo). Puente `home_widget`: la app EMPUJA el plan del
+día YA determinista al almacenamiento del widget y dispara el refresco; el nativo
+(**RemoteViews**, no Glance — Compose no está en el classpath) SOLO lee y pinta,
+sin lógica ni llamadas al cerebro. Selección pura en Dart
+(`features/widgets_inicio`, reusa `bloqueActual`/`bloqueSiguiente`). Tokens de
+Matix espejados en `res/values/colors.xml`. Refresco: push on-change (un
+`ref.listen(planDiaProvider)` cubre completar/saltar/replanificar/despertar/
+rollover) + WorkManager periódico (90 min, solo con red) + `updatePeriodMillis`
+nativo de respaldo. Tap en ítem → deep link (`matixwidget://abrir?payload=…`,
+reusa `_enrutarPayload`); tap en encabezado → Inicio. Estado vacío limpio ("Abre
+Matix para ver tu día"). Marcar hecho desde el widget queda para Fase 2 (solo
+lectura + deep link). MagicOS: el refresco en background puede morir por la
+gestión agresiva — reusa la exención de batería (`entrega_background_service`).
+Render nativo: validación en DISPOSITIVO (el unit local no lo prueba); la lógica
+de empuje sí está testeada.
+
 ### Capa 6 — Agente de PC (6.0a cimiento · 6.0b lectura · 6.1 organización)
 
 Daemon local `agente_pc/` (Python) que corre en la PC del usuario y abre una

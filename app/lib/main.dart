@@ -18,6 +18,7 @@ import 'features/repaso/presentation/repaso_semanal_screen.dart';
 import 'features/compartir/data/share_intent_service.dart';
 import 'features/eventos/presentation/nuevo_evento_screen.dart';
 import 'features/eventos/providers/eventos_providers.dart';
+import 'features/horario/providers/horario_providers.dart';
 import 'features/matix/data/captura_apunte_repository.dart';
 import 'features/matix/presentation/manos_libres_screen.dart';
 import 'features/matix/providers/captura_apunte_providers.dart';
@@ -30,8 +31,10 @@ import 'features/wakeword/data/wakeword_prefs.dart';
 import 'features/wakeword/domain/voz_overlay.dart';
 import 'features/wakeword/providers/wakeword_providers.dart';
 import 'features/tareas/presentation/nueva_tarea_screen.dart';
+import 'features/widgets_inicio/data/widget_service.dart';
 import 'screens/home_shell.dart';
 import 'theme/matix_theme.dart';
+import 'package:home_widget/home_widget.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -128,6 +131,30 @@ class _MatixAppState extends ConsumerState<MatixApp>
       // Firebase no inicializado (checkout sin google-services.json): sin
       // deep link de push, la app sigue.
     }
+
+    // Widgets de pantalla de inicio (Próximo/Hoy):
+    //  - Empujamos el plan al widget cada vez que cambia (completar, saltar,
+    //    replanificar, despertar, rollover invalidan `planDiaProvider` → al
+    //    re-resolver, este listener empuja la versión fresca). Cubre también la
+    //    primera carga. Fuente única: el plan determinista que ya calculamos.
+    ref.listenManual<AsyncValue<dynamic>>(planDiaProvider, (_, next) {
+      next.whenData((plan) => unawaited(
+            WidgetService.actualizar(plan, DateTime.now()),
+          ));
+    }, fireImmediately: true);
+    //  - Tap en un ítem del widget → deep link (abre Matix en la pantalla
+    //    correspondiente). Reusa el mismo enrutado que las notificaciones.
+    try {
+      HomeWidget.widgetClicked.listen(_enrutarPayloadWidget);
+      unawaited(
+        HomeWidget.initiallyLaunchedFromHomeWidget().then(_enrutarPayloadWidget),
+      );
+    } catch (_) {
+      // home_widget no disponible (p. ej. tests / plataforma): la app sigue.
+    }
+    //  - Refresco periódico en background (WorkManager, no agresivo).
+    unawaited(WidgetService.registrarRefrescoPeriodico());
+
     // Refresca la ventana móvil de recordatorios de eventos (Cal-3):
     // las series recurrentes solo tienen agendados los próximos ~30
     // días, así que al abrir la app reagendamos para que la ventana
@@ -397,6 +424,15 @@ class _MatixAppState extends ConsumerState<MatixApp>
     } catch (e) {
       if (kDebugMode) debugPrint('Deep link evento falló: $e');
     }
+  }
+
+  /// Tap en un ítem/encabezado del widget de pantalla de inicio. El payload
+  /// viaja en la query del URI (`matixwidget://abrir?payload=...`). Reusa el
+  /// mismo enrutado que las notificaciones (Inicio / tarea / evento).
+  void _enrutarPayloadWidget(Uri? uri) {
+    if (uri == null) return;
+    final payload = uri.queryParameters['payload'];
+    _enrutarPayload(payload == null || payload.isEmpty ? 'hoy' : payload);
   }
 
   /// Enruta un payload de notificación/push a su pantalla. Lo comparten el

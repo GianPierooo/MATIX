@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tokens de Matix (espejo de lib/theme/matix_colors.dart) para los widgets. -->
+<resources>
+    <color name="matix_bg">#0B0F1A</color>
+    <color name="matix_card">#161B2E</color>
+    <color name="matix_card_hi">#1B2138</color>
+    <color name="matix_text">#E8ECF4</color>
+    <color name="matix_muted">#8A93A8</color>
+    <color name="matix_accent">#2D7FF9</color>
+    <color name="matix_green">#21D07A</color>
+    <color name="matix_red">#FF4D5E</color>
+    <color name="matix_amber">#E0A33A</color>
+    <color name="matix_purple">#9B7BFF</color>
+    <color name="matix_teal">#3CCFCF</color>
+</resources>

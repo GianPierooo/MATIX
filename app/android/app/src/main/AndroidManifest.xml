@@ -149,6 +149,32 @@
             </intent-filter>
         </receiver>
 
+        <!-- Widgets de pantalla de inicio (Próximo / Hoy). El SO entrega el
+             APPWIDGET_UPDATE; exported=true para que el launcher pueda fijarlos
+             en todos los OEM. Solo leen lo que empuja la app (home_widget). -->
+        <receiver
+            android:name=".ProximoWidgetProvider"
+            android:exported="true"
+            android:label="Matix · Próximo">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/proximo_widget_info"/>
+        </receiver>
+        <receiver
+            android:name=".HoyWidgetProvider"
+            android:exported="true"
+            android:label="Matix · Hoy">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/hoy_widget_info"/>
+        </receiver>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

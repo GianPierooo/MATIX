@@ -3,4 +3,7 @@
     <!-- Descripción que Android muestra en Ajustes > Accesibilidad para el
          servicio de lectura de pantalla de Matix (Tier C.0). -->
     <string name="accesibilidad_descripcion">Permite que Matix LEA la pantalla que tienes abierta cuando se lo pides (por ejemplo, «léeme el último mensaje»). Es solo lectura y bajo demanda: Matix no toca, no escribe ni desliza nada, y no lee la pantalla de fondo en silencio.</string>
+    <!-- Descripciones de los widgets de pantalla de inicio. -->
+    <string name="widget_proximo_desc">Lo siguiente que toca en tu día.</string>
+    <string name="widget_hoy_desc">Tu día de un vistazo.</string>
 </resources>
