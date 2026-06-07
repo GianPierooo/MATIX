@@ -111,11 +111,15 @@ async def conversar(
     # secuenciales repartidos por la función → sumaban round-trips a la BD). Son
     # independientes entre sí; gather las dispara juntas y baja la latencia del
     # armado del turno. Si alguna falla, gather propaga igual que antes.
-    contexto, bloque_mem, modo, seleccion = await asyncio.gather(
+    contexto, bloque_mem, modo, seleccion, _ = await asyncio.gather(
         contexto_vivo(db),
         memoria.bloque_memoria(db),
         modos.modo_activo(db),
         modelos_llm.seleccion_guardada(db),
+        # Refresca el cache del proveedor preferido desde la BD cada turno: el
+        # cerebro corre con varios workers y el cache es por-proceso; así el
+        # worker que atiende este turno respeta la preferencia actual.
+        modelos_llm.cargar_preferido(db),
     )
 
     # Conversación actual (sesión por inactividad). Se resuelve al ARRANCAR para
