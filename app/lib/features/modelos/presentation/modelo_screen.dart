@@ -45,6 +45,22 @@ class ModeloScreen extends ConsumerWidget {
             ),
           ),
 
+          // Proveedor de IA preferido (resiliencia multi-proveedor): a cuál
+          // apuntar primero; si cae o se queda sin crédito, Matix usa el otro.
+          const _Encabezado('Proveedor de IA preferido'),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Text(
+              'A cuál apuntar primero. Si se cae o se queda sin crédito, Matix '
+              'usa el otro automáticamente. «Automático» respeta el modelo de abajo.',
+              style: TextStyle(fontSize: 12, color: MatixColors.muted, height: 1.35),
+            ),
+          ),
+          _ProveedorSelector(
+            actual: estado.proveedorPreferido,
+            onElegir: ctrl.fijarProveedor,
+          ),
+
           // Automático: Matix elige el modelo por cada mensaje.
           _AutomaticoTile(
             seleccionado: estado.esAuto,
@@ -102,6 +118,48 @@ class _Encabezado extends StatelessWidget {
           letterSpacing: 1.0,
           color: MatixColors.muted,
         ),
+      ),
+    );
+  }
+}
+
+/// Selector del proveedor de IA preferido: Automático / OpenAI / Anthropic.
+class _ProveedorSelector extends StatelessWidget {
+  const _ProveedorSelector({required this.actual, required this.onElegir});
+  final String actual;
+  final void Function(String) onElegir;
+
+  static const _opciones = [
+    ('auto', 'Automático'),
+    ('openai', 'OpenAI (GPT)'),
+    ('anthropic', 'Anthropic (Claude)'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final (id, etiqueta) in _opciones)
+            ChoiceChip(
+              label: Text(etiqueta),
+              selected: actual == id,
+              onSelected: (_) => onElegir(id),
+              selectedColor: MatixColors.accent,
+              labelStyle: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: actual == id ? Colors.white : MatixColors.text,
+              ),
+              backgroundColor: MatixColors.card,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+        ],
       ),
     );
   }

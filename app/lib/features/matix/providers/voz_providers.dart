@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../api/matix_client.dart';
+import '../data/dictado_nativo_service.dart';
 import '../data/grabacion_voz_service.dart';
 import '../data/matix_transcribir_repository.dart';
 
@@ -62,6 +63,10 @@ final _transcribirRepoProvider = Provider<MatixTranscribirRepository>((ref) {
   return repo;
 });
 
+final _dictadoNativoProvider = Provider<DictadoNativoService>((ref) {
+  return DictadoNativoService();
+});
+
 /// Notifier de voz para una pantalla. `autoDispose` para que al
 /// salir del chat el recorder se libere y no quede el mic abierto.
 final vozNotifierProvider =
@@ -71,6 +76,7 @@ class VozNotifier extends AutoDisposeNotifier<EstadoVoz> {
   GrabacionVozService get _svc => ref.read(_grabacionServiceProvider);
   MatixTranscribirRepository get _repo =>
       ref.read(_transcribirRepoProvider);
+  DictadoNativoService get _nativo => ref.read(_dictadoNativoProvider);
 
   @override
   EstadoVoz build() => const EstadoVoz();
@@ -146,6 +152,16 @@ class VozNotifier extends AutoDisposeNotifier<EstadoVoz> {
       state = const EstadoVoz();
       return texto.isEmpty ? null : texto;
     } on MatixApiException catch (e) {
+      // Whisper no disponible (sin crédito / cerebro caído) → respaldo NATIVO:
+      // el dictado no muere por falta de GPT. El usuario vuelve a hablar y el
+      // teléfono transcribe. Si el nativo tampoco da nada, mostramos el error.
+      if (e.statusCode == 503 || e.statusCode == 0) {
+        final nativo = await _intentarDictadoNativo();
+        if (nativo != null && nativo.isNotEmpty) {
+          state = const EstadoVoz();
+          return nativo;
+        }
+      }
       state = EstadoVoz(
         fase: FaseVoz.error,
         error: _mensajeDeError(e),
@@ -163,6 +179,19 @@ class VozNotifier extends AutoDisposeNotifier<EstadoVoz> {
       } catch (_) {
         // No crítico.
       }
+    }
+  }
+
+  /// Respaldo de dictado con el reconocedor NATIVO del teléfono. Devuelve el
+  /// texto reconocido o `null`. Best-effort: si no hay reconocedor o no se
+  /// escuchó nada, devuelve null y el caller muestra el error de Whisper.
+  Future<String?> _intentarDictadoNativo() async {
+    try {
+      if (!await _nativo.disponible()) return null;
+      final texto = await _nativo.escuchar();
+      return texto.isEmpty ? null : texto;
+    } catch (_) {
+      return null;
     }
   }
 

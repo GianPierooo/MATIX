@@ -308,6 +308,7 @@ async def conversar(
     # Modelo que de verdad respondió. Si el LLM hizo failover al otro proveedor,
     # `responder_con_tools` lo marca y lo surfaceamos con transparencia.
     modelo_efectivo = modelo
+    hubo_failover = False
 
     for _ in range(_MAX_VUELTAS):
         salida = await llm.responder_con_tools(
@@ -315,6 +316,7 @@ async def conversar(
         )
         if salida.get("failover"):
             modelo_efectivo = salida.get("modelo_efectivo", modelo)
+            hubo_failover = True
 
         if salida["tipo"] == "texto":
             ultima_respuesta = salida["contenido"]
@@ -416,6 +418,9 @@ async def conversar(
         # es el modelo del OTRO proveedor con el que se reintentó.
         "modelo_usado": modelo_efectivo,
         "auto": auto,
+        # True si el proveedor primario cayó y se respondió con el otro. La app
+        # muestra una nota honesta ("respondiendo con Claude…").
+        "failover": hubo_failover,
         # Acción de teléfono (Intent nativo) o None. La app la confirma y ejecuta.
         "accion_dispositivo": accion_dispositivo,
     }

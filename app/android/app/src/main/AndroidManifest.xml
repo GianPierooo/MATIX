@@ -172,6 +172,12 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE"/>
         </intent>
+        <!-- RecognitionService: Android 11+ requiere declararlo para que
+             `speech_to_text` descubra el reconocedor de voz nativo. Es el
+             respaldo del dictado cuando Whisper (OpenAI) no está disponible. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService"/>
+        </intent>
         <!-- Capa 6 Fase 1 (acceso al teléfono): Android 11+ exige declarar las
              intenciones que la app va a LANZAR para poder resolverlas
              (package visibility). Sin esto, `resolveActivity`/`startActivity`

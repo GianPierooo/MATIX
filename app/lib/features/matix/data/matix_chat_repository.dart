@@ -58,6 +58,7 @@ class ChatTurno {
     this.opciones,
     this.modeloUsado,
     this.auto = false,
+    this.failover = false,
   });
 
   final String respuesta;
@@ -87,6 +88,10 @@ class ChatTurno {
   /// `true` si el modelo lo eligió el modo Automático. La app muestra la
   /// etiqueta del modelo usado sobre todo en este caso.
   final bool auto;
+
+  /// `true` si el proveedor primario cayó y se respondió con el otro (failover).
+  /// La app muestra una nota honesta ("respondiendo con Claude…").
+  final bool failover;
 
   bool get huboCambios => tablasCambiadas.isNotEmpty;
 }
@@ -157,6 +162,7 @@ class MatixChatRepository {
           : null,
       modeloUsado: j['modelo_usado'] as String?,
       auto: (j['auto'] as bool?) ?? false,
+      failover: (j['failover'] as bool?) ?? false,
     );
   }
 }

@@ -27,11 +27,18 @@ class ModelosEstado(BaseModel):
     modelos: list[ModeloInfo]
     seleccionado: str
     par: ParModelos
+    # Proveedor preferido transversal: "openai" | "anthropic" | "auto".
+    proveedor_preferido: str = "auto"
 
 
 class SeleccionarModeloRequest(BaseModel):
     # Un id del catálogo o `"auto"`.
     modelo: str
+
+
+class ProveedorRequest(BaseModel):
+    # "openai" | "anthropic" | "auto".
+    proveedor: str
 
 
 class ParRequest(BaseModel):

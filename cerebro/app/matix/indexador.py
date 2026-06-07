@@ -79,7 +79,12 @@ async def indexar_apunte(db: Postgrest, apunte: dict[str, Any]) -> None:
     # 2) Embebir. En Paso 1, un solo chunk por apunte (título +
     # etiquetas + contenido juntos). text-embedding-3-small acepta
     # ~8k tokens, y nuestros apuntes típicos no se acercan.
-    [emb] = await llm.embebir([texto])
+    # Best-effort: si no hay crédito de embeddings, el apunte YA se guardó
+    # (esto es solo el índice RAG); no tumbamos la creación.
+    embs = await llm.embebir_seguro([texto])
+    if not embs:
+        return
+    [emb] = embs
 
     # 3) Insertar. pgvector acepta el embedding como una lista de
     # floats — PostgREST la serializa como JSON y el cast implícito
@@ -113,8 +118,10 @@ async def buscar_apuntes(
     distancia va de 0 (idéntico) a ~2 (opuesto); valores típicos
     de un match razonable están entre 0.2 y 0.6.
     """
-    [emb] = await llm.embebir([consulta])
+    embs = await llm.embebir_seguro([consulta])
+    if not embs:
+        return []  # sin crédito de embeddings → búsqueda RAG vacía, chat sigue
     return await db.rpc(
         "buscar_apunte_chunks",
-        {"query_embedding": emb, "match_count": top_k},
+        {"query_embedding": embs[0], "match_count": top_k},
     )

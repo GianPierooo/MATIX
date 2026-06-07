@@ -70,7 +70,76 @@ def _es_error_de_proveedor(e: Exception) -> bool:
     }
 
 
+def _es_auth_o_credito(e: Exception) -> bool:
+    """¿El fallo es por AUTH (key inválida) o CRÉDITO/CUOTA agotada?
+
+    Para el FAILOVER entre proveedores esto SÍ amerita saltar al otro: si la
+    key de OpenAI no tiene crédito (401 / 403 / 429 insufficient_quota), no
+    sirve reintentar con OpenAI — hay que usar Anthropic. (Distinto del retry
+    en el MISMO proveedor, que sí excluye estos: reintentar una key muerta es
+    inútil.)
+    """
+    code = getattr(e, "status_code", None)
+    if code in (401, 403):
+        return True
+    # 429 puede ser rate-limit (transitorio) o insufficient_quota (sin saldo).
+    texto = f"{getattr(e, 'code', '')} {e}".lower()
+    pistas = ("insufficient_quota", "billing", "credit", "quota", "exceeded your", "payment")
+    if code == 429 and any(p in texto for p in pistas):
+        return True
+    nombre = type(e).__name__
+    if nombre in ("AuthenticationError", "PermissionDeniedError"):
+        return True
+    return any(p in texto for p in ("insufficient_quota", "exceeded your current quota"))
+
+
+def _amerita_failover(e: Exception) -> bool:
+    """Para CAMBIAR de proveedor: transitorio (timeout/5xx/429) O auth/crédito.
+    Lo legítimo (400 bad request, content filter, 404, 422) NO cae al otro."""
+    return _es_error_de_proveedor(e) or _es_auth_o_credito(e)
+
+
 _T = TypeVar("_T")
+
+
+def _modelo_efectivo(model: str | None) -> str:
+    """Modelo a intentar PRIMERO, respetando el proveedor preferido.
+
+    - Si la preferencia es 'auto' (o no hay), usa el modelo tal cual.
+    - Si la preferencia fuerza un proveedor distinto al del modelo, salta al
+      modelo COMPARABLE de ese proveedor (p. ej. preferencia=anthropic y
+      modelo=gpt-4o-mini → claude-haiku-4-5). El failover luego cae al otro.
+    """
+    m = _modelo_chat(model)
+    pref = modelos_llm.proveedor_preferido()
+    if pref in ("openai", "anthropic") and modelos_llm.proveedor_de_id(m) != pref:
+        alt = modelos_llm.modelo_fallback(m)
+        if alt and modelos_llm.proveedor_de_id(alt) == pref:
+            return alt
+    return m
+
+
+async def _con_failover(
+    model: str, intento: Callable[[str], Awaitable[_T]]
+) -> tuple[_T, str, bool]:
+    """Ejecuta `intento(model)`; si falla por error de proveedor o por
+    auth/crédito, reintenta UNA vez con el modelo comparable del OTRO
+    proveedor. Devuelve (resultado, modelo_efectivo, hubo_failover).
+    Errores legítimos se relanzan sin failover."""
+    try:
+        return await intento(model), model, False
+    except Exception as e:  # noqa: BLE001
+        if not _amerita_failover(e):
+            raise
+        fallback = modelos_llm.modelo_fallback(model)
+        if not fallback or fallback == model:
+            raise
+        logger.warning(
+            "failover LLM: «%s» (%s) falló por %s → reintento con «%s» (%s)",
+            model, modelos_llm.proveedor_de_id(model), type(e).__name__,
+            fallback, modelos_llm.proveedor_de_id(fallback),
+        )
+        return await intento(fallback), fallback, True
 
 
 async def _con_reintentos(
@@ -156,10 +225,11 @@ def _registrar_chat_openai(usage: Any, model: str) -> None:
     precios = modelos_llm.precios_de(model)
     if precios:
         medidor.registrar_chat(
-            usage, precio_input_por_m=precios[0], precio_output_por_m=precios[1]
+            usage, precio_input_por_m=precios[0], precio_output_por_m=precios[1],
+            proveedor="openai",
         )
     else:
-        medidor.registrar_chat(usage)
+        medidor.registrar_chat(usage, proveedor="openai")
 
 
 def _registrar_uso_anthropic(usage: Any, model: str) -> None:
@@ -178,10 +248,11 @@ def _registrar_uso_anthropic(usage: Any, model: str) -> None:
     precios = modelos_llm.precios_de(model)
     if precios:
         medidor.registrar_chat(
-            normalizado, precio_input_por_m=precios[0], precio_output_por_m=precios[1]
+            normalizado, precio_input_por_m=precios[0], precio_output_por_m=precios[1],
+            proveedor="anthropic",
         )
     else:
-        medidor.registrar_chat(normalizado)
+        medidor.registrar_chat(normalizado, proveedor="anthropic")
 
 
 def _imagen_a_anthropic(url: str) -> dict[str, Any]:
@@ -382,18 +453,26 @@ def _texto_de_anthropic(content: Any) -> str:
     return "".join(partes)
 
 
+async def _texto_en(model: str, messages: list[dict], *, temperature: float) -> str:
+    """Un intento de texto contra UN modelo (rutea por proveedor)."""
+    if _es_anthropic(model):
+        return await _anthropic_texto(messages, model=model, temperature=temperature)
+    return await _openai_texto(messages, model=model, temperature=temperature)
+
+
 async def responder(
     messages: list[dict],
     *,
     model: str | None = None,
     temperature: float = 0.6,
 ) -> str:
-    """Versión simple sin tools (compat/debugging). Enruta al proveedor
-    activo. El flujo real de Matix usa `responder_con_tools`."""
-    model = _modelo_chat(model)
-    if _es_anthropic(model):
-        return await _anthropic_texto(messages, model=model, temperature=temperature)
-    return await _openai_texto(messages, model=model, temperature=temperature)
+    """Versión simple sin tools (resumen de documentos, utilidades). Respeta el
+    proveedor preferido y cae al otro proveedor ante error/crédito agotado."""
+    model = _modelo_efectivo(model)
+    texto, _, _ = await _con_failover(
+        model, lambda m: _texto_en(m, messages, temperature=temperature)
+    )
+    return texto
 
 
 async def responder_con_tools(
@@ -430,33 +509,22 @@ async def responder_con_tools(
     legítimos (bad request, content filter, auth) NO reintenta: los relanza.
     Si hubo failover, el dict trae `modelo_efectivo` y `failover=True` para que
     `chat.py` lo surfacee con transparencia.
+
+    FAILOVER: respeta el proveedor preferido (lo intenta primero) y, si falla
+    por error de proveedor O por auth/crédito agotado, cae UNA vez al modelo
+    comparable del OTRO proveedor. Errores legítimos (400/404/422) se relanzan.
     """
-    model = _modelo_chat(model)
-    try:
-        return await _con_tools_en(
-            model, messages, tools, temperature=temperature, tool_choice=tool_choice
-        )
-    except Exception as e:  # noqa: BLE001
-        if not _es_error_de_proveedor(e):
-            raise  # error legítimo → tal cual, SIN failover
-        fallback = modelos_llm.modelo_fallback(model)
-        if not fallback or fallback == model:
-            raise  # sin equivalente claro → propagamos el error original
-        logger.warning(
-            "failover LLM: «%s» (%s) falló por %s → reintento con «%s» (%s)",
-            model,
-            modelos_llm.proveedor_de_id(model),
-            type(e).__name__,
-            fallback,
-            modelos_llm.proveedor_de_id(fallback),
-        )
-        # UN solo intento de fallback. Si también falla, propaga (sin loops).
-        resultado = await _con_tools_en(
-            fallback, messages, tools, temperature=temperature, tool_choice=tool_choice
-        )
+    model = _modelo_efectivo(model)
+    resultado, efectivo, hubo = await _con_failover(
+        model,
+        lambda m: _con_tools_en(
+            m, messages, tools, temperature=temperature, tool_choice=tool_choice
+        ),
+    )
+    if hubo:
         resultado["failover"] = True
-        resultado["modelo_efectivo"] = fallback
-        return resultado
+        resultado["modelo_efectivo"] = efectivo
+    return resultado
 
 
 async def _con_tools_en(
@@ -477,16 +545,24 @@ async def _con_tools_en(
     )
 
 
+async def _json_en(model: str, messages: list[dict], *, temperature: float) -> str:
+    """Un intento de JSON contra UN modelo (rutea por proveedor)."""
+    if _es_anthropic(model):
+        return await _anthropic_json(messages, model=model, temperature=temperature)
+    return await _openai_json(messages, model=model, temperature=temperature)
+
+
 async def _chat_json(
     messages: list[dict], *, model: str | None, temperature: float
 ) -> str:
     """Pide al modelo del chat una respuesta JSON y devuelve el string
-    crudo. OpenAI usa su modo JSON; Anthropic, prefill con `{`. El parseo
-    y la validación los hace cada extractor (son tolerantes a fallos)."""
-    model = _modelo_chat(model)
-    if _es_anthropic(model):
-        return await _anthropic_json(messages, model=model, temperature=temperature)
-    return await _openai_json(messages, model=model, temperature=temperature)
+    crudo. OpenAI usa su modo JSON; Anthropic, prefill con `{`. Respeta el
+    proveedor preferido y cae al otro ante error/crédito agotado."""
+    model = _modelo_efectivo(model)
+    texto, _, _ = await _con_failover(
+        model, lambda m: _json_en(m, messages, temperature=temperature)
+    )
+    return texto
 
 
 # ── Implementación OpenAI ───────────────────────────────────────────
@@ -1311,44 +1387,78 @@ async def embebir(
     return [item.embedding for item in resp.data]
 
 
+async def embebir_seguro(textos: list[str]) -> list[list[float]] | None:
+    """Como `embebir` pero NUNCA tumba al caller: ante error de proveedor o
+    crédito agotado devuelve None. Para BÚSQUEDA (degrada a sin-RAG) e INDEXADO
+    best-effort (se salta el índice). La INGESTA usa `embebir` directo para poder
+    mostrar el mensaje honesto «ingesta en pausa: sin crédito de embeddings»."""
+    try:
+        return await embebir(textos)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("embeddings no disponibles (%s); degrado sin RAG", type(e).__name__)
+        return None
+
+
+async def _openai_tts(texto: str, voz: str, model: str, formato: str) -> bytes:
+    client = _get_openai_client()
+    resp = await client.audio.speech.create(
+        model=model, voice=voz, input=texto, response_format=formato
+    )
+    return await resp.aread()
+
+
+async def _eleven_tts(texto: str, formato: str) -> bytes:
+    """TTS de ElevenLabs (solo si hay key). Devuelve bytes mp3."""
+    import httpx
+
+    voice_id = settings.elevenlabs_voice_id or "EXAVITQu4vr4xnSDxMaL"  # "Sarah" (default)
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    headers = {"xi-api-key": settings.elevenlabs_api_key, "accept": "audio/mpeg"}
+    payload = {"text": texto, "model_id": "eleven_multilingual_v2"}
+    async with httpx.AsyncClient(timeout=30) as cli:
+        r = await cli.post(url, headers=headers, json=payload)
+        r.raise_for_status()
+        return r.content
+
+
 async def hablar(
     texto: str,
     *,
     voz: str = "onyx",
     model: str = "tts-1",
     formato: str = "mp3",
-) -> bytes:
-    """Convierte `texto` a audio usando la TTS de OpenAI.
+) -> tuple[bytes, str]:
+    """Convierte `texto` a audio. Cadena de respaldo CLOUD:
+    ElevenLabs (si hay key) → OpenAI tts-1. Devuelve `(audio_bytes, proveedor)`.
 
-    Voz por defecto: `onyx` (masculina, grave, profesional). Otras
-    voces disponibles: `alloy` (neutra), `echo` (masculina media),
-    `fable` (británica), `nova` (femenina), `shimmer` (femenina).
-
-    Modelo `tts-1` es el rápido (preferido para conversación en
-    tiempo real); `tts-1-hd` cuesta el doble y suena un poco mejor.
-
-    Devuelve los bytes del audio (mp3 por defecto). El caller los
-    sirve al cliente como `audio/mpeg`. Registra el consumo en el
-    medidor (cobra por caracteres del input).
+    Si TODO el cloud falla, relanza `RuntimeError`: el caller (la app) cae a la
+    voz NATIVA del dispositivo (flutter_tts). `voz` aplica a OpenAI; ElevenLabs
+    usa el voice_id de config.
     """
-    client = _get_openai_client()
+    errores: list[str] = []
 
-    async def _pedir() -> bytes:
-        resp = await client.audio.speech.create(
-            model=model,
-            voice=voz,
-            input=texto,
-            response_format=formato,
+    if settings.elevenlabs_api_key:
+        try:
+            audio = await _con_reintentos(
+                lambda: _eleven_tts(texto, formato), etiqueta="tts-eleven"
+            )
+            medidor.registrar_tts(len(texto))
+            return audio, "elevenlabs"
+        except Exception as e:  # noqa: BLE001
+            errores.append(f"elevenlabs:{type(e).__name__}")
+            logger.warning("TTS ElevenLabs falló (%s); caigo a OpenAI", type(e).__name__)
+
+    try:
+        audio = await _con_reintentos(
+            lambda: _openai_tts(texto, voz, model, formato), etiqueta="tts-openai"
         )
-        # La SDK devuelve un HttpxBinaryResponseContent — .read() devuelve
-        # los bytes completos.
-        return await resp.aread()
-
-    # Reintenta ante 502/503/timeout pasajeros de OpenAI (antes un solo 502
-    # tumbaba la voz). Si agota, relanza y el caller degrada (texto sin voz).
-    audio = await _con_reintentos(_pedir, etiqueta="tts")
-    medidor.registrar_tts(len(texto))
-    return audio
+        medidor.registrar_tts(len(texto))
+        return audio, "openai"
+    except Exception as e:  # noqa: BLE001
+        errores.append(f"openai:{type(e).__name__}")
+        raise RuntimeError(
+            f"TTS en la nube no disponible ({', '.join(errores)}); usa la voz del dispositivo."
+        ) from e
 
 
 # ── Cámara en vivo: narración corta de un frame (visión, gpt-4o-mini) ─────────
@@ -1362,27 +1472,17 @@ _NARRACION_SYSTEM = (
 )
 
 
-async def narrar_frame(
-    imagen_data_url: str, *, narracion_previa: str | None = None
+async def _openai_vision(
+    model: str, system: str, pedido: str, imagen_data_url: str, *, max_tokens: int
 ) -> str:
-    """Narra en una frase corta lo que se ve en un frame de la cámara en vivo.
-
-    Usa gpt-4o-mini con visión en `detail=low` (barato) — SIEMPRE OpenAI, como
-    Whisper/TTS/embeddings. Devuelve '' si no hay nada nuevo respecto a la
-    narración previa (el caller no narra). Metido en el medidor de uso."""
     client = _get_openai_client()
-    previa = (narracion_previa or "").strip()
-    pedido = (
-        "¿Qué ves ahora?"
-        if not previa
-        else f"Narración previa: «{previa}». Di qué cambió o qué ves ahora."
-    )
+
     async def _pedir():
         return await client.chat.completions.create(
-            model="gpt-4o-mini",
-            max_tokens=40,
+            model=model,
+            max_tokens=max_tokens,
             messages=[
-                {"role": "system", "content": _NARRACION_SYSTEM},
+                {"role": "system", "content": system},
                 {
                     "role": "user",
                     "content": [
@@ -1394,12 +1494,78 @@ async def narrar_frame(
             ],
         )
 
-    # Reintenta ante errores transitorios; si agota, relanza y el router degrada
-    # a narración vacía (la cámara sigue, sin frase para este frame).
-    resp = await _con_reintentos(_pedir, etiqueta="narrar_frame")
-    _registrar_chat_openai(resp.usage, "gpt-4o-mini")
-    out = (resp.choices[0].message.content or "").strip()
-    # Normaliza el "sin cambios" (con o sin signos) a vacío.
+    resp = await _con_reintentos(_pedir, etiqueta="vision")
+    _registrar_chat_openai(resp.usage, model)
+    return (resp.choices[0].message.content or "").strip()
+
+
+async def _anthropic_vision(
+    model: str, system: str, pedido: str, imagen_data_url: str, *, max_tokens: int
+) -> str:
+    client = _get_anthropic_client()
+
+    async def _pedir():
+        return await client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": pedido},
+                        _imagen_a_anthropic(imagen_data_url),
+                    ],
+                }
+            ],
+        )
+
+    resp = await _con_reintentos(_pedir, etiqueta="vision")
+    _registrar_uso_anthropic(resp.usage, model)
+    textos = [
+        (b.text if hasattr(b, "text") else "")
+        for b in resp.content
+        if getattr(b, "type", None) == "text"
+    ]
+    return "".join(textos).strip()
+
+
+async def _vision_en(
+    model: str, system: str, pedido: str, imagen_data_url: str, *, max_tokens: int
+) -> str:
+    """Un intento de visión contra UN modelo (rutea por proveedor). Tanto
+    gpt-4o-mini como Claude Haiku soportan imágenes."""
+    if _es_anthropic(model):
+        return await _anthropic_vision(model, system, pedido, imagen_data_url, max_tokens=max_tokens)
+    return await _openai_vision(model, system, pedido, imagen_data_url, max_tokens=max_tokens)
+
+
+async def narrar_frame(
+    imagen_data_url: str, *, narracion_previa: str | None = None
+) -> str:
+    """Narra en una frase corta lo que se ve en un frame de la cámara en vivo.
+
+    Visión por la MISMA abstracción de proveedor que el chat: respeta el
+    proveedor preferido y, si el primario cae (incl. crédito agotado), hace
+    failover a Claude (también ve imágenes). Así la cámara revive aunque OpenAI
+    no esté. Devuelve '' si no hay nada nuevo (el caller no narra)."""
+    previa = (narracion_previa or "").strip()
+    pedido = (
+        "¿Qué ves ahora?"
+        if not previa
+        else f"Narración previa: «{previa}». Di qué cambió o qué ves ahora."
+    )
+    # Modelo de visión barato del proveedor preferido; failover al otro.
+    model = _modelo_efectivo("gpt-4o-mini")
+    try:
+        out, _efectivo, _hubo = await _con_failover(
+            model,
+            lambda m: _vision_en(m, _NARRACION_SYSTEM, pedido, imagen_data_url, max_tokens=60),
+        )
+    except Exception:  # noqa: BLE001 — la cámara sigue; este frame queda sin frase
+        logger.warning("narrar_frame: visión no disponible en ningún proveedor")
+        return ""
+    out = out.strip()
     if out.upper().strip(" .!¡¿?\"'") == "SIN CAMBIOS":
         return ""
     return out

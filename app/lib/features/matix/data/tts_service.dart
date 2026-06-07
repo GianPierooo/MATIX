@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
@@ -73,6 +74,58 @@ class ReproductorAudioPlayers implements ReproductorAudio {
   }
 }
 
+/// Voz NATIVA del dispositivo (piso siempre disponible). Cuando la TTS en la
+/// nube (OpenAI/ElevenLabs vía cerebro) no responde, hablamos con esto en vez
+/// de quedarnos en texto. Interfaz chica para poder inyectar un fake en tests.
+abstract class VozDispositivo {
+  /// Lee `texto` con la voz del teléfono. Devuelve `true` si habló.
+  Future<bool> hablar(String texto);
+  Future<void> detener();
+}
+
+/// Implementación real con `flutter_tts` (motor TTS del sistema, es-ES).
+///
+/// La config (idioma) es LAZY dentro de `hablar`, no en el constructor: así
+/// construir el servicio no dispara llamadas al canal nativo (que en tests no
+/// existe) y no genera errores async sueltos.
+class VozDispositivoFlutterTts implements VozDispositivo {
+  // LAZY: `FlutterTts()` llama `setMethodCallHandler` en su constructor, que
+  // requiere el binding de Flutter. Construirlo solo al usar el respaldo evita
+  // tocar el canal nativo en el camino normal (cloud OK) y en tests.
+  FlutterTts? _instancia;
+  FlutterTts get _tts => _instancia ??= FlutterTts();
+  bool _configurado = false;
+
+  Future<void> _configurar() async {
+    if (_configurado) return;
+    await _tts.setLanguage('es-ES');
+    await _tts.awaitSpeakCompletion(true);
+    _configurado = true;
+  }
+
+  @override
+  Future<bool> hablar(String texto) async {
+    try {
+      await _configurar();
+      await _tts.stop();
+      final r = await _tts.speak(texto);
+      // En Android `speak` devuelve 1 al encolar OK; algunos motores no
+      // devuelven nada → asumimos que habló si no lanzó.
+      return r == null || r == 1;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> detener() async {
+    if (_instancia == null) return; // no instanciar solo para parar
+    try {
+      await _instancia!.stop();
+    } catch (_) {}
+  }
+}
+
 /// Contrato del TTS para el modo manos libres (permite inyectar un fake).
 abstract class TtsBase {
   /// Lee `texto` con la voz de Matix. `onInicio` se llama cuando el audio
@@ -95,9 +148,13 @@ abstract class TtsBase {
 /// que `onInicio` solo dispara cuando el reproductor entra en `playing`: eso
 /// es lo que mantiene el visual sincronizado con el audio.
 class TtsService implements TtsBase {
-  TtsService({http.Client? inner, ReproductorAudio? reproductor})
-      : _inner = inner ?? http.Client(),
-        _rep = reproductor ?? ReproductorAudioPlayers() {
+  TtsService({
+    http.Client? inner,
+    ReproductorAudio? reproductor,
+    VozDispositivo? vozDispositivo,
+  })  : _inner = inner ?? http.Client(),
+        _rep = reproductor ?? ReproductorAudioPlayers(),
+        _voz = vozDispositivo ?? VozDispositivoFlutterTts() {
     _completionSub = _rep.alCompletar.listen((_) => _completar());
     _estadoSub = _rep.reproduciendo.listen((rep) {
       if (rep && !_inicioNotificado) {
@@ -109,6 +166,7 @@ class TtsService implements TtsBase {
 
   final http.Client _inner;
   final ReproductorAudio _rep;
+  final VozDispositivo _voz;
   late final StreamSubscription<void> _completionSub;
   late final StreamSubscription<bool> _estadoSub;
 
@@ -131,14 +189,21 @@ class TtsService implements TtsBase {
     _onInicio = onInicio;
     _inicioNotificado = false;
 
-    // 1) Pedir el mp3 al cerebro (esto NO suena todavía).
-    final mp3 = await _descargar(t);
-
-    // 2) Reproducir; `onInicio` dispara cuando entra en `playing`, y el
-    // completer se resuelve al terminar (o por `detener`).
-    _completer = Completer<void>();
-    await _rep.reproducir(mp3);
-    await _completer!.future;
+    try {
+      // 1) Pedir el mp3 al cerebro (esto NO suena todavía).
+      final mp3 = await _descargar(t);
+      // 2) Reproducir; `onInicio` dispara cuando entra en `playing`, y el
+      // completer se resuelve al terminar (o por `detener`).
+      _completer = Completer<void>();
+      await _rep.reproducir(mp3);
+      await _completer!.future;
+    } catch (_) {
+      // TTS en la nube caído (sin crédito / 5xx) → voz NATIVA del dispositivo
+      // (piso siempre disponible). Si el dispositivo tampoco habla, silencio
+      // (el texto ya está en pantalla). Nunca lanza.
+      onInicio?.call();
+      await _voz.hablar(t);
+    }
   }
 
   /// Narra en SEGUNDO PLANO: descarga + reproduce sin bloquear al caller y sin
@@ -149,13 +214,24 @@ class TtsService implements TtsBase {
   /// [onFallo] se llama si la voz no salió (tras reintentos). El caller puede
   /// mostrar un aviso honesto ("voz no disponible, sigo en texto") sin que esto
   /// rompa nada.
-  void narrar(String texto, {void Function()? onFallo}) {
+  /// [onDispositivo] se llama si la voz salió por el respaldo NATIVO del
+  /// teléfono (cloud caído). El caller puede mostrar "usando la voz del
+  /// teléfono". [onFallo] solo si NI el dispositivo pudo hablar.
+  void narrar(
+    String texto, {
+    void Function()? onFallo,
+    void Function()? onDispositivo,
+  }) {
     final t = texto.trim();
     if (t.isEmpty) return;
-    unawaited(_narrarSeguro(t, onFallo));
+    unawaited(_narrarSeguro(t, onFallo, onDispositivo));
   }
 
-  Future<void> _narrarSeguro(String t, void Function()? onFallo) async {
+  Future<void> _narrarSeguro(
+    String t,
+    void Function()? onFallo,
+    void Function()? onDispositivo,
+  ) async {
     try {
       if (_completer != null && !_completer!.isCompleted) {
         _completer!.complete();
@@ -169,14 +245,21 @@ class TtsService implements TtsBase {
       await _rep.reproducir(mp3);
       // NO esperamos el fin del audio: el caller (cámara) sigue su ritmo.
     } catch (_) {
-      // Silencio total: el texto ya está; un fallo de voz no rompe nada.
-      onFallo?.call();
+      // Cloud TTS caído → voz NATIVA del teléfono (piso siempre disponible).
+      // Solo si el dispositivo TAMPOCO habla nos quedamos en texto.
+      final hablo = await _voz.hablar(t);
+      if (hablo) {
+        onDispositivo?.call();
+      } else {
+        onFallo?.call();
+      }
     }
   }
 
   @override
   Future<void> detener() async {
     await _rep.detener();
+    await _voz.detener();
     _completar();
   }
 

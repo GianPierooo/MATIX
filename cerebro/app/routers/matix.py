@@ -568,8 +568,9 @@ async def voz(body: VozRequest) -> Response:
             detail="El texto es demasiado largo para una sola lectura.",
         )
     try:
-        audio = await llm.hablar(texto, voz=body.voz)
+        audio, proveedor = await llm.hablar(texto, voz=body.voz)
     except RuntimeError as e:
+        # Todo el TTS cloud cayó → 503. La app cae a la voz del dispositivo.
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(e),
@@ -577,7 +578,7 @@ async def voz(body: VozRequest) -> Response:
     except Exception as e:  # noqa: BLE001
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"TTS de OpenAI falló: {e}",
+            detail=f"TTS falló: {e}",
         ) from e
 
     return Response(
@@ -586,6 +587,8 @@ async def voz(body: VozRequest) -> Response:
         headers={
             "Cache-Control": "no-store",
             "Content-Length": str(len(audio)),
+            # Observabilidad: qué proveedor de voz sirvió este audio.
+            "X-TTS-Proveedor": proveedor,
         },
     )
 

@@ -69,6 +69,14 @@ dependencies:
   # el endpoint `/api/v1/matix/voz`.
   audioplayers: ^6.1.0
 
+  # Respaldos NATIVOS de voz (Capa de resiliencia multi-proveedor): si la TTS
+  # en la nube (OpenAI/ElevenLabs vía cerebro) no está disponible, hablamos con
+  # la voz del dispositivo (flutter_tts) como piso siempre disponible. Y si
+  # Whisper no responde, dictamos con el reconocimiento de voz nativo de Android
+  # (speech_to_text). Así voz y dictado no mueren por falta de OpenAI.
+  flutter_tts: ^4.2.0
+  speech_to_text: ^7.0.0
+
   # Firebase: `core` + `messaging` (Push Capa 1). Los OEM (Honor/Huawei)
   # matan las notificaciones locales programadas en segundo plano, así que
   # los recordatorios pasan a push vía FCM. La distribución sigue por

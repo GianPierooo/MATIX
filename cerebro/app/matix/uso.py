@@ -64,6 +64,12 @@ class _Snapshot:
     # de recomputarlo al final con un precio fijo.
     costo_chat_usd: float = 0.0
     llamadas_chat: int = 0
+    # Desglose por proveedor (observabilidad del failover): cuánto costó y
+    # cuántas llamadas sirvió cada proveedor del chat/visión.
+    costo_chat_openai_usd: float = 0.0
+    costo_chat_anthropic_usd: float = 0.0
+    llamadas_chat_openai: int = 0
+    llamadas_chat_anthropic: int = 0
     segundos_whisper: float = 0.0
     llamadas_whisper: int = 0
     caracteres_tts: int = 0
@@ -88,6 +94,7 @@ class MedidorUso:
         precio_input_por_m: float | None = None,
         precio_output_por_m: float | None = None,
         precio_cached_por_m: float | None = None,
+        proveedor: str | None = None,
     ) -> None:
         """Acepta el `usage` de un chat (objeto OpenAI o dict; tolerante a
         campos faltantes). Acumula tokens (para mostrar) y el COSTO del
@@ -121,6 +128,12 @@ class MedidorUso:
             self._s.cached_prompt_tokens += cached
             self._s.costo_chat_usd += inc
             self._s.llamadas_chat += 1
+            if proveedor == "anthropic":
+                self._s.costo_chat_anthropic_usd += inc
+                self._s.llamadas_chat_anthropic += 1
+            elif proveedor == "openai":
+                self._s.costo_chat_openai_usd += inc
+                self._s.llamadas_chat_openai += 1
 
     def registrar_whisper(self, segundos: float) -> None:
         if segundos <= 0:
@@ -184,6 +197,17 @@ class MedidorUso:
             "llamadas_busqueda_web": s.llamadas_busqueda_web,
             "costo_usd": round(costo, 6),
             "costos": costos,
+            # Desglose del chat/visión por proveedor (observabilidad del failover).
+            "por_proveedor": {
+                "openai": {
+                    "costo_usd": round(s.costo_chat_openai_usd, 6),
+                    "llamadas": s.llamadas_chat_openai,
+                },
+                "anthropic": {
+                    "costo_usd": round(s.costo_chat_anthropic_usd, 6),
+                    "llamadas": s.llamadas_chat_anthropic,
+                },
+            },
             # Útil para la UI: precios usados para el cálculo.
             "precios": {
                 "input_por_m_usd": _PRECIO_INPUT_POR_M,

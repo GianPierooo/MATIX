@@ -658,8 +658,16 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen>
                           // Transparencia: bajo el último turno del
                           // asistente mostramos qué modelo respondió cuando
                           // lo eligió el modo Automático.
+                          // Failover: el proveedor primario cayó / sin crédito
+                          // y respondió el otro. Nota honesta (con su modelo).
+                          final mostrarFailover = esUltimoAsistente &&
+                              estado.failoverUltimoTurno &&
+                              estado.modeloUltimoTurno != null;
+                          // El modelo "Automático · X" solo cuando NO hubo
+                          // failover (si lo hubo, lo dice la nota de failover).
                           final mostrarModelo = esUltimoAsistente &&
                               estado.autoUltimoTurno &&
+                              !mostrarFailover &&
                               estado.modeloUltimoTurno != null;
                           // Opciones tocables (elicitación) bajo el último
                           // turno: chips/campo que mandan la respuesta.
@@ -679,6 +687,10 @@ class _MatixChatScreenState extends ConsumerState<MatixChatScreen>
                                   bloque: estado.opcionesUltimoTurno!,
                                   enabled: !estado.enviando,
                                   onResponder: _responderOpcion,
+                                ),
+                              if (mostrarFailover)
+                                _NotaFailover(
+                                  modeloId: estado.modeloUltimoTurno!,
                                 ),
                               if (mostrarModelo)
                                 _ModeloUsadoEtiqueta(
@@ -1085,6 +1097,37 @@ class _ReconectandoInline extends StatelessWidget {
 /// Etiqueta pequeña bajo el último turno cuando el modo Automático eligió el
 /// modelo: "Automático · GPT-4o mini". Deja ver qué se usó para que el
 /// usuario pueda ajustar el par desde Ajustes › Modelo.
+/// Nota honesta cuando el proveedor primario cayó (o sin crédito) y respondió
+/// el otro: "Respondiendo con Claude Haiku 4.5 (respaldo)".
+class _NotaFailover extends ConsumerWidget {
+  const _NotaFailover({required this.modeloId});
+  final String modeloId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final etiqueta = ref.watch(modelosProvider).etiquetaDe(modeloId);
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, left: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.swap_horiz, size: 12, color: MatixColors.muted),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              'Respondiendo con $etiqueta (respaldo)',
+              style: MatixText.caption.copyWith(
+                color: MatixColors.muted,
+                fontSize: 10.5,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ModeloUsadoEtiqueta extends ConsumerWidget {
   const _ModeloUsadoEtiqueta({required this.modeloId});
   final String modeloId;

@@ -10,6 +10,7 @@ class ModelosState {
     this.seleccionado = '',
     this.barato = 'gpt-4o-mini',
     this.fuerte = 'claude-sonnet-4-6',
+    this.proveedorPreferido = 'auto',
     this.cargando = false,
   });
 
@@ -17,6 +18,7 @@ class ModelosState {
   final String seleccionado;
   final String barato;
   final String fuerte;
+  final String proveedorPreferido; // 'openai' | 'anthropic' | 'auto'
   final bool cargando;
 
   /// ¿Está activo el modo Automático?
@@ -48,6 +50,7 @@ class ModelosState {
     String? seleccionado,
     String? barato,
     String? fuerte,
+    String? proveedorPreferido,
     bool? cargando,
   }) {
     return ModelosState(
@@ -55,6 +58,7 @@ class ModelosState {
       seleccionado: seleccionado ?? this.seleccionado,
       barato: barato ?? this.barato,
       fuerte: fuerte ?? this.fuerte,
+      proveedorPreferido: proveedorPreferido ?? this.proveedorPreferido,
       cargando: cargando ?? this.cargando,
     );
   }
@@ -74,6 +78,7 @@ class ModelosController extends StateNotifier<ModelosState> {
         seleccionado: e.seleccionado,
         barato: e.barato,
         fuerte: e.fuerte,
+        proveedorPreferido: e.proveedorPreferido,
       );
 
   Future<void> _cargar() async {
@@ -102,6 +107,18 @@ class ModelosController extends StateNotifier<ModelosState> {
     state = state.copyWith(barato: barato, fuerte: fuerte);
     try {
       state = _desde(await _repo.fijarPar(barato: barato, fuerte: fuerte));
+    } catch (_) {
+      state = previo;
+    }
+  }
+
+  /// Fija el proveedor de IA preferido: 'openai' | 'anthropic' | 'auto'.
+  Future<void> fijarProveedor(String proveedor) async {
+    if (proveedor == state.proveedorPreferido) return;
+    final previo = state;
+    state = state.copyWith(proveedorPreferido: proveedor); // optimista
+    try {
+      state = _desde(await _repo.fijarProveedor(proveedor));
     } catch (_) {
       state = previo;
     }

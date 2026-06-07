@@ -230,6 +230,53 @@ async def set_seleccion(db: Postgrest, valor: str) -> None:
 set_modelo = set_seleccion
 
 
+# ── Proveedor preferido (openai / anthropic / auto) ─────────────────
+#
+# Capa transversal de resiliencia: el usuario elige a qué proveedor apuntar
+# PRIMERO (chat, visión, JSON). El failover sigue cayendo al otro. Se cachea en
+# proceso porque lo leen rutas SIN db (visión, TTS): se carga al arrancar y se
+# refresca al cambiarlo. Default "auto" (usa el modelo tal cual y cae al otro).
+PROVEEDORES_VALIDOS = ("openai", "anthropic", "auto")
+_pref_cache: str = "auto"
+
+
+def proveedor_preferido() -> str:
+    """Lectura SÍNCRONA del proveedor preferido cacheado (sin db)."""
+    return _pref_cache
+
+
+def proveedor_preferido_valido(valor: str) -> bool:
+    return (valor or "").strip().lower() in PROVEEDORES_VALIDOS
+
+
+async def cargar_preferido(db: Postgrest) -> str:
+    """Carga el proveedor preferido desde config_matix al cache en proceso.
+    Best-effort: si la columna no existe aún o falla la lectura, deja 'auto'."""
+    global _pref_cache
+    try:
+        fila = await _fila(db) or {}
+        v = (fila.get("proveedor_preferido") or "auto").strip().lower()
+        _pref_cache = v if v in PROVEEDORES_VALIDOS else "auto"
+    except Exception:  # noqa: BLE001 — nunca tumbar el arranque por esto
+        _pref_cache = "auto"
+    return _pref_cache
+
+
+async def set_proveedor_preferido(db: Postgrest, valor: str) -> str:
+    """Fija el proveedor preferido (persistido + cache). Devuelve el valor."""
+    global _pref_cache
+    v = (valor or "").strip().lower()
+    if v not in PROVEEDORES_VALIDOS:
+        raise ValueError(f"Proveedor preferido desconocido: {valor}")
+    fila = await _fila(db)
+    if fila is None:
+        await db.insert("config_matix", {"proveedor_preferido": v})
+    else:
+        await db.update("config_matix", fila["id"], {"proveedor_preferido": v})
+    _pref_cache = v
+    return v
+
+
 async def set_par(
     db: Postgrest, *, barato: str | None = None, fuerte: str | None = None
 ) -> None:

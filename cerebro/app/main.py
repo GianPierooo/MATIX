@@ -104,6 +104,14 @@ async def lifespan(_: FastAPI):
         recordatorios.iniciar(db)
     except Exception:  # noqa: BLE001
         logger.exception("no pude iniciar el scheduler de recordatorios")
+    # Cache del proveedor de IA preferido (resiliencia multi-proveedor). Lo leen
+    # rutas sin db (visión, TTS). Best-effort: si falla, queda 'auto'.
+    from .matix import modelos_llm
+
+    try:
+        await modelos_llm.cargar_preferido(db)
+    except Exception:  # noqa: BLE001
+        logger.exception("no pude cargar el proveedor preferido")
     try:
         yield
     finally:

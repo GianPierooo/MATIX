@@ -46,6 +46,7 @@ typedef ModelosEstado = ({
   String seleccionado,
   String barato,
   String fuerte,
+  String proveedorPreferido, // 'openai' | 'anthropic' | 'auto'
 });
 
 /// Wrapper sobre `/api/v1/modelos`. El catálogo, la selección y el ruteo
@@ -69,6 +70,10 @@ class ModelosRepository {
         if (fuerte != null) 'fuerte': fuerte,
       }));
 
+  /// Fija el proveedor de IA preferido: 'openai' | 'anthropic' | 'auto'.
+  Future<ModelosEstado> fijarProveedor(String proveedor) async =>
+      _parse(await _client.post('/api/v1/modelos/proveedor', {'proveedor': proveedor}));
+
   ModelosEstado _parse(Map<String, dynamic> j) {
     final par = (j['par'] as Map?)?.cast<String, dynamic>() ?? const {};
     return (
@@ -79,6 +84,7 @@ class ModelosRepository {
       seleccionado: (j['seleccionado'] as String?) ?? '',
       barato: (par['barato'] as String?) ?? 'gpt-4o-mini',
       fuerte: (par['fuerte'] as String?) ?? 'claude-sonnet-4-6',
+      proveedorPreferido: (j['proveedor_preferido'] as String?) ?? 'auto',
     );
   }
 }

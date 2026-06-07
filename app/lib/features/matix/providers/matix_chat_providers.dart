@@ -46,6 +46,7 @@ class EstadoChatMatix {
     this.opcionesUltimoTurno,
     this.modeloUltimoTurno,
     this.autoUltimoTurno = false,
+    this.failoverUltimoTurno = false,
     this.reconectando = false,
   });
 
@@ -70,6 +71,10 @@ class EstadoChatMatix {
   /// `true` si ese modelo lo eligió el modo Automático.
   final bool autoUltimoTurno;
 
+  /// `true` si el último turno se respondió por failover al otro proveedor
+  /// (el primario cayó / sin crédito). La UI muestra una nota honesta.
+  final bool failoverUltimoTurno;
+
   EstadoChatMatix copyWith({
     List<Mensaje>? mensajes,
     bool? enviando,
@@ -78,6 +83,7 @@ class EstadoChatMatix {
     Object? opcionesUltimoTurno = _kSentinel,
     Object? modeloUltimoTurno = _kSentinel,
     bool? autoUltimoTurno,
+    bool? failoverUltimoTurno,
     bool? reconectando,
   }) {
     return EstadoChatMatix(
@@ -94,6 +100,7 @@ class EstadoChatMatix {
           ? this.modeloUltimoTurno
           : modeloUltimoTurno as String?,
       autoUltimoTurno: autoUltimoTurno ?? this.autoUltimoTurno,
+      failoverUltimoTurno: failoverUltimoTurno ?? this.failoverUltimoTurno,
       reconectando: reconectando ?? this.reconectando,
     );
   }
@@ -238,6 +245,7 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
         opcionesUltimoTurno: turno.opciones,
         modeloUltimoTurno: turno.modeloUsado,
         autoUltimoTurno: turno.auto,
+        failoverUltimoTurno: turno.failover,
       );
       _invalidarProviders(turno.tablasCambiadas);
       final destino = seccionMatixDeString(turno.navegacion);

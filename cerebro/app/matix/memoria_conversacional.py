@@ -141,11 +141,13 @@ async def buscar_en_historial(
     """Busca en el historial por similitud semántica. Excluye la conversación
     actual (ya está en contexto). Devuelve `{contenido, fecha_texto, distancia}`
     con la fecha en lenguaje natural (Lima)."""
-    [emb] = await llm.embebir([consulta])
+    embs = await llm.embebir_seguro([consulta])
+    if not embs:
+        return []  # sin crédito de embeddings → sin recall, el chat sigue
     filas = await db.rpc(
         "buscar_memoria_conversacional",
         {
-            "query_embedding": emb,
+            "query_embedding": embs[0],
             "excluir_conversacion": excluir_conversacion,
             "match_count": top_k,
         },

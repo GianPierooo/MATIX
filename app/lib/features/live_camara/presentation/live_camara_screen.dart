@@ -41,6 +41,7 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
   // La voz falló al menos una vez en esta sesión (502/timeout tras reintentos).
   // La cámara sigue narrando en TEXTO; solo lo avisamos honesto.
   bool _sinVoz = false;
+  bool _vozTelefono = false;
 
   // Estado del muestreo / costo.
   DateTime? _inicioSesion;
@@ -125,6 +126,7 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
       _tts.narrar(
         'Listo, te voy contando lo que veo.',
         onFallo: _avisarSinVoz,
+        onDispositivo: _avisarVozTelefono,
       );
       unawaited(_loop());
     } catch (e) {
@@ -134,6 +136,16 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
 
   void _avisarSinVoz() {
     if (mounted && !_sinVoz) setState(() => _sinVoz = true);
+  }
+
+  void _avisarVozTelefono() {
+    // La voz salió por el respaldo nativo del teléfono (cloud caído).
+    if (mounted && (!_vozTelefono || _sinVoz)) {
+      setState(() {
+        _vozTelefono = true;
+        _sinVoz = false;
+      });
+    }
   }
 
   Future<void> _loop() async {
@@ -206,7 +218,11 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
       // El TEXTO se muestra YA; la voz va en segundo plano y nunca bloquea el
       // loop ni lo tumba. Si la voz falla, seguimos narrando en texto.
       if (mounted) setState(() => _narracionActual = narracion);
-      _tts.narrar(narracion, onFallo: _avisarSinVoz);
+      _tts.narrar(
+        narracion,
+        onFallo: _avisarSinVoz,
+        onDispositivo: _avisarVozTelefono,
+      );
     }
     if (mounted && _activa) setState(() => _fase = _Fase.observando);
   }
@@ -308,6 +324,9 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
                 if (_activa && _sinVoz) ...[
                   const SizedBox(height: 8),
                   const _AvisoSinVoz(),
+                ] else if (_activa && _vozTelefono) ...[
+                  const SizedBox(height: 8),
+                  const _AvisoVozTelefono(),
                 ],
                 const SizedBox(height: 16),
                 _Controles(
@@ -418,6 +437,33 @@ class _Narracion extends StatelessWidget {
           height: 1.3,
           shadows: [Shadow(color: Colors.black, blurRadius: 8)],
         ),
+      ),
+    );
+  }
+}
+
+/// Aviso discreto cuando la voz salió por el respaldo nativo del teléfono
+/// (la TTS en la nube no estaba disponible). Honesto, sin alarmar.
+class _AvisoVozTelefono extends StatelessWidget {
+  const _AvisoVozTelefono();
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(horizontal: 24),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.phone_android_rounded, color: Colors.white70, size: 16),
+          SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              'Usando la voz del teléfono.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70, fontSize: 12.5),
+            ),
+          ),
+        ],
       ),
     );
   }

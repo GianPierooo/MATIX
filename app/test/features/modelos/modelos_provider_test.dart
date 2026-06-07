@@ -20,9 +20,15 @@ class _FakeRepo implements ModelosRepository {
   String _sel;
   String barato = 'gpt-4o-mini';
   String fuerte = 'claude-opus-4-8';
+  String proveedor = 'auto';
 
-  ModelosEstado get _estado =>
-      (modelos: _catalogo, seleccionado: _sel, barato: barato, fuerte: fuerte);
+  ModelosEstado get _estado => (
+        modelos: _catalogo,
+        seleccionado: _sel,
+        barato: barato,
+        fuerte: fuerte,
+        proveedorPreferido: proveedor,
+      );
 
   @override
   Future<ModelosEstado> estado() async => _estado;
@@ -37,6 +43,12 @@ class _FakeRepo implements ModelosRepository {
   Future<ModelosEstado> fijarPar({String? barato, String? fuerte}) async {
     if (barato != null) this.barato = barato;
     if (fuerte != null) this.fuerte = fuerte;
+    return _estado;
+  }
+
+  @override
+  Future<ModelosEstado> fijarProveedor(String proveedor) async {
+    this.proveedor = proveedor;
     return _estado;
   }
 }

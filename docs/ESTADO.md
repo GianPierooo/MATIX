@@ -33,15 +33,28 @@ SOLO-BACKEND (existe en el cerebro, sin pantalla propia en la app).
   lectura) y Tier C.1 (enviar WhatsApp tras confirmación). No hay automatización
   libre de tocar/escribir en apps arbitrarias.
 
-### Cerebro — proveedores
+### Cerebro — proveedores (RESILIENCIA multi-proveedor)
 
-- Chat LLM: OpenAI (default `gpt-4o-mini`) o Anthropic Claude, conmutable por
-  `MATIX_LLM_PROVIDER`. Auto-router por mensaje (`enrutador.py`) elige barato vs
-  fuerte sin llamada extra. Aislado en `matix/llm.py` (único que importa los SDK).
-- STT (voz→texto): Whisper (`whisper-1`, idioma fijo "es") + filtro de
-  alucinaciones.
-- TTS (texto→voz): OpenAI `tts-1`, voz `onyx`, vía `POST /matix/voz`.
-- Embeddings (RAG): OpenAI `text-embedding-3-small` (apuntes + biblioteca).
+- Chat/razonamiento/JSON: OpenAI o Anthropic con **failover real**. Si el
+  proveedor preferido cae por error transitorio (timeout/5xx/429) **o por
+  auth/crédito agotado (401/403/insufficient_quota)**, reintenta UNA vez con el
+  modelo comparable del OTRO proveedor. Aislado en `matix/llm.py`.
+- **Proveedor preferido** (`config_matix.proveedor_preferido`: openai /
+  anthropic / auto, default auto): a cuál apuntar primero; el failover cae al
+  otro. Editable desde Ajustes → Modelo. GET/POST `/api/v1/modelos[/proveedor]`.
+- Visión (cámara/imágenes): por la MISMA abstracción → gpt-4o-mini o Claude
+  (ambos ven imágenes), con failover. La cámara revive aunque OpenAI no esté.
+- TTS (texto→voz): cadena de respaldo **ElevenLabs (si hay key) → OpenAI tts-1
+  → voz NATIVA del dispositivo (flutter_tts) → texto**. El endpoint `/matix/voz`
+  devuelve 503 si todo el cloud cae; la app baja a la voz del teléfono. Header
+  `X-TTS-Proveedor` para observabilidad.
+- STT (voz→texto): Whisper (`whisper-1`, "es") + filtro de alucinaciones;
+  **respaldo NATIVO** de Android (`speech_to_text`) cuando Whisper no responde.
+- Embeddings (RAG): OpenAI `text-embedding-3-small`. Degradan elegante: sin
+  crédito, la búsqueda RAG/recall vuelve vacía (el chat NO se cae) y la ingesta
+  responde honesto ("ingesta en pausa: sin crédito de embeddings").
+- Observabilidad: el medidor de costos etiqueta proveedor (`por_proveedor`); el
+  chat surfacea `failover`/`modelo_usado` (la app muestra "respondiendo con …").
 - Búsqueda web: Tavily. Push: Firebase Cloud Messaging (FCM).
 
 ### Cerebro — tools del chat (93)

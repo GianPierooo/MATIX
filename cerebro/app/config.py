@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     # del RAG SIEMPRE usan OpenAI, sea cual sea el proveedor del chat.
     openai_api_key: str = ""
     anthropic_api_key: str = ""
+    # ElevenLabs (TTS premium, OPCIONAL). Si hay key, es el primer eslabón de la
+    # cadena de voz (ElevenLabs → OpenAI → voz del dispositivo). Si está vacío,
+    # se salta limpio a OpenAI. `elevenlabs_voice_id` elige la voz.
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_id: str = ""
     # CORS: lista separada por coma. Vacío = deny-all browser (la app
     # Android no es navegador y no la necesita). Se pone solo si en
     # el futuro hay un cliente web.

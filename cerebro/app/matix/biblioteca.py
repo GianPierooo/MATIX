@@ -58,7 +58,14 @@ async def ingestar_material(
         return {"creados": 0, "reemplazados": reemplazados}
 
     # 3) Embebir todas en una llamada (mismo modelo que el RAG de apuntes).
-    embeddings = await llm.embebir(textos)
+    # Si no hay crédito de embeddings, la ingesta se pausa con un mensaje
+    # honesto — pero NO tumba el cerebro ni el chat (que no la necesita en vivo).
+    embeddings = await llm.embebir_seguro(textos)
+    if embeddings is None:
+        raise RuntimeError(
+            "ingesta en pausa: sin crédito de embeddings (OpenAI). "
+            "El material no se indexó; reintenta cuando haya saldo."
+        )
 
     # 4) Insertar en orden.
     for orden, (texto, emb) in enumerate(zip(textos, embeddings)):
@@ -89,11 +96,13 @@ async def buscar_material(
     `{skill, bloque, fuente, fragmento, distancia}`.
 
     La distancia coseno va de 0 (idéntico) a ~2 (opuesto)."""
-    [emb] = await llm.embebir([consulta])
+    embs = await llm.embebir_seguro([consulta])
+    if not embs:
+        return []  # sin crédito de embeddings → sin resultados, el chat sigue
     return await db.rpc(
         "buscar_material_chunks",
         {
-            "query_embedding": emb,
+            "query_embedding": embs[0],
             "match_count": top_k,
             "filtro_skill": (skill or None),
             "filtro_bloque": (bloque or None),

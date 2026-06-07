@@ -20,6 +20,7 @@ from ..matix import modelos_llm
 from ..schemas.modelos import (
     ModelosEstado,
     ParRequest,
+    ProveedorRequest,
     SeleccionarModeloRequest,
 )
 from ..security import require_api_key
@@ -37,6 +38,7 @@ async def _estado(db: Postgrest) -> dict:
         "modelos": modelos_llm.listar(),
         "seleccionado": await modelos_llm.seleccion_guardada(db),
         "par": {"barato": barato, "fuerte": fuerte},
+        "proveedor_preferido": await modelos_llm.cargar_preferido(db),
     }
 
 
@@ -56,6 +58,18 @@ async def seleccionar(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Selección desconocida: «{body.modelo}».",
         )
+    return await _estado(db)
+
+
+@router.post("/proveedor", response_model=ModelosEstado)
+async def fijar_proveedor(
+    body: ProveedorRequest, db: Postgrest = Depends(get_db)
+) -> dict:
+    """Fija el proveedor de IA preferido: openai | anthropic | auto."""
+    try:
+        await modelos_llm.set_proveedor_preferido(db, body.proveedor.strip())
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return await _estado(db)
 
 
