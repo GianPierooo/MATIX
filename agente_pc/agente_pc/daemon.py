@@ -3,6 +3,9 @@
 Carga config, aplica las guardas (token presente, no elevado), monta el
 registry + contexto de seguridad, y corre el cliente WebSocket hasta el kill
 switch (Ctrl+C / SIGTERM).
+
+También expone el autotest:
+    uv run python -m agente_pc --test-connection
 """
 from __future__ import annotations
 
@@ -11,11 +14,56 @@ import ctypes
 import os
 import signal
 import sys
+from pathlib import Path
 
+from . import autotest
 from .acciones import crear_registro
 from .cliente import correr
 from .config import ConfigAgente, cargar_config
 from .registro import Contexto
+
+
+def chequear_venv() -> str | None:
+    """Detecta un `.venv` ROTO antes de fallar críptico (Windows suele tirar
+    'access is denied' cuando el `.venv/Scripts/python.exe` apunta a un Python
+    que ya no existe — p. ej. tras desinstalar 3.12). Devuelve un mensaje
+    accionable o None si está sano. PURO (no muta nada)."""
+    raiz = Path(__file__).resolve().parents[1]  # agente_pc/
+    venv = raiz / ".venv"
+    if not venv.exists():
+        # No hay venv todavía: el `uv sync` lo creará. No es un error per se.
+        return None
+    # Localiza el python del venv (Windows: Scripts/python.exe; POSIX: bin/python).
+    candidatos = [
+        venv / "Scripts" / "python.exe",
+        venv / "bin" / "python",
+        venv / "bin" / "python3",
+    ]
+    py = next((p for p in candidatos if p.exists()), None)
+    if py is None:
+        return (
+            "El .venv está ROTO (no encuentro su intérprete de Python). "
+            "Regenéralo: cd agente_pc && rm -rf .venv && uv sync"
+        )
+    # `pyvenv.cfg` apunta al Python BASE que creó el venv. Si ese base ya no
+    # existe (desinstalaste 3.12), invocar al python del venv falla cripticamente.
+    cfg = venv / "pyvenv.cfg"
+    base: Path | None = None
+    if cfg.exists():
+        try:
+            for linea in cfg.read_text(encoding="utf-8").splitlines():
+                if linea.lower().startswith("home"):
+                    _, _, valor = linea.partition("=")
+                    base = Path(valor.strip())
+                    break
+        except OSError:
+            return None  # no podemos diagnosticar; deja que el daemon siga
+    if base is not None and not base.exists():
+        return (
+            f"El .venv apunta a un Python que ya no existe ({base}). "
+            "Regenéralo: cd agente_pc && rm -rf .venv && uv sync"
+        )
+    return None
 
 
 def _es_elevado() -> bool:
@@ -64,7 +112,7 @@ async def _run(config: ConfigAgente) -> int:
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     # Línea a línea aunque la salida esté redirigida (no solo en TTY): así los
     # mensajes de diagnóstico ("conectado al cerebro", errores) aparecen al
     # instante en cualquier terminal o log.
@@ -73,6 +121,27 @@ def main() -> int:
             flujo.reconfigure(line_buffering=True)  # type: ignore[union-attr]
         except Exception:  # noqa: BLE001
             pass
+
+    args = argv if argv is not None else sys.argv[1:]
+
+    # Aviso TEMPRANO de .venv roto: vale tanto para el daemon como para el
+    # autotest. Sin esto, Windows tira "access is denied" críptico cuando el
+    # base Python que creó el venv ya no existe.
+    aviso_venv = chequear_venv()
+    if aviso_venv:
+        print(f"[agente] aviso: {aviso_venv}", file=sys.stderr)
+
+    # --test-connection: autotest de extremo a extremo y SALIR.
+    if "--test-connection" in args:
+        return autotest.ejecutar()
+    if "--help" in args or "-h" in args:
+        print(
+            "Uso: python -m agente_pc [--test-connection]\n"
+            "\n"
+            "  (sin argumentos)    Arranca el daemon y queda corriendo hasta Ctrl+C.\n"
+            "  --test-connection   Prueba la conexión al cerebro y sale.\n"
+        )
+        return 0
 
     config = cargar_config()
 

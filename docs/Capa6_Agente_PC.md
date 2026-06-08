@@ -188,6 +188,31 @@ Requisitos: Python 3.12+ y [uv](https://docs.astral.sh/uv/).
    [agente] conectado al cerebro
    ```
 
+5. **Autotest de conexión** (desde `agente_pc/`): prueba la auth y el canal y
+   sale limpio. NO deja nada corriendo. Útil para diagnosticar antes de dejar
+   el daemon vivo.
+
+   ```bash
+   uv run python -m agente_pc --test-connection
+   ```
+
+   Salida esperada (todo OK):
+
+   ```
+   [autotest] probando conexión a wss://matix-production.up.railway.app/api/v1/agente/ws …
+   ✓ Conectado a cerebro (matix-production.up.railway.app)
+     Handshake TLS + token aceptados; canal abierto y cerrado limpio.
+   ```
+
+   Si algo falla, sale un error ESPECÍFICO con la sugerencia de qué hacer: token
+   no coincide, host inalcanzable, DNS, TLS, timeout (el cerebro de Railway
+   puede estar dormido), `.venv` roto, allowlist vacía, etc. Exit code 0 si OK,
+   1 si la conexión falló, 2 si la config está mal.
+
+   En Windows con `stdout` redirigido (cp1252) las marcas se imprimen como
+   `[OK]` / `[X]` para no crashear con UnicodeEncodeError; en una terminal
+   moderna salen `✓` / `✗`.
+
 ### Editar qué puede ver
 
 Cambia `AGENTE_PC_ALLOWLIST` en `agente_pc/.env` y reinicia el agente. La
