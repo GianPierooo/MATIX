@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends
 
 from ..db import Postgrest, get_db
-from ..matix import horario
+from ..matix import horario, notis_programadas
 from ..schemas.horario import (
     CompletarBloqueRequest,
     PlanDelDiaRead,
@@ -73,6 +73,32 @@ async def saltar_bloque(
 ) -> dict:
     """Salta un bloque del set (no hoy, sin culpa)."""
     return await horario.saltar_bloque(db, set_item_id=str(body.set_item_id))
+
+
+@router.get("/notis-programadas")
+async def listar_notis_programadas(db: Postgrest = Depends(get_db)) -> dict:
+    """Lista las notis que la app debe meter al scheduler local para el resto
+    de HOY (Lima): resumen matutino + pre-actividad por cada bloque + nudges
+    del próximo bloque dosificados por el dial de intensidad. 100% determinista
+    (plantilla + plan); cero LLM, cero tokens. Respeta quiet hours.
+
+    La app cancela las anteriores del día por `dedup_key` y reprograma — re-
+    pedir no duplica. Las notis sobreviven al background porque las dispara el
+    AlarmManager del sistema (no la app), bien para MagicOS.
+    """
+    ahora = datetime.now(timezone.utc)
+    plan = await horario.plan_de_hoy_data(db, ahora=ahora)
+    cfgs = await db.list("config_nudges", limit=1)
+    cfg = cfgs[0] if cfgs else None
+    notis = notis_programadas.armar_notis_programadas(plan, cfg, ahora=ahora)
+    return {
+        "ahora": ahora.isoformat(),
+        "fecha": plan.get("fecha"),
+        "intensidad": (cfg or {}).get("intensidad", "intenso"),
+        "lead_pre_actividad_min": (cfg or {}).get("pre_actividad_min")
+            or notis_programadas.LEAD_DEFAULT_MIN,
+        "notis": [n.to_dict() for n in notis],
+    }
 
 
 @router.post("/agendar")

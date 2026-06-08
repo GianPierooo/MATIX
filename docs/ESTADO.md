@@ -10,6 +10,20 @@ pendientes `·`.
 
 ---
 
+## Criterio de "Matix 1.0 terminada"
+
+1. Capas 1-3 (hub, chat y voz, memoria/tutor) funcionan sólidas a diario.
+2. El horario automático arma el día, replanifica, y se confía en él.
+3. El acceso agéntico al teléfono (C.2) hace los flujos seguros habituales.
+4. Resiliencia de proveedores: si uno cae, Matix sigue funcionando.
+5. Usado como sistema principal 7 días seguidos sin romperse nada crítico.
+
+Fuera de 1.0 (post-1.0 / 2.0): agente PC completo, casa inteligente,
+Google sync completo, cámara avanzada, proactividad plena, capa de
+comandos unificada, voz con ElevenLabs.
+
+---
+
 ## INVENTARIO — qué tiene Matix HOY (leído del repo · 2026-06-04)
 
 Foto honesta del estado real, sacada del código (no de memoria). Marcas:
@@ -83,6 +97,17 @@ SOLO-BACKEND (existe en el cerebro, sin pantalla propia en la app).
   (`cache_control` en la última). OpenAI auto-cachea por prefijo estable.
 - **Routing a barato por defecto** (enrutador, modo auto) + recorte de historial
   por turno (`_MAX_HISTORIAL_MENSAJES`) + RAG top-k=5 (verificado razonable).
+- **Notis proactivas programadas** (`notis_programadas.py` + endpoint
+  `/horario/notis-programadas` + `NotisProactivasService` en app): el cerebro
+  arma la lista determinista (resumen matutino + pre-actividad por cada bloque
+  con lead default 15 min + nudges del próximo bloque dosificados por dial
+  suave/medio/intenso/maximo). La app las mete al scheduler local con
+  `flutter_local_notifications.zonedSchedule` → las dispara el AlarmManager
+  nativo aunque la app esté dormida (robusto contra MagicOS sin depender del
+  receiver del plugin). Respeta quiet hours, dedup por dedup_key estable
+  (re-pedir cancela las anteriores y reprograma; cero duplicados). Triggers:
+  tras "me acabo de levantar", tras agendar bloques, on-resume throttled 10 min.
+  Cero LLM, cero FCM, cero tokens.
 - **Clasificador rápido pre-LLM** (`clasificador_rapido.py`): para casos
   LIMPIOS — saludos ("hola", "gracias"), "anota: X" sin verbo-de-acción ni
   fecha, "crea tarea X" / "recuérdame X" sin fecha — el chat se SALTA el LLM

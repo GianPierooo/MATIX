@@ -101,6 +101,10 @@ class _MatixAppState extends ConsumerState<MatixApp>
   bool _overlayActivo = false;
   ProviderSubscription<EstadoManosLibres>? _overlaySub;
 
+  /// Último refresco de las notis proactivas — throttle para no machacar el
+  /// endpoint en cada resume (la app entra y sale muchas veces seguidas).
+  DateTime? _ultimoRefrescoNotisProactivas;
+
   @override
   void initState() {
     super.initState();
@@ -229,6 +233,10 @@ class _MatixAppState extends ConsumerState<MatixApp>
       // datos rancios) y, si el plan cacheado es de otro día, lo refetch (el
       // listener de `planDiaProvider` empuja al widget cuando llegue el nuevo).
       _refrescarWidgetEnResume();
+      // Notis proactivas: el plan pudo cambiar mientras estábamos fuera (otros
+      // dispositivos, tools de Matix, paso del tiempo). Re-armamos las del
+      // resto del día — best-effort, no bloquea el resume.
+      unawaited(_refrescarNotisProactivasEnResume());
     } else if (estado == AppLifecycleState.paused ||
         estado == AppLifecycleState.detached) {
       // A segundo plano. Con "segundo plano" ON el FGS YA está corriendo y
@@ -445,6 +453,24 @@ class _MatixAppState extends ConsumerState<MatixApp>
     }
     if (plan != null) {
       unawaited(WidgetService.actualizar(plan, ahora));
+    }
+  }
+
+  /// Refresca las notis proactivas locales al volver al frente. Throttled por
+  /// `_ultimoRefrescoNotisProactivas`: como mínimo 10 min entre refrescos para
+  /// no machacar el endpoint cada vez que el usuario abre la app por 2 s. El
+  /// plan suele cambiar al hacer cosas dentro de la app (despertar/agendar);
+  /// el on-resume cubre el caso "vine de fuera y mientras tanto Matix re-armó
+  /// el día".
+  Future<void> _refrescarNotisProactivasEnResume() async {
+    final ahora = DateTime.now();
+    final ultimo = _ultimoRefrescoNotisProactivas;
+    if (ultimo != null && ahora.difference(ultimo).inMinutes < 10) return;
+    _ultimoRefrescoNotisProactivas = ahora;
+    try {
+      await ref.read(notisProactivasServiceProvider).refrescar();
+    } catch (_) {
+      // best-effort; silenciamos
     }
   }
 

@@ -366,6 +366,13 @@ class _BotonDespertarState extends ConsumerState<_BotonDespertar> {
       ref.read(replanActivoProvider.notifier).state = true;
       ref.invalidate(planDiaProvider);
       ref.invalidate(despertarHoyProvider);
+      // Notis proactivas del día: el cerebro ya conoce el ancla de despertar,
+      // así que pedimos las notis (resumen matutino + pre-actividad + nudges)
+      // y las metemos al scheduler local. Best-effort: si falla la red, no
+      // bloquea el flujo del usuario — solo loggea.
+      try {
+        await ref.read(notisProactivasServiceProvider).refrescar();
+      } catch (_) {}
       if (!mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()

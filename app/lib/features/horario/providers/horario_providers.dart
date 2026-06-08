@@ -1,8 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/notificaciones_service.dart';
 import '../../../core/providers.dart';
 import '../data/despertar_prefs.dart';
 import '../data/horario_repository.dart';
+import '../data/notis_proactivas_service.dart';
 import '../domain/plan_dia.dart';
 
 final horarioRepositoryProvider = Provider<HorarioRepository>((ref) {
@@ -22,6 +24,16 @@ final despertarHoyProvider = FutureProvider<bool>((ref) async {
   } catch (_) {
     return false;
   }
+});
+
+/// Servicio que sincroniza las notis proactivas (resumen matutino + pre-
+/// actividad + nudges del próximo bloque) con el scheduler local. Se llama
+/// tras despertar / agendar / on-resume para refrescar.
+final notisProactivasServiceProvider = Provider<NotisProactivasService>((ref) {
+  return NotisProactivasService(
+    ref.watch(horarioRepositoryProvider),
+    ref.watch(notificacionesServiceProvider),
+  );
 });
 
 /// Si está activo, el plan se trae como REPLAN (resto del día desde ahora).

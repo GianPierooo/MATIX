@@ -35,6 +35,15 @@ class HorarioRepository {
     await _client.post('/api/v1/horario/bloque/saltar', {'set_item_id': setItemId});
   }
 
+  /// Lista las notis proactivas programadas para el RESTO de HOY (resumen
+  /// matutino + pre-actividad + nudges del próximo bloque). Determinista en el
+  /// cerebro (plantilla, cero LLM). La app las mete al scheduler local con
+  /// `NotificacionesService.programar`. Re-pedirlo es idempotente por
+  /// `dedup_key` (el servicio cancela las anteriores antes de programar).
+  Future<Map<String, dynamic>> traerNotisProgramadas() async {
+    return await _client.getOne('/api/v1/horario/notis-programadas');
+  }
+
   /// AGENDA los bloques tentativos como TAREAS del hub (camino canónico). Manda
   /// los ids para enganchar al modelo Tarea↔bloque: si el bloque ya viene de una
   /// tarea/set/nodo se agenda ESA, si no se crea una tarea — NUNCA un evento.

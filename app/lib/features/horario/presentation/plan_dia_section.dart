@@ -159,6 +159,11 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
       final n = (r['agendadas'] as num?)?.toInt() ?? 0;
       invalidarHub(ref);
       _aviso(n == 0 ? 'Ya estaba todo agendado.' : 'Agendé $n en tu día.');
+      // Cambió el plan → re-armar las notis proactivas (pre-actividad, resumen,
+      // nudges) que reflejan el plan nuevo. Best-effort: silencia errores.
+      try {
+        await ref.read(notisProactivasServiceProvider).refrescar();
+      } catch (_) {}
     } on Object catch (e) {
       _aviso('No pude agendar: $e');
     } finally {
