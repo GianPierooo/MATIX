@@ -3803,11 +3803,14 @@ async def _obtener_cambios_recientes(_db: Postgrest, args: dict) -> dict[str, An
     n = max(1, min(50, n))
     try:
         # %x1f = separador US (no choca con texto humano). %aI = ISO 8601 estricto.
+        # encoding="utf-8" + errors="replace": evita UnicodeDecodeError en
+        # Windows (default cp1252) cuando los mensajes traen ✓/✗/ñ/acentos.
         r = subprocess.run(
             ["git", "log", f"-n{n}",
              "--pretty=format:%h\x1f%aI\x1f%s"],
             cwd=str(_REPO_RAIZ),
             capture_output=True, text=True, timeout=5, check=False,
+            encoding="utf-8", errors="replace",
         )
     except (FileNotFoundError, subprocess.SubprocessError) as e:
         return _ok({"commits": [], "motivo": f"sin git en este entorno: {type(e).__name__}"})

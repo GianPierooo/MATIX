@@ -16,6 +16,7 @@ import asyncio
 import logging
 
 from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -172,6 +173,24 @@ async def aplicar_accion(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Acción desconocida: {body.accion!r}",
         )
+    # Ping del diagnóstico: NO toca BD ni alimenta evolución; solo confirma que
+    # el chain handler→cerebro llegó. Devuelve 200 con `tipo=diag` para que la
+    # app muestre "✓ chain OK" en el historial.
+    if body.tarea_id == "diag-ping":
+        logger.info("rc/accion: diag-ping (no toca BD)")
+        return {"ok": True, "tipo": "diag", "accion": accion}
+    # Validamos forma de UUID antes de tocar la BD: antes mandar un id "feo"
+    # (p. ej. una etiqueta de diagnóstico vieja) reventaba Postgres con
+    # "invalid input syntax for type uuid" → 500 críptico en la app. Ahora
+    # respondemos 404 limpio.
+    try:
+        UUID(body.tarea_id)
+    except (ValueError, TypeError, AttributeError):
+        logger.warning("rc/accion: tarea_id %r no es UUID", body.tarea_id)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No existe esa tarea.",
+        ) from None
     tarea = await db.get("tareas", body.tarea_id)
     if tarea is None:
         logger.warning("rc/accion: tarea %s no existe", body.tarea_id)
@@ -285,6 +304,18 @@ async def aplicar_asistencia(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Acción desconocida: {body.accion!r}",
         )
+    if body.evento_id == "diag-ping":
+        logger.info("asistencia/accion: diag-ping (no toca BD)")
+        return {"ok": True, "tipo": "diag", "accion": accion}
+    try:
+        UUID(body.evento_id)
+    except (ValueError, TypeError, AttributeError):
+        logger.warning("asistencia/accion: evento_id %r no es UUID",
+                       body.evento_id)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No existe ese evento.",
+        ) from None
     evento = await db.get("eventos", body.evento_id)
     if evento is None:
         logger.warning("asistencia/accion: evento %s no existe", body.evento_id)

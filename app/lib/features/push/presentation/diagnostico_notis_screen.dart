@@ -123,9 +123,9 @@ class _DiagnosticoNotisScreenState extends ConsumerState<DiagnosticoNotisScreen>
   }
 
   /// Dispara una notificación REAL con los botones de acción. Usa `diag-ping`
-  /// para no tocar datos del usuario; el cerebro responderá 404 al recibir la
-  /// acción y el log mostrará evidencia de que el chain disparó. Si el cerebro
-  /// está corriendo, además verás el `info` en los logs (`rc/accion recibida`).
+  /// para no tocar datos del usuario; el cerebro lo reconoce y devuelve un 200
+  /// con `tipo=diag` (sin tocar BD), así el log queda con un OK limpio. Si el
+  /// cerebro está corriendo, además verás el `info` (`rc/accion: diag-ping`).
   ///
   /// IMPORTANTE: usamos `abrirAppAlTap: true` aquí porque en MagicOS el
   /// BroadcastReceiver del plugin puede ser matado por el SO y el tap se pierde
