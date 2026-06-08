@@ -1,5 +1,9 @@
 # Estado de Matix
 
+> **ESTADO: Matix 1.0 — TERMINADA (8 de junio de 2026).**
+> Tag de versión: `v1.0.0`. La rama `main` queda en modo mantenimiento de la
+> 1.0 hasta arrancar formalmente la 2.0.
+
 Bitácora viva del proyecto. Si la sesión se reinicia, lee primero
 `CLAUDE.md`, después `docs/Mapa_del_Hub.md`, después
 `docs/Plan_Capa1.md` y por último este archivo para saber dónde
@@ -12,15 +16,92 @@ pendientes `·`.
 
 ## Criterio de "Matix 1.0 terminada"
 
-1. Capas 1-3 (hub, chat y voz, memoria/tutor) funcionan sólidas a diario.
-2. El horario automático arma el día, replanifica, y se confía en él.
-3. El acceso agéntico al teléfono (C.2) hace los flujos seguros habituales.
-4. Resiliencia de proveedores: si uno cae, Matix sigue funcionando.
-5. Usado como sistema principal 7 días seguidos sin romperse nada crítico.
+1. ✓ Capas 1-3 (hub, chat y voz, memoria/tutor) funcionan sólidas a diario.
+2. ✓ El horario automático arma el día, replanifica, y se confía en él.
+3. ✓ El acceso agéntico al teléfono (C.2) hace los flujos seguros habituales.
+4. ✓ Resiliencia de proveedores: si uno cae, Matix sigue funcionando.
+5. ✓ Usado como sistema principal 7 días seguidos sin romperse nada crítico.
 
 Fuera de 1.0 (post-1.0 / 2.0): agente PC completo, casa inteligente,
 Google sync completo, cámara avanzada, proactividad plena, capa de
 comandos unificada, voz con ElevenLabs.
+
+---
+
+## Qué entregó 1.0
+
+Superficie que quedó viva y se usa a diario:
+
+- **Hub completo**: Inicio (presencia Matix, robot, "Tu día", widgets),
+  Tareas (con prioridad, fechas, subtareas, papelera), Calendario (mensual +
+  lista del día, eventos fijos y recurrentes, asistencia con confirmación),
+  Universidad (cursos, entregas, exámenes, calificaciones, sesiones de clase,
+  evaluaciones), Apuntes (etiquetas, búsqueda, conversión a tareas), Proyectos
+  (con árbol, fase actual, capacidad estimada y modalidad), Finanzas básicas
+  (movimientos, categorías, consultas), y la búsqueda global desde Inicio.
+- **Chat + voz con Matix**: chat persistente con historial, modo voz manos
+  libres, wake word entrenado por el usuario, transcripción Whisper, TTS cloud
+  con respaldo en la voz nativa del dispositivo (cadena device-first para la
+  cámara), captura rápida desde Inicio (tarea o apunte en un toque).
+- **Memoria + RAG + modo tutor**: memoria personal de Matix (lo que sabe del
+  usuario), RAG sobre apuntes y biblioteca de material por skill/bloque
+  (calistenia, inglés con bloques 1-6 ingeridos, etc.), recall semántico del
+  historial, modo tutor que explica y genera práctica.
+- **Horario automático**: plan del día determinístico que coloca tareas en
+  ventanas libres reales, respeta anclas, buffer de transición tras
+  compromisos fuera de casa, replanificación desde "me acabo de levantar",
+  rollover de lo aceptado-no-hecho, apartado de huecos libres con sugerencia
+  dosificada.
+- **Acceso agéntico al teléfono (C.2)**: enviar mensaje (WhatsApp/SMS/correo),
+  iniciar llamada, crear evento del teléfono, abrir app/URL/mapa, leer la
+  galería, leer la pantalla — todos con confirmación previa cuando es
+  irreversible.
+- **Resiliencia de proveedores**: failover OpenAI ↔ Anthropic para chat,
+  visión y JSON; cadena de respaldo de TTS (ElevenLabs/OpenAI cloud → voz
+  nativa); embeddings degrada a sin-RAG si falla; cámara con reintentos y
+  timeout agresivo.
+- **Cámara en vivo con narración**: muestreo de frames, narración corta del
+  modelo, voz device-first del Honor con fallback a cloud.
+- **Notificaciones de accountability + proactivas**: rendición de cuentas y
+  nudges de plazos con dial de intensidad (suave/medio/intenso/máximo),
+  asistencia a eventos fuera de casa, recordatorios pre-actividad (lead
+  ~15 min), resumen matutino, nudges del próximo bloque, programadas con el
+  AlarmManager nativo (sobreviven a MagicOS sin depender del receiver del
+  plugin), respetando quiet hours y dedup.
+- **Widgets de pantalla de inicio (Android)**: lista del día y "lo siguiente",
+  semántica de colores, push on-change y al cambiar día.
+- **Robot companion**: presencia de Matix en Inicio + burbuja flotante;
+  acción siguiente tocable; despedida nocturna.
+- **Base del agente PC (Capa 6 — Fase 1)**: agente local en la PC,
+  autotest de conexión, listar/leer/mover/renombrar archivos, organizar
+  carpeta, resumir documento — con confirmación para acciones destructivas.
+
+Bajo la línea: cerebro y app con tests verdes, CI bloqueante (analyze + tests
++ APK release), instrumentación de latencia por turno (clasificador rápido
+pre-LLM + tools en paralelo + prompt caching en ambos proveedores), backups
+deterministas, y migraciones siempre aplicadas vía helper.
+
+---
+
+## Siguiente capítulo: 2.0
+
+El norte de la 2.0 vive en [`docs/Matix_2.0_Norte_Capa_de_Comandos.md`](Matix_2.0_Norte_Capa_de_Comandos.md).
+
+Parqueado para 2.0 (no entra en 1.0):
+
+- Agente PC completo y Capa 6 restante (ejecutar comandos, control real más
+  allá de archivos, integración con apps de escritorio).
+- Voz premium con ElevenLabs (la cadena ya soporta el respaldo; falta la
+  voz pinneada del usuario).
+- Google sync completo (Calendar, Tasks, Mail vía MCP).
+- Casa inteligente (Home Assistant).
+- Cámara avanzada (más allá de la narración en vivo: visión continua, modo
+  estudiar-conmigo, reconocimiento de pizarras).
+- Proactividad plena (Matix actuando por iniciativa propia, no solo
+  reaccionando).
+- Tier B de acceso al teléfono (acciones más sensibles y compuestas).
+- Logimatix / Peyo (las dos extensiones de Matix para los flujos de la empresa
+  y la familia).
 
 ---
 
