@@ -42,6 +42,9 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
   // La cámara sigue narrando en TEXTO; solo lo avisamos honesto.
   bool _sinVoz = false;
   bool _vozTelefono = false;
+  // Sirve de chip diagnóstico ("dispositivo" / "cloud (respaldo)" / "sin voz").
+  // Se actualiza tras cada turno con lo que reporta `TtsService.ultimoEvento`.
+  String _vozFuente = '';
 
   // Estado del muestreo / costo.
   DateTime? _inicioSesion;
@@ -76,6 +79,10 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
     WidgetsBinding.instance.addObserver(this);
     _tts = TtsService();
     _repo = NarracionRepository(ref.read(matixClientProvider));
+    // Inicializar el TTS del dispositivo eager: idioma con fallback Latam,
+    // velocidad/volumen, modo FLUSH. Si no se hace acá, la primera frase paga
+    // el setup (medio segundo en algunos OEM) y se siente atrasada.
+    unawaited(_tts.prepararDispositivo());
     WidgetsBinding.instance.addPostFrameCallback((_) => _arrancar());
   }
 
@@ -135,13 +142,14 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
         _enVuelo = false;
         _pensando = false;
       });
-      // Saludo de apertura en SEGUNDO PLANO (no bloqueante, nunca lanza): antes
-      // un TTS 502 acá caía en el catch y mataba la cámara con "No pude abrir la
-      // cámara". Ahora la cámara abre aunque la voz falle.
-      _tts.narrar(
+      // Saludo de apertura: device-first (rápido, sin red, simultáneo con el
+      // texto). Si el motor del dispositivo no habla, cae al cloud como
+      // respaldo. Antes era cloud-first y se sentía 1–2s atrasado o muteado.
+      _tts.narrarRapido(
         'Listo, te voy contando lo que veo.',
         onFallo: _avisarSinVoz,
         onDispositivo: _avisarVozTelefono,
+        onCloud: _avisarVozCloud,
       );
       // Dos loops DESACOPLADOS (no en serie): la captura nunca espera a la
       // visión, y la visión nunca espera al audio. Así el ritmo es humano y
@@ -154,17 +162,33 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
   }
 
   void _avisarSinVoz() {
-    if (mounted && !_sinVoz) setState(() => _sinVoz = true);
+    if (!mounted) return;
+    setState(() {
+      _sinVoz = true;
+      _vozFuente = _tts.ultimoEvento?.etiqueta ?? '';
+    });
   }
 
   void _avisarVozTelefono() {
-    // La voz salió por el respaldo nativo del teléfono (cloud caído).
-    if (mounted && (!_vozTelefono || _sinVoz)) {
-      setState(() {
-        _vozTelefono = true;
-        _sinVoz = false;
-      });
-    }
+    // Voz del dispositivo (camino feliz device-first): rápida y sin red.
+    if (!mounted) return;
+    setState(() {
+      _vozTelefono = true;
+      _sinVoz = false;
+      final idioma = _tts.idiomaDispositivo;
+      _vozFuente =
+          idioma == null ? 'dispositivo' : 'dispositivo · $idioma';
+    });
+  }
+
+  void _avisarVozCloud() {
+    // Device falló: salió por el respaldo cloud (lento pero al menos suena).
+    if (!mounted) return;
+    setState(() {
+      _vozTelefono = true; // mantenemos el aviso pero con etiqueta cloud
+      _sinVoz = false;
+      _vozFuente = 'cloud (respaldo)';
+    });
   }
 
   /// Loop de CAPTURA: muestrea a ritmo humano y deja el frame más fresco que
@@ -272,10 +296,12 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
         // El TEXTO se muestra YA; la voz va en segundo plano, interrumpible, y
         // nunca bloquea el loop. Si la voz falla, seguimos narrando en texto.
         setState(() => _narracionActual = narracion);
-        _tts.narrar(
+        // Device-first: la voz arranca a la par del texto, sin esperar la red.
+        _tts.narrarRapido(
           narracion,
           onFallo: _avisarSinVoz,
           onDispositivo: _avisarVozTelefono,
+          onCloud: _avisarVozCloud,
         );
       }
     } catch (_) {
@@ -326,7 +352,8 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
             'No veía cambios, así que cerré para no gastar de más.',
           null => 'Listo, cerré la sesión.',
         };
-    _tts.narrar(txt);
+    // Despedida también device-first: corta y rápida, al cerrar la sesión.
+    _tts.narrarRapido(txt);
   }
 
   void _fallar(String msg) {
@@ -396,10 +423,10 @@ class _LiveCamaraScreenState extends ConsumerState<LiveCamaraScreen>
                 ],
                 if (_activa && _sinVoz) ...[
                   const SizedBox(height: 8),
-                  const _AvisoSinVoz(),
+                  _AvisoSinVoz(motivo: _vozFuente),
                 ] else if (_activa && _vozTelefono) ...[
                   const SizedBox(height: 8),
-                  const _AvisoVozTelefono(),
+                  _AvisoVozTelefono(fuente: _vozFuente),
                 ],
                 const SizedBox(height: 16),
                 _Controles(
@@ -560,25 +587,33 @@ class _MirandoState extends State<_Mirando>
   }
 }
 
-/// Aviso discreto cuando la voz salió por el respaldo nativo del teléfono
-/// (la TTS en la nube no estaba disponible). Honesto, sin alarmar.
+/// Chip diagnóstico del proveedor de voz. Muestra de qué fuente salió (device
+/// o cloud-respaldo), con icono y locale si está disponible.
 class _AvisoVozTelefono extends StatelessWidget {
-  const _AvisoVozTelefono();
+  const _AvisoVozTelefono({this.fuente = ''});
+  final String fuente;
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.symmetric(horizontal: 24),
+    final esCloud = fuente.toLowerCase().contains('cloud');
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.phone_android_rounded, color: Colors.white70, size: 16),
-          SizedBox(width: 6),
+          Icon(
+            esCloud ? Icons.cloud_outlined : Icons.phone_android_rounded,
+            color: Colors.white70,
+            size: 16,
+          ),
+          const SizedBox(width: 6),
           Flexible(
             child: Text(
-              'Usando la voz del teléfono.',
+              fuente.isEmpty
+                  ? 'Usando la voz del teléfono.'
+                  : 'Voz: $fuente',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white70, fontSize: 12.5),
+              style: const TextStyle(color: Colors.white70, fontSize: 12.5),
             ),
           ),
         ],
@@ -590,7 +625,8 @@ class _AvisoVozTelefono extends StatelessWidget {
 /// Aviso discreto cuando la voz no salió: la cámara sigue narrando en texto.
 /// Honesto, sin alarmar — NO es "no pude abrir la cámara".
 class _AvisoSinVoz extends StatelessWidget {
-  const _AvisoSinVoz();
+  const _AvisoSinVoz({this.motivo = ''});
+  final String motivo;
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -598,14 +634,16 @@ class _AvisoSinVoz extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
-        children: const [
-          Icon(Icons.volume_off_rounded, color: Colors.white70, size: 16),
-          SizedBox(width: 6),
+        children: [
+          const Icon(Icons.volume_off_rounded, color: Colors.white70, size: 16),
+          const SizedBox(width: 6),
           Flexible(
             child: Text(
-              'Voz no disponible ahora; sigo contándote en texto.',
+              motivo.isEmpty
+                  ? 'Voz no disponible ahora; sigo contándote en texto.'
+                  : 'Voz no disponible ($motivo); sigo en texto.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white70, fontSize: 12.5),
+              style: const TextStyle(color: Colors.white70, fontSize: 12.5),
             ),
           ),
         ],

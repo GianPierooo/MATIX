@@ -23,7 +23,10 @@ class _RepFake implements ReproductorAudio {
 class _VozFake implements VozDispositivo {
   _VozFake(this.ok);
   final bool ok;
+  final String? idioma = 'es-419';
   int veces = 0;
+  int detenciones = 0;
+  bool preparado = false;
   @override
   Future<bool> hablar(String texto) async {
     veces++;
@@ -31,7 +34,18 @@ class _VozFake implements VozDispositivo {
   }
 
   @override
-  Future<void> detener() async {}
+  Future<void> detener() async {
+    detenciones++;
+  }
+
+  @override
+  Future<bool> preparar() async {
+    preparado = true;
+    return ok;
+  }
+
+  @override
+  String? get idiomaActivo => preparado ? idioma : null;
 }
 
 void main() {

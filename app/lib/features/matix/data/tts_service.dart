@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -81,38 +82,122 @@ abstract class VozDispositivo {
   /// Lee `texto` con la voz del teléfono. Devuelve `true` si habló.
   Future<bool> hablar(String texto);
   Future<void> detener();
+
+  /// Inicializa el motor EAGER (idioma, volumen, velocidad, modo FLUSH). Idem-
+  /// potente. Devuelve true si el motor quedó listo para hablar de inmediato.
+  /// Hacerlo al abrir la cámara evita que el primer frame pague la latencia de
+  /// configuración (que en algunos OEM se traga la primera frase entera).
+  Future<bool> preparar();
+
+  /// El último idioma TTS que se logró setear (`es-419`, `es-PE`, …). Útil para
+  /// diagnosticar en qué locale habla el motor del Honor del user. Null si nada.
+  String? get idiomaActivo;
 }
 
-/// Implementación real con `flutter_tts` (motor TTS del sistema, es-ES).
+/// Implementación real con `flutter_tts` (motor TTS del sistema).
 ///
-/// La config (idioma) es LAZY dentro de `hablar`, no en el constructor: así
-/// construir el servicio no dispara llamadas al canal nativo (que en tests no
-/// existe) y no genera errores async sueltos.
+/// Optimizada para narración EN VIVO (cámara): idioma con fallback Latam-first,
+/// volumen y rate altos, modo FLUSH (una `speak` nueva CORTA la anterior), y
+/// `awaitSpeakCompletion(false)` para que `speak()` retorne ya y el caller
+/// pueda interrumpir al siguiente frame sin esperar a que termine la frase.
+///
+/// La instancia de `FlutterTts` es LAZY (requiere el binding de Flutter, no
+/// existe en tests). `preparar()` es idempotente y se debe llamar al abrir la
+/// pantalla — antes el config corría dentro de `hablar()` y la primera frase
+/// pagaba la latencia.
 class VozDispositivoFlutterTts implements VozDispositivo {
-  // LAZY: `FlutterTts()` llama `setMethodCallHandler` en su constructor, que
-  // requiere el binding de Flutter. Construirlo solo al usar el respaldo evita
-  // tocar el canal nativo en el camino normal (cloud OK) y en tests.
   FlutterTts? _instancia;
   FlutterTts get _tts => _instancia ??= FlutterTts();
   bool _configurado = false;
+  String? _idiomaActivo;
 
-  Future<void> _configurar() async {
-    if (_configurado) return;
-    await _tts.setLanguage('es-ES');
-    await _tts.awaitSpeakCompletion(true);
-    _configurado = true;
+  /// Orden de intento: español Latam primero (el motor del Honor del user suele
+  /// venir con `es-419`/`es-PE` y NO con `es-ES`). Antes solo intentábamos
+  /// `es-ES` y, si el motor no lo tenía, `setLanguage` lanzaba y la voz quedaba
+  /// muda sin un mensaje claro.
+  static const List<String> _idiomasEnOrden = [
+    'es-419', // Latin American Spanish
+    'es-PE',
+    'es-MX',
+    'es-US',
+    'es-CO',
+    'es-AR',
+    'es-ES',
+  ];
+
+  @override
+  String? get idiomaActivo => _idiomaActivo;
+
+  @override
+  Future<bool> preparar() async {
+    if (_configurado) return true;
+    try {
+      // Volumen + velocidad para narración en vivo: clara y un toque por encima
+      // del default lento de Android (~0.5).
+      await _tts.setVolume(1.0);
+      await _tts.setSpeechRate(0.55);
+      await _tts.setPitch(1.0);
+      // Modo FLUSH: una nueva `speak()` corta la anterior. Si el motor no lo
+      // soporta (algún OEM raro), no es fatal: caemos a `stop()` antes de cada
+      // speak. Por eso va en try/catch.
+      try {
+        await _tts.setQueueMode(0);
+      } catch (_) {}
+      // FALSO: `speak()` retorna en cuanto ENCOLA, no cuando termina. Para la
+      // cámara queremos esto: el caller no espera el fin de la frase.
+      await _tts.awaitSpeakCompletion(false);
+      // Idioma: primero el preferido disponible, sin lanzar si no está.
+      _idiomaActivo = await _setearPrimerIdiomaDisponible();
+      if (_idiomaActivo == null) {
+        debugPrint('[tts][dispositivo] ningún idioma es-* disponible en el motor');
+        return false;
+      }
+      debugPrint('[tts][dispositivo] preparado (lang=$_idiomaActivo)');
+      _configurado = true;
+      return true;
+    } catch (e) {
+      debugPrint('[tts][dispositivo] preparar falló: $e');
+      return false;
+    }
+  }
+
+  /// Intenta cada idioma del orden hasta que uno responde "disponible". Devuelve
+  /// el que quedó seteado o null si ninguno aplicó.
+  Future<String?> _setearPrimerIdiomaDisponible() async {
+    for (final lang in _idiomasEnOrden) {
+      try {
+        final disp = await _tts.isLanguageAvailable(lang);
+        if (disp != true) continue;
+        final r = await _tts.setLanguage(lang);
+        // Android: 1 = OK. Algunos motores devuelven null en éxito.
+        if (r == 1 || r == null) return lang;
+      } catch (_) {
+        // Sigue con el próximo.
+      }
+    }
+    // Último recurso: intentar `es-ES` a ciegas (algunos motores no implementan
+    // isLanguageAvailable y siempre lo reportan como false).
+    try {
+      final r = await _tts.setLanguage('es-ES');
+      if (r == 1 || r == null) return 'es-ES';
+    } catch (_) {}
+    return null;
   }
 
   @override
   Future<bool> hablar(String texto) async {
     try {
-      await _configurar();
+      if (!_configurado) {
+        final ok = await preparar();
+        if (!ok) return false;
+      }
+      // En modo FLUSH `stop()` no haría falta, pero algunos motores no respetan
+      // el queueMode al pie de la letra; con esto garantizamos interrupción.
       await _tts.stop();
       final r = await _tts.speak(texto);
-      // En Android `speak` devuelve 1 al encolar OK; algunos motores no
-      // devuelven nada → asumimos que habló si no lanzó.
       return r == null || r == 1;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[tts][dispositivo] speak falló: $e');
       return false;
     }
   }
@@ -123,6 +208,31 @@ class VozDispositivoFlutterTts implements VozDispositivo {
     try {
       await _instancia!.stop();
     } catch (_) {}
+  }
+}
+
+/// Proveedor TTS que se intentó en un turno de narración. Para diagnóstico:
+/// "qué eslabón falló". Lo expone `TtsService.ultimoEvento`.
+enum ProveedorTts { dispositivo, cloud, ninguno }
+
+class TtsEvento {
+  const TtsEvento({
+    required this.cuando,
+    required this.proveedor,
+    required this.exito,
+    this.motivo,
+  });
+
+  final DateTime cuando;
+  final ProveedorTts proveedor;
+  final bool exito;
+  final String? motivo;
+
+  /// Texto compacto para chips/badges: "✓ dispositivo" / "✗ cloud (timeout)".
+  String get etiqueta {
+    final tick = exito ? '✓' : '✗';
+    final p = proveedor.name;
+    return motivo == null ? '$tick $p' : '$tick $p ($motivo)';
   }
 }
 
@@ -178,6 +288,30 @@ class TtsService implements TtsBase {
   // narración más nueva → NO se reproduce (evita encolar audio atrasado en la
   // cámara en vivo: la última narración manda, nada de minutos de audio viejo).
   int _epoca = 0;
+  // Instrumentación del último intento (para la chip de diagnóstico en la cámara
+  // y para debug). Se actualiza en cada `narrarRapido`/`narrar` que tome decisión.
+  TtsEvento? _ultimoEvento;
+  TtsEvento? get ultimoEvento => _ultimoEvento;
+
+  void _emitir(ProveedorTts proveedor, bool exito, [String? motivo]) {
+    final e = TtsEvento(
+      cuando: DateTime.now(),
+      proveedor: proveedor,
+      exito: exito,
+      motivo: motivo,
+    );
+    _ultimoEvento = e;
+    debugPrint('[tts] ${e.etiqueta}');
+  }
+
+  /// Inicializa el motor del DISPOSITIVO eagerly. Llamar al abrir una pantalla
+  /// que vaya a usar `narrarRapido` (cámara en vivo): así la PRIMERA frase ya
+  /// sale a la velocidad de un toque, sin pagar el setup.
+  Future<bool> prepararDispositivo() => _voz.preparar();
+
+  /// Idioma TTS activo en el dispositivo (`es-419`, `es-PE`, …). Útil para el
+  /// chip de diagnóstico de la cámara.
+  String? get idiomaDispositivo => _voz.idiomaActivo;
 
   @override
   Future<void> hablar(String texto, {void Function()? onInicio}) async {
@@ -231,6 +365,80 @@ class TtsService implements TtsBase {
     final t = texto.trim();
     if (t.isEmpty) return;
     unawaited(_narrarSeguro(t, onFallo, onDispositivo));
+  }
+
+  /// Narración con PRIORIDAD AL DISPOSITIVO. Para la cámara en vivo: el TTS
+  /// del dispositivo es ~instantáneo y siempre disponible; el cloud suma
+  /// 0.5–2s de red y a veces falla silenciosamente. Si el dispositivo no
+  /// habla, el cloud entra como RESPALDO. Si ninguno habla, `onFallo`.
+  ///
+  /// Diferencias con `narrar()`:
+  ///  - Device-first (más rápido, simultáneo con el texto).
+  ///  - Sin "epoca-guard" que estrangulaba el respaldo cuando llegaba un
+  ///    frame nuevo durante el fallo del cloud (causa real del "no se oye nada"
+  ///    en el modo anterior).
+  ///  - Cada decisión emite un `TtsEvento` con proveedor/éxito/motivo
+  ///    accesible vía `ultimoEvento` (para el chip de diagnóstico en pantalla).
+  ///
+  /// Reusa la misma cadena de descarga del cloud (`_descargar` con reintentos)
+  /// y el mismo reproductor — no duplica nada.
+  void narrarRapido(
+    String texto, {
+    void Function()? onFallo,
+    void Function()? onDispositivo,
+    void Function()? onCloud,
+  }) {
+    final t = texto.trim();
+    if (t.isEmpty) return;
+    unawaited(_narrarRapidoSeguro(t, onFallo, onDispositivo, onCloud));
+  }
+
+  Future<void> _narrarRapidoSeguro(
+    String t,
+    void Function()? onFallo,
+    void Function()? onDispositivo,
+    void Function()? onCloud,
+  ) async {
+    final miEpoca = ++_epoca;
+    // 1) Cortar cualquier audio en curso (cloud O dispositivo), inmediato.
+    if (_completer != null && !_completer!.isCompleted) {
+      _completer!.complete();
+      _completer = null;
+      await _rep.detener();
+    }
+    await _voz.detener();
+
+    // 2) DEVICE primero (rápido, sin red, lo que la cámara necesita).
+    final hablo = await _voz.hablar(t);
+    if (miEpoca != _epoca) {
+      _emitir(ProveedorTts.dispositivo, false, 'superado por narración más nueva');
+      return;
+    }
+    if (hablo) {
+      _emitir(ProveedorTts.dispositivo, true);
+      onDispositivo?.call();
+      return;
+    }
+
+    // 3) Device falló: respaldo CLOUD. NO aplicamos epoca-guard al respaldo
+    // (era el bug previo: si llegaba otro frame durante el catch, ningún audio
+    // jamás sonaba). Aquí confiamos en el `_voz.detener` + `_rep.detener` de la
+    // próxima llamada para cortar este respaldo si llega otra narración.
+    _emitir(ProveedorTts.dispositivo, false, 'speak devolvió false');
+    try {
+      final mp3 = await _descargar(t);
+      if (miEpoca != _epoca) {
+        _emitir(ProveedorTts.cloud, false, 'superado durante descarga');
+        return;
+      }
+      _completer = Completer<void>();
+      await _rep.reproducir(mp3);
+      _emitir(ProveedorTts.cloud, true, 'respaldo');
+      onCloud?.call();
+    } catch (e) {
+      _emitir(ProveedorTts.cloud, false, '${e.runtimeType}');
+      if (miEpoca == _epoca) onFallo?.call();
+    }
   }
 
   Future<void> _narrarSeguro(
