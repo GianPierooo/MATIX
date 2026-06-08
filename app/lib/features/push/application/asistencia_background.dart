@@ -1,10 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 
-import '../../../config.dart';
+import 'confirmacion_service.dart';
 
 /// Handler de un botón de la notificación de ASISTENCIA ("¿Fuiste a X?"),
 /// disparado por `flutter_local_notifications` desde foreground o background
@@ -17,6 +15,9 @@ import '../../../config.dart';
 ///   - 'no_fui'      → no asistió.
 ///   - 'reprogramar' → no asistió + intención de reprogramar.
 ///
+/// INSTRUMENTACIÓN (Honor/MagicOS): cada intento se anota en el log local de
+/// [ConfirmacionService] para que la pantalla de Diagnóstico muestre evidencia.
+///
 /// CRÍTICO: TOP-LEVEL para que el isolate del background la invoque. URL y API
 /// key vienen de `MatixConfig` (compile-time), sin estado de la app.
 Future<void> manejarTapAsistencia({
@@ -27,25 +28,12 @@ Future<void> manejarTapAsistencia({
   Duration timeout = const Duration(seconds: 15),
 }) async {
   if (eventoId.isEmpty) return;
-  if (accion != 'si_fui' && accion != 'no_fui' && accion != 'reprogramar') {
-    return;
-  }
-  if (MatixConfig.apiUrl.isEmpty) return;
-
-  final uri = Uri.parse('${MatixConfig.apiUrl}/api/v1/push/asistencia/accion');
-  final headers = <String, String>{
-    'Content-Type': 'application/json',
-    if (MatixConfig.hasApiKey) 'X-Matix-Key': MatixConfig.apiKey,
-  };
-  final body = json.encode({'evento_id': eventoId, 'accion': accion});
-  final c = cliente ?? http.Client();
+  final svc = ConfirmacionService(cliente: cliente);
   try {
-    await c.post(uri, headers: headers, body: body).timeout(timeout);
-  } catch (e) {
-    // Sin red / 5xx: lo dejamos pasar limpio; el próximo tick re-evaluará.
-    // NUNCA crashea (eso mataría el sistema de notificaciones).
-    debugPrint('Asistencia background: no pude aplicar la acción ($e).');
+    await svc.confirmarAsistencia(
+      eventoId: eventoId, accion: accion, timeout: timeout,
+    );
   } finally {
-    if (cliente == null) c.close();
+    if (cliente == null) svc.cerrar();
   }
 }

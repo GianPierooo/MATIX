@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../../api/matix_client.dart';
 import '../../../theme/matix_colors.dart';
+import '../../push/presentation/confirmar_pendientes_card.dart';
 import '../domain/cierre_dia.dart';
 import '../providers/cierres_providers.dart';
 
@@ -156,7 +157,13 @@ class _CierreDiaScreenState extends ConsumerState<CierreDiaScreen> {
                       height: 1.5,
                     ),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 16),
+                  // Cierra lo que pasó hoy: tareas/eventos sin confirmar. Vive
+                  // ANTES de las "3 cosas que sí hice" para que el repaso del día
+                  // tenga datos reales (no depende solo de las notis, que en
+                  // Honor/MagicOS pueden no entregar).
+                  const ConfirmarPendientesCard(),
+                  const SizedBox(height: 16),
                   for (var i = 0; i < _items.length; i++)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 10),

@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../features/eventos/providers/eventos_providers.dart';
 import '../features/horario/providers/horario_providers.dart';
 import '../features/proyectos/providers/proyectos_providers.dart';
+import '../features/push/providers/pendientes_providers.dart';
 import '../features/rollover/providers/rollover_providers.dart';
 import '../features/tareas/providers/tareas_providers.dart';
 
@@ -23,4 +25,8 @@ void invalidarHub(WidgetRef ref) {
   ref.invalidate(planDiaProvider);
   ref.invalidate(rolloverProvider);
   ref.invalidate(proyectosListProvider);
+  // Pendientes de confirmar y eventos: cualquier mutación los puede afectar
+  // (completar una tarea la saca de pendientes; cambiar un evento idem).
+  ref.invalidate(pendientesConfirmacionProvider);
+  ref.invalidate(eventosProvider);
 }

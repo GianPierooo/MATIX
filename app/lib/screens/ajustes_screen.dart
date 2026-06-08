@@ -23,6 +23,7 @@ import '../features/memoria/presentation/sobre_mi_screen.dart';
 import '../features/modelos/presentation/modelo_screen.dart';
 import '../features/nudges/providers/nudges_providers.dart';
 import '../features/push/domain/intensidad_notif.dart';
+import '../features/push/presentation/diagnostico_notis_screen.dart';
 import '../features/mascota/domain/dosificacion.dart';
 import '../features/mascota/providers/mascota_providers.dart';
 import '../features/papelera/presentation/papelera_screen.dart';
@@ -324,6 +325,18 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
           _BuscarActualizacionTile(),
 
           const _Seccion('Notificaciones'),
+          _Accion(
+            label: 'Diagnóstico de notificaciones',
+            icon: Icons.health_and_safety_outlined,
+            subtitle:
+                'Estado de cada permiso del SO + prueba real con botones. '
+                'Útil en Honor/MagicOS: ves qué eslabón falla.',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const DiagnosticoNotisScreen(),
+              ),
+            ),
+          ),
           _Accion(
             label: 'Pedir permiso (Android 13+)',
             icon: Icons.notifications_active_outlined,

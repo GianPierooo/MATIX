@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/hub_refresh.dart';
 import '../../../theme/matix_colors.dart';
+import '../../push/presentation/confirmar_pendientes_card.dart';
 import '../../universidad/providers/universidad_providers.dart';
 import '../domain/plan_dia.dart';
 import '../providers/horario_providers.dart';
@@ -221,6 +222,10 @@ class _PlanDiaSectionState extends ConsumerState<PlanDiaSection> {
                     onSaltar: () => _saltar(b),
                     onEditarHora: () => _editarHora(b),
                   ),
+                // Pendientes de confirmar (in-app, no depende de la noti). Es
+                // el respaldo para Honor/MagicOS, donde las notis pueden no
+                // entregar: el seguimiento que alimenta la evolución vive aquí.
+                const ConfirmarPendientesCard(compact: true),
                 if (huecos.isNotEmpty)
                   _HuecosApartado(
                     huecos: huecos,

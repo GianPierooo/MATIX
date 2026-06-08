@@ -181,6 +181,28 @@ Extensión (2026-06-07, migración 0044):
   `wakeword_bg_service`. Lo nativo (heads-up/full-screen/ongoing real) es de
   DISPOSITIVO: no corre en CI; cubierto por tests puros del mapeo + contratos.
 
+Refuerzo MagicOS (2026-06-07):
+- **Pantalla "Diagnóstico de notificaciones"** (Ajustes → Notificaciones):
+  estado de POST_NOTIFICATIONS, alarmas exactas, batería sin restricciones y
+  full-screen intent (canal nativo), con CTA que abre el ajuste del sistema
+  correspondiente. Botón "Enviar prueba con botones AHORA" que dispara una noti
+  real (con la `tareaId='diag-ping'` que el cerebro responderá 404 sin tocar
+  datos del usuario). Historial reciente del [ConfirmacionService] muestra
+  el último intento + status para cada acción — convierte "no sé por qué falla"
+  en "veo qué eslabón falla".
+- **ConfirmacionService** centraliza los POST de las acciones de tareas y de
+  asistencia (mismos endpoints que la noti). Lo usan: los handlers de background
+  (instrumentados), la UI in-app y la pantalla de diagnóstico. Persiste un log
+  rotatorio (~30) con `cuando/tipo/ref/accion/ok/statusCode/error`.
+- **Confirmación IN-APP** (`ConfirmarPendientesCard`) en Tu día y en Cierre del
+  día: muestra tareas pasadas sin completar + eventos fuera-de-casa terminados
+  sin asistencia (endpoint nuevo `GET /push/pendientes-confirmacion`), con
+  botones que aplican exactamente las mismas acciones del cerebro. El motor de
+  evolución sigue alimentándose aunque la noti nunca llegue.
+- **Logging en cerebro**: `/push/rendicion-cuentas/accion` y `/push/asistencia/
+  accion` ahora hacen `logger.info("…/accion recibida: …")`. El user puede
+  verificar contra los logs de Railway si la acción llegó al servidor.
+
 ### Widgets de pantalla de inicio (Android · 2026-06-07)
 
 Dos widgets nativos: **"Próximo"** (compacto, una sola cosa: lo que toca ahora o

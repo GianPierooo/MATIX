@@ -1,10 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 
-import '../../../config.dart';
+import 'confirmacion_service.dart';
 
 /// Handler de un botón de acción de la notificación de rendición de cuentas,
 /// disparado por `flutter_local_notifications` desde:
@@ -20,9 +18,13 @@ import '../../../config.dart';
 ///                   `tipo=sin_ventana` y aquí lo dejamos pasar limpio
 ///                   (la próxima notif ya no ofrecerá ese botón).
 ///
-/// CRÍTICO: debe ser una función TOP-LEVEL para que el isolate del background
-/// la pueda invocar. La URL y la API key vienen de `MatixConfig` (compile-time
-/// con `--dart-define`), así que tampoco necesitan estado de la app.
+/// INSTRUMENTACIÓN (Honor/MagicOS): cada intento se anota en el log local de
+/// [ConfirmacionService] para que la pantalla de Diagnóstico muestre evidencia
+/// (último intento + status + error). Convierte "no sé por qué no funciona" en
+/// "veo exactamente qué eslabón falla".
+///
+/// CRÍTICO: TOP-LEVEL para que el isolate del background la invoque. URL y API
+/// key vienen de `MatixConfig` (compile-time), sin estado de la app.
 Future<void> manejarTapRendicionCuentas({
   required String tareaId,
   required String accion,
@@ -31,28 +33,13 @@ Future<void> manejarTapRendicionCuentas({
   Duration timeout = const Duration(seconds: 15),
 }) async {
   if (tareaId.isEmpty) return;
-  if (accion != 'hecho' && accion != 'manana' && accion != 'mas_tarde') return;
-  if (MatixConfig.apiUrl.isEmpty) return;
-
-  final uri = Uri.parse(
-    '${MatixConfig.apiUrl}/api/v1/push/rendicion-cuentas/accion',
-  );
-  final headers = <String, String>{
-    'Content-Type': 'application/json',
-    if (MatixConfig.hasApiKey) 'X-Matix-Key': MatixConfig.apiKey,
-  };
-  final body = json.encode({'tarea_id': tareaId, 'accion': accion});
-  final c = cliente ?? http.Client();
+  // El servicio valida la acción y nunca lanza; aquí solo orquestamos.
+  final svc = ConfirmacionService(cliente: cliente);
   try {
-    // Timeout corto: el isolate de background tiene poco tiempo de vida.
-    await c.post(uri, headers: headers, body: body).timeout(timeout);
-  } catch (e) {
-    // Sin red / 5xx: no podemos abrir la app aquí. Lo dejamos pasar limpio;
-    // el próximo tick de rendición de cuentas del cerebro re-evaluará. NUNCA
-    // crashea el handler — eso mataría al sistema de notificaciones.
-    debugPrint('RC background: no pude aplicar la acción ($e).');
+    await svc.confirmarTarea(
+      tareaId: tareaId, accion: accion, timeout: timeout,
+    );
   } finally {
-    // Solo cerramos el que creamos nosotros (el inyectado lo gestiona el caller).
-    if (cliente == null) c.close();
+    if (cliente == null) svc.cerrar();
   }
 }
