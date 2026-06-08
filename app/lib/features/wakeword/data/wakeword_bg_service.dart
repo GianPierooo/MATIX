@@ -146,6 +146,27 @@ class WakeWordBgService {
     }
   }
 
+  /// ¿Tiene permiso de alarmas exactas (Android 12+)? En Android 13+ con
+  /// `USE_EXACT_ALARM` declarado se concede por defecto.
+  Future<bool> puedeAlarmasExactas() async {
+    try {
+      return (await _canal.invokeMethod<bool>('puedeAlarmasExactas')) ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Abre la pantalla del sistema para conceder alarmas exactas (Android 12+).
+  /// El plugin de notificaciones devuelve null en Android 13+ sin abrir nada;
+  /// este método lanza el intent oficial del SO. Best-effort.
+  Future<void> pedirAlarmasExactas() async {
+    try {
+      await _canal.invokeMethod('pedirAlarmasExactas');
+    } catch (e) {
+      wlog('bg: error pedir alarmas exactas: $e');
+    }
+  }
+
   /// ¿Tiene "mostrar sobre otras apps" (overlay)? Exime del bloqueo de
   /// lanzamiento de actividades desde background (clave en Honor/MagicOS).
   Future<bool> puedeOverlay() async {

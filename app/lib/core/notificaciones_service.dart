@@ -388,6 +388,7 @@ class NotificacionesService {
     required String payload,
     IntensidadNotif intensidad = IntensidadNotif.intenso,
     bool critico = false,
+    bool abrirAppAlTap = false,
   }) async {
     if (!_inicializado) await inicializar();
     final botones = <AndroidNotificationAction>[];
@@ -397,10 +398,20 @@ class NotificacionesService {
       botones.add(AndroidNotificationAction(
         a,
         etiqueta,
-        // showsUserInterface=false: el tap NO abre la app — el botón actúa
-        // por sí solo. `cancelNotification=true`: la notif se cierra tras el
-        // tap (el cerebro confirmará la acción aparte si hace falta).
-        showsUserInterface: false,
+        // `showsUserInterface` controla CÓMO se entrega el tap:
+        //  - false (default): el tap va al BroadcastReceiver interno del plugin
+        //    que spawna un isolate y llama al handler de background. En MagicOS
+        //    ese receiver puede ser matado por el SO y el tap se pierde — el
+        //    usuario reporta "le doy pero no se selecciona". Es lo que el
+        //    diagnóstico está para detectar.
+        //  - true: el tap abre la app (singleTop reusa la instancia viva) y
+        //    `onDidReceiveNotificationResponse` (foreground) dispara con el
+        //    actionId. Ruta confiable cuando el SO mata el background isolate.
+        // Para la PRUEBA del diagnóstico usamos true: queremos asegurar la
+        // evidencia de que la cadena del actionId funciona. Para producción
+        // dejamos false (no abrir la app por cada tap), pero el card in-app
+        // sigue cubriendo el caso donde el tap se pierde.
+        showsUserInterface: abrirAppAlTap,
         cancelNotification: true,
       ));
     }

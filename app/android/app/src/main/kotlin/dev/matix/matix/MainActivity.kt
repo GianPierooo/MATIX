@@ -86,6 +86,13 @@ class MainActivity : FlutterActivity() {
                     // background al detectar (si no, la notificación no auto-abre).
                     "puedeFullScreenIntent" -> result.success(puedeFullScreenIntent())
                     "pedirFullScreenIntent" -> result.success(pedirFullScreenIntent())
+                    // Alarmas exactas (Android 12+): el plugin de notificaciones
+                    // expone un requestExactAlarmsPermission(), pero en Android
+                    // 13+ con USE_EXACT_ALARM declarado devuelve null y NO abre
+                    // ningún sheet. Para diagnosticar en el Honor necesitamos
+                    // abrir la pantalla del sistema de verdad.
+                    "puedeAlarmasExactas" -> result.success(puedeAlarmasExactas())
+                    "pedirAlarmasExactas" -> result.success(pedirAlarmasExactas())
                     // Overlay ("mostrar sobre otras apps"): exime del bloqueo de
                     // lanzamiento desde background y, en Honor, habilita las
                     // ventanas emergentes en segundo plano.
@@ -347,6 +354,50 @@ class MainActivity : FlutterActivity() {
             true
         } catch (_: Exception) {
             false
+        }
+    }
+
+    /** ¿Tenemos permiso de alarmas exactas? Android 12+ (API 31): consulta al
+     * AlarmManager; en Android 13+ con `USE_EXACT_ALARM` declarado se concede
+     * por defecto y devuelve true sin sheet. */
+    private fun puedeAlarmasExactas(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        val am = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+        return am.canScheduleExactAlarms()
+    }
+
+    /** Abre la pantalla del sistema para conceder el permiso de alarmas exactas
+     * (Android 12+). Antes intentábamos abrirlo con el plugin de notificaciones,
+     * que en Android 13+ devuelve null sin abrir nada — en el Honor del user
+     * resultaba en "el botón no hace nada". Acá lanzamos el intent OFICIAL del
+     * SO: `Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM`. */
+    private fun pedirAlarmasExactas(): Boolean {
+        if (puedeAlarmasExactas()) return true
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        return try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    Uri.parse("package:$packageName"),
+                ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) },
+            )
+            true
+        } catch (_: Exception) {
+            // Algunos OEM esconden la pantalla concreta; caemos a "Apps > Matix
+            // > Notificaciones" como red de seguridad.
+            try {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_APP_NOTIFICATION_SETTINGS,
+                    ).apply {
+                        putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    },
+                )
+                true
+            } catch (_: Exception) {
+                false
+            }
         }
     }
 

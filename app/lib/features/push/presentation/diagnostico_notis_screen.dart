@@ -38,12 +38,14 @@ class DiagnosticoNotisScreen extends ConsumerStatefulWidget {
       _DiagnosticoNotisScreenState();
 }
 
-class _DiagnosticoNotisScreenState extends ConsumerState<DiagnosticoNotisScreen> {
+class _DiagnosticoNotisScreenState extends ConsumerState<DiagnosticoNotisScreen>
+    with WidgetsBindingObserver {
   bool? _permisoNotifs;
   bool _trabajando = false;
 
-  // Estado del último chequeo del canal nativo (full-screen intent).
+  // Estado del último chequeo del canal nativo (full-screen intent + alarmas).
   bool? _puedeFullScreen;
+  bool? _puedeAlarmas;
 
   // Log local de intentos de confirmación (evidencia del chain).
   List<EntradaConfirmacion> _log = const [];
@@ -51,20 +53,41 @@ class _DiagnosticoNotisScreenState extends ConsumerState<DiagnosticoNotisScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _refrescar());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Cuando el user vuelve a Matix (tras tocar el botón de la prueba o
+    // conceder un permiso en Ajustes del sistema), refrescamos para que el
+    // historial muestre la evidencia recién registrada.
+    if (state == AppLifecycleState.resumed) {
+      _refrescar();
+    }
   }
 
   Future<void> _refrescar() async {
     final svc = ref.read(confirmacionServiceProvider);
     final log = await svc.leerLog();
     bool? fs;
+    bool? al;
     try {
-      fs = await ref.read(wakeWordBgServiceProvider).puedeFullScreenIntent();
+      final bg = ref.read(wakeWordBgServiceProvider);
+      fs = await bg.puedeFullScreenIntent();
+      al = await bg.puedeAlarmasExactas();
     } catch (_) {}
     if (!mounted) return;
     setState(() {
       _log = log;
       _puedeFullScreen = fs;
+      _puedeAlarmas = al;
     });
   }
 
@@ -75,9 +98,15 @@ class _DiagnosticoNotisScreenState extends ConsumerState<DiagnosticoNotisScreen>
   }
 
   Future<void> _pedirExactas() async {
-    await ref.read(notificacionesServiceProvider).pedirPermisoAlarmasExactas();
+    // Pasamos por el canal NATIVO (`pedirAlarmasExactas`) que lanza el intent
+    // oficial Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM. El plugin de
+    // notificaciones devuelve null en Android 13+ sin abrir nada — por eso el
+    // user reportaba "el botón no hace nada".
+    await ref.read(wakeWordBgServiceProvider).pedirAlarmasExactas();
     if (!mounted) return;
     _aviso('Si se abrió el ajuste del sistema, activa "Alarmas y recordatorios".');
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    await _refrescar();
   }
 
   Future<void> _pedirBateria() async {
@@ -93,11 +122,16 @@ class _DiagnosticoNotisScreenState extends ConsumerState<DiagnosticoNotisScreen>
     await _refrescar();
   }
 
-  /// Dispara una notificación REAL con los botones de acción. Usa una "tarea
-  /// fantasma" (`diag-ping`) para no tocar datos del usuario; el cerebro
-  /// responderá 404 al recibir la acción y el log mostrará la evidencia de que
-  /// el chain disparó. Si el cerebro está corriendo, además verás el `info` en
-  /// los logs (`rc/accion recibida`).
+  /// Dispara una notificación REAL con los botones de acción. Usa `diag-ping`
+  /// para no tocar datos del usuario; el cerebro responderá 404 al recibir la
+  /// acción y el log mostrará evidencia de que el chain disparó. Si el cerebro
+  /// está corriendo, además verás el `info` en los logs (`rc/accion recibida`).
+  ///
+  /// IMPORTANTE: usamos `abrirAppAlTap: true` aquí porque en MagicOS el
+  /// BroadcastReceiver del plugin puede ser matado por el SO y el tap se pierde
+  /// (el user reportó: "le doy pero no se selecciona"). Con `true`, el tap abre
+  /// Matix (singleTop reusa la instancia viva) y `onDidReceiveNotificationResponse`
+  /// dispara con el actionId — ruta confiable que SIEMPRE deja evidencia.
   Future<void> _enviarPruebaConBotones() async {
     setState(() => _trabajando = true);
     try {
@@ -108,14 +142,15 @@ class _DiagnosticoNotisScreenState extends ConsumerState<DiagnosticoNotisScreen>
       await notif.mostrarConAcciones(
         id: 990500,
         titulo: '¿Hiciste tu tarea de prueba?',
-        cuerpo: 'Toca un botón para verificar la cadena de acciones. '
-            'Esto NO afecta tus datos.',
+        cuerpo: 'Toca un botón para verificar la cadena. El tap abre Matix y '
+            'el resultado aparece aquí mismo. NO afecta tus datos.',
         acciones: const ['hecho', 'mas_tarde', 'manana'],
         payload: 'rc:diag-ping',
         intensidad: IntensidadNotif.intenso,
+        abrirAppAlTap: true,
       );
-      _aviso('Mandé la prueba. Bájala desde la barra de notificaciones y toca '
-          'un botón. Vuelve aquí para ver el resultado.');
+      _aviso('Mandé la prueba. Bájala desde la barra y toca un botón — Matix '
+          'se abrirá y el resultado aparecerá aquí.');
     } catch (e) {
       _aviso('No pude mostrar la prueba: $e');
     } finally {
@@ -172,9 +207,9 @@ class _DiagnosticoNotisScreenState extends ConsumerState<DiagnosticoNotisScreen>
           ),
           _Estado(
             label: 'Alarmas exactas',
-            ok: null, // el sistema no expone el getter; solo CTA
-            cta: 'Abrir ajuste',
-            onCta: _pedirExactas,
+            ok: _puedeAlarmas,
+            cta: _puedeAlarmas == true ? null : 'Abrir ajuste',
+            onCta: _puedeAlarmas == true ? null : _pedirExactas,
             ayuda:
                 'Necesario para que las locales programadas disparen al minuto. '
                 'Sin esto se atrasan o no llegan.',
