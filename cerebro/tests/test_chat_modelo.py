@@ -105,8 +105,11 @@ async def test_auto_rutea_por_mensaje(monkeypatch):
     monkeypatch.setattr(chat_mod.modelos_llm, "seleccion_guardada", sel_auto)
     monkeypatch.setattr(chat_mod.modelos_llm, "par_barato_fuerte", par)
 
-    # Comando corto → barato.
-    r1 = await chat_mod.conversar(None, historial=[], mensaje="crea una tarea comprar pan")
+    # Comando corto → barato. Usamos «qué tengo hoy?» (pregunta corta) para
+    # que NO lo intercepte el clasificador rápido pre-LLM (que come "crea
+    # tarea X" sin fecha y similares): aquí queremos validar el ruteo del
+    # MODELO en el camino LLM, no el atajo.
+    r1 = await chat_mod.conversar(None, historial=[], mensaje="qué tengo hoy?")
     assert r1["auto"] is True
     assert r1["modelo_usado"] == "gpt-4o-mini"
     assert capturas[-1]["model"] == "gpt-4o-mini"

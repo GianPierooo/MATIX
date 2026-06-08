@@ -23,12 +23,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..db import Postgrest
 from . import (
+    clasificador_rapido,
     enrutador,
     estado,
     llm,
@@ -41,6 +44,62 @@ from . import (
 from .contexto import contexto_vivo
 from .system_prompt import system_prompt_fijo
 from .tools import TABLAS_AFECTADAS, TOOL_DEFINITIONS, ejecutar_tool
+
+logger = logging.getLogger("matix.chat")
+
+
+class _Cronometro:
+    """Marca durations por etapa del turno. Al cerrar, emite UN log estructurado
+    con el desglose en milisegundos (`stage=ms`). Sin esto no se puede saber
+    dónde se va el tiempo — el usuario reporta "se siente lento" pero "lento"
+    puede ser red al proveedor, BD del contexto, render de la app… cada uno se
+    arregla distinto. Usamos `time.monotonic` (no se ve afectado por NTP).
+
+    Uso:
+        cron = _Cronometro()
+        with cron.etapa("contexto"): ...
+        with cron.etapa("llm"): ...
+        cron.cerrar(motivo="clasificador" | "llm", extras={...})
+    """
+
+    def __init__(self) -> None:
+        self._inicio = time.monotonic()
+        self._etapas: dict[str, float] = {}
+
+    def etapa(self, nombre: str) -> "_EtapaCtx":
+        return _EtapaCtx(self, nombre)
+
+    def _registrar(self, nombre: str, ms: float) -> None:
+        # Si la misma etapa se mide varias veces (loop de tools), sumamos: queremos
+        # el TOTAL gastado en LLM/tools del turno, no la última vuelta.
+        self._etapas[nombre] = self._etapas.get(nombre, 0.0) + ms
+
+    def cerrar(self, *, motivo: str, extras: dict[str, Any] | None = None) -> None:
+        total_ms = (time.monotonic() - self._inicio) * 1000.0
+        partes = " ".join(f"{k}={v:.0f}ms" for k, v in self._etapas.items())
+        extra_str = ""
+        if extras:
+            extra_str = " " + " ".join(f"{k}={v}" for k, v in extras.items())
+        logger.info(
+            "chat turno: ruta=%s total=%.0fms %s%s",
+            motivo, total_ms, partes, extra_str,
+        )
+
+
+class _EtapaCtx:
+    """Context manager para `_Cronometro.etapa`. Registra el delta al salir."""
+
+    def __init__(self, cron: _Cronometro, nombre: str) -> None:
+        self._cron = cron
+        self._nombre = nombre
+        self._t0 = 0.0
+
+    def __enter__(self) -> "_EtapaCtx":
+        self._t0 = time.monotonic()
+        return self
+
+    def __exit__(self, *_exc: Any) -> None:
+        self._cron._registrar(self._nombre, (time.monotonic() - self._t0) * 1000.0)
 
 # Tope de iteraciones del loop modelo↔tools. Generoso pero finito:
 # 6 cubre el caso "ejecutar 3 tools, ver resultado, narrar" con
@@ -106,22 +165,47 @@ async def conversar(
     Si el modelo devuelve texto sin tools, `tools_usadas` y
     `tablas_cambiadas` son listas vacías.
     """
+    cron = _Cronometro()
     fijo = system_prompt_fijo()
 
     # Lecturas de contexto INDEPENDIENTES en paralelo (antes eran 4 awaits
     # secuenciales repartidos por la función → sumaban round-trips a la BD). Son
     # independientes entre sí; gather las dispara juntas y baja la latencia del
     # armado del turno. Si alguna falla, gather propaga igual que antes.
-    contexto, bloque_mem, modo, seleccion, _ = await asyncio.gather(
-        contexto_vivo(db),
-        memoria.bloque_memoria(db),
-        modos.modo_activo(db),
-        modelos_llm.seleccion_guardada(db),
-        # Refresca el cache del proveedor preferido desde la BD cada turno: el
-        # cerebro corre con varios workers y el cache es por-proceso; así el
-        # worker que atiende este turno respeta la preferencia actual.
-        modelos_llm.cargar_preferido(db),
+    with cron.etapa("contexto"):
+        contexto, bloque_mem, modo, seleccion, _ = await asyncio.gather(
+            contexto_vivo(db),
+            memoria.bloque_memoria(db),
+            modos.modo_activo(db),
+            modelos_llm.seleccion_guardada(db),
+            # Refresca el cache del proveedor preferido desde la BD cada turno: el
+            # cerebro corre con varios workers y el cache es por-proceso; así el
+            # worker que atiende este turno respeta la preferencia actual.
+            modelos_llm.cargar_preferido(db),
+        )
+
+    # ─── RUTA RÁPIDA: clasificador SIN LLM ──────────────────────────────────
+    # Para los casos LIMPIOS ("anota X", "crea tarea X" sin fecha, saludos),
+    # nos saltamos el LLM entero: ejecutamos la acción directo (o respondemos
+    # con plantilla) y cerramos el turno. Esto convierte un "agrega tarea
+    # comprar pan" de ~2s a ~50ms. Es DEFENSIVO: ante la mínima duda devuelve
+    # None y cae al camino normal.
+    imgs_para_clasificador = bool(imagen or (imagenes and any(imagenes)))
+    intencion = clasificador_rapido.detectar(
+        mensaje,
+        hay_imagen=imgs_para_clasificador,
+        hay_documento=bool(documento and (documento.get("texto") or "").strip()),
+        modo_activo=modo,
     )
+    if intencion is not None:
+        resultado = await _ejecutar_ruta_rapida(
+            db, intencion, cron=cron, persistir=persistir, mensaje=mensaje,
+        )
+        cron.cerrar(
+            motivo=f"rapida:{intencion.etiqueta_motivo}",
+            extras={"tool": intencion.nombre or "-"},
+        )
+        return resultado
 
     # Conversación actual (sesión por inactividad). Se resuelve al ARRANCAR para
     # que `buscar_en_historial` pueda EXCLUIRLA del recall durante el loop. Solo
@@ -321,10 +405,13 @@ async def conversar(
     # (igual que el modelo): el loop de tools encadena dentro del mismo set.
     tools_turno = seleccion_tools.filtrar_tools(TOOL_DEFINITIONS, mensaje, modo=modo)
 
+    vueltas_usadas = 0
     for _ in range(_MAX_VUELTAS):
-        salida = await llm.responder_con_tools(
-            mensajes, tools_turno, model=modelo
-        )
+        vueltas_usadas += 1
+        with cron.etapa("llm"):
+            salida = await llm.responder_con_tools(
+                mensajes, tools_turno, model=modelo
+            )
         # El modelo REAL que respondió (puede diferir por proveedor preferido
         # o por failover). Lo surfaceamos siempre como `modelo_usado`.
         modelo_efectivo = salida.get("modelo_efectivo", modelo_efectivo)
@@ -340,15 +427,24 @@ async def conversar(
         # por cada call. Luego volvemos a llamar al modelo.
         mensajes.append(salida["raw"])
 
-        pidio_opciones = False
-        for call in salida["tool_calls"]:
-            nombre = call["nombre"]
-            args = call["args"]
-            tools_usadas.append(nombre)
-
-            resultado = await ejecutar_tool(
-                db, nombre, args, conversacion_id=conversacion_id
+        # PARALELO: el modelo a veces pide varios tools en una vuelta (p. ej.
+        # `consultar_tareas` + `consultar_eventos`). Antes corrían en serie →
+        # sumábamos round-trips a la BD. asyncio.gather los dispara juntos. Cada
+        # tool ya atrapa sus excepciones y devuelve un dict; no hace falta
+        # `return_exceptions=True`. Conservamos el orden del modelo (importante
+        # para los tool_call_id que el LLM espera).
+        with cron.etapa("tools"):
+            resultados = await asyncio.gather(
+                *[
+                    ejecutar_tool(db, c["nombre"], c["args"], conversacion_id=conversacion_id)
+                    for c in salida["tool_calls"]
+                ]
             )
+
+        pidio_opciones = False
+        for call, resultado in zip(salida["tool_calls"], resultados, strict=True):
+            nombre = call["nombre"]
+            tools_usadas.append(nombre)
 
             if resultado.get("ok"):
                 for tabla in TABLAS_AFECTADAS.get(nombre, []):
@@ -400,21 +496,32 @@ async def conversar(
     # falla, el chat responde igual. Solo para chats reales (persistir=True) y
     # si pudimos resolver la conversación.
     if persistir and conversacion_id:
-        try:
-            await memoria_conversacional.persistir_turno(
-                db,
-                conversacion_id=conversacion_id,
-                mensaje_usuario=mensaje,
-                respuesta=ultima_respuesta,
-            )
-            memoria_conversacional.indexar_turno_async(
-                db,
-                conversacion_id=conversacion_id,
-                mensaje_usuario=mensaje,
-                respuesta=ultima_respuesta,
-            )
-        except Exception:  # noqa: BLE001
-            pass
+        with cron.etapa("persistir"):
+            try:
+                await memoria_conversacional.persistir_turno(
+                    db,
+                    conversacion_id=conversacion_id,
+                    mensaje_usuario=mensaje,
+                    respuesta=ultima_respuesta,
+                )
+                memoria_conversacional.indexar_turno_async(
+                    db,
+                    conversacion_id=conversacion_id,
+                    mensaje_usuario=mensaje,
+                    respuesta=ultima_respuesta,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+    cron.cerrar(
+        motivo="llm",
+        extras={
+            "modelo": modelo_efectivo,
+            "vueltas": vueltas_usadas,
+            "tools": len(tools_usadas),
+            "failover": int(hubo_failover),
+        },
+    )
 
     return {
         "respuesta": ultima_respuesta,
@@ -436,6 +543,125 @@ async def conversar(
         "failover": hubo_failover,
         # Acción de teléfono (Intent nativo) o None. La app la confirma y ejecuta.
         "accion_dispositivo": accion_dispositivo,
+    }
+
+
+# ── Ruta rápida (sin LLM) ────────────────────────────────────────────────────
+
+
+def _respuesta_saludo(intencion: clasificador_rapido.IntencionRapida) -> dict[str, Any]:
+    """Empaqueta una respuesta de saludo/agradecimiento sin tocar la BD ni el
+    LLM. Mismo shape que el camino normal para que la app no distinga."""
+    return {
+        "respuesta": intencion.mensaje or "Va.",
+        "tools_usadas": [],
+        "tablas_cambiadas": [],
+        "navegacion": None,
+        "modo_activo": None,
+        "opciones": None,
+        "modelo_usado": None,
+        "auto": False,
+        "failover": False,
+        "accion_dispositivo": None,
+    }
+
+
+def _frase_tarea_creada(titulo: str) -> str:
+    """Confirmación corta y peruana de que la tarea quedó creada. Sin markdown
+    ni emojis, sin signos de exclamación de robot."""
+    return f"Listo, te la anoto: «{titulo}». Sin fecha — la editas si quieres ponerle vencimiento."
+
+
+def _frase_apunte_creado(titulo: str) -> str:
+    return f"Anotado: «{titulo}»."
+
+
+async def _ejecutar_ruta_rapida(
+    db: Postgrest,
+    intencion: clasificador_rapido.IntencionRapida,
+    *,
+    cron: _Cronometro,
+    persistir: bool,
+    mensaje: str,
+) -> dict[str, Any]:
+    """Ejecuta el camino que se saltó el LLM. Para `saludo` arma una respuesta
+    plantilla; para `tool` llama directo a `ejecutar_tool` y arma la frase de
+    confirmación.
+
+    Mantiene el mismo shape de respuesta que el camino LLM para que la app no
+    se tenga que enterar — solo el log de latencia (motivo="rapida:*") lo
+    diferencia.
+    """
+    if intencion.tipo == "saludo":
+        return _respuesta_saludo(intencion)
+
+    # tipo == "tool": ejecutamos la herramienta. Si falla la validación o la BD,
+    # caemos al texto "no pude" honesto (no inventamos un éxito).
+    nombre = intencion.nombre or ""
+    args = intencion.args or {}
+    with cron.etapa("tools"):
+        resultado = await ejecutar_tool(db, nombre, args)
+    tablas = list(TABLAS_AFECTADAS.get(nombre, [])) if resultado.get("ok") else []
+
+    if not resultado.get("ok"):
+        # Honesto: la ruta rápida es defensiva, pero si la BD rechaza por algún
+        # motivo (validación, conexión), devolvemos el error tal cual al usuario
+        # — NO escalamos al LLM (sería peor: más latencia y la BD igual estaría
+        # caída).
+        return {
+            "respuesta": resultado.get(
+                "mensaje", "No pude guardarlo ahora. Intenta de nuevo."
+            ),
+            "tools_usadas": [nombre],
+            "tablas_cambiadas": [],
+            "navegacion": None,
+            "modo_activo": None,
+            "opciones": None,
+            "modelo_usado": None,
+            "auto": False,
+            "failover": False,
+            "accion_dispositivo": None,
+        }
+
+    datos = resultado.get("datos") or {}
+    titulo = (args.get("titulo") or datos.get("titulo") or "").strip()
+    if nombre == "crear_tarea":
+        respuesta = _frase_tarea_creada(titulo)
+    elif nombre == "crear_apunte":
+        respuesta = _frase_apunte_creado(titulo)
+    else:
+        # Defensivo: si algún día agregamos otra tool a la ruta rápida y se nos
+        # olvida una plantilla, devolvemos genérico (no rompemos al usuario).
+        respuesta = "Hecho."
+
+    # Persistir el turno también acá: si no, la memoria conversacional pierde
+    # los mensajes que respondió la ruta rápida, y el recall del LLM en el
+    # siguiente turno no vería "le pedí que anotara comprar pan hace 1m".
+    if persistir:
+        try:
+            conv_id = await memoria_conversacional.conversacion_actual(db)
+            if conv_id:
+                with cron.etapa("persistir"):
+                    await memoria_conversacional.persistir_turno(
+                        db,
+                        conversacion_id=conv_id,
+                        mensaje_usuario=mensaje,
+                        respuesta=respuesta,
+                    )
+        except Exception:  # noqa: BLE001
+            pass
+
+    return {
+        "respuesta": respuesta,
+        "tools_usadas": [nombre],
+        "tablas_cambiadas": tablas,
+        "navegacion": None,
+        "modo_activo": None,
+        "opciones": None,
+        "modelo_usado": None,
+        "auto": False,
+        "failover": False,
+        "accion_dispositivo": None,
     }
 
 

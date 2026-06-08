@@ -83,6 +83,19 @@ SOLO-BACKEND (existe en el cerebro, sin pantalla propia en la app).
   (`cache_control` en la última). OpenAI auto-cachea por prefijo estable.
 - **Routing a barato por defecto** (enrutador, modo auto) + recorte de historial
   por turno (`_MAX_HISTORIAL_MENSAJES`) + RAG top-k=5 (verificado razonable).
+- **Clasificador rápido pre-LLM** (`clasificador_rapido.py`): para casos
+  LIMPIOS — saludos ("hola", "gracias"), "anota: X" sin verbo-de-acción ni
+  fecha, "crea tarea X" / "recuérdame X" sin fecha — el chat se SALTA el LLM
+  entero y ejecuta la tool directo (o responde plantilla). De ~2s a ~50ms en
+  los inputs más comunes. Defensivo: ante la mínima ambigüedad (fecha,
+  imagen/documento adjunto, modo pesado, contenido extra), cae al camino LLM.
+- **Tool calls en paralelo** dentro de una vuelta del loop (`asyncio.gather`):
+  si el modelo pide `consultar_tareas` + `consultar_eventos` en una respuesta,
+  ahora arrancan juntos en vez de en serie — el tiempo de esa vuelta cae a la
+  tool más lenta, no a la suma. Antes sumaba round-trips a la BD.
+- **Latencia instrumentada por etapa** (`chat.py:_Cronometro`): cada turno emite
+  un log estructurado `contexto=Xms llm=Yms tools=Zms persistir=Wms total=…
+  modelo=… vueltas=…`. Permite diagnosticar dónde se va el tiempo sin adivinar.
 - **Robot instantáneo:** la burbuja de rollover y posponer/reprogramar son
   update OPTIMISTA (instant al tocar) + operación de BD en background; nada pasa
   por el modelo. **Bolita persistente** del robot abajo-izquierda (tocar = chat).
