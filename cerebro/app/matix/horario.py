@@ -907,10 +907,15 @@ async def completar_bloque(
         await db.update("arbol_nodos", nodo_id, {"estado": "hecho"})
         hecho.append("nodo")
     if tarea_id:
-        ahora = datetime.now(timezone.utc).isoformat()
-        await db.update("tareas", tarea_id, {"completada": True, "completada_en": ahora})
-        from . import planificador_diario
-        await planificador_diario.marcar_item_por_tarea(db, tarea_id=tarea_id, estado="hecho")
+        # Completar por el COMANDO canónico (D5): mismo estado que completar por
+        # checkbox o por la tool de la IA — repetición + sync de árbol/set
+        # incluidos. Antes este camino del bloque NO creaba la siguiente
+        # instancia repetida ni sincronizaba el nodo del árbol.
+        from ..comandos import registro
+
+        await registro.ejecutar(
+            db, "completar_tarea", {"tarea_id": tarea_id}, origen="bloque"
+        )
         hecho.append("tarea")
     return {"ok": True, "completado": hecho}
 

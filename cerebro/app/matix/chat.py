@@ -668,7 +668,13 @@ async def _ejecutar_ruta_rapida(
 # Whitelist de tools para la captura rápida (NO incluye `crear_evento`: la
 # captura jamás agenda eventos en el calendario — eso solo viene por la ruta
 # explícita de evento con hora fija). El modelo elige entre estas dos según el
-# texto. Bloqueo de raíz contra el bug #2.
+# texto.
+#
+# 2.0 · Fase 1 (D1): la creación va por `ejecutar_tool("crear_tarea")` → el
+# COMANDO canónico `crear_tarea` (app/comandos/tareas.py), la MISMA ruta que la
+# app y el chat. Doble blindaje contra el bug "se creó como Evento": (1) la
+# whitelist no expone `crear_evento`, y (2) la única ruta de creación de tarea
+# es el comando — no hay un camino paralelo que pueda agendar.
 _TOOLS_CAPTURA = ("crear_tarea", "crear_apunte")
 
 

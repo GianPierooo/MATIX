@@ -58,6 +58,7 @@ import httpx
 from pydantic import ValidationError
 
 from ..agente.canal import canal
+from ..comandos import registro as _registro
 from ..db import Postgrest
 from ..schemas.apuntes import ApunteCreate, ApunteUpdate
 from ..schemas.cierres_dia import CierreDiaCreate
@@ -2950,91 +2951,46 @@ def _resumen_fecha(iso: str | None) -> str | None:
 # ─────────────────────────────────────────────────────────────────────
 
 
+# ── Tareas: ENVOLTORIOS sobre los comandos canónicos (comandos/tareas.py) ─────
+# La lógica vive UNA sola vez en el comando; aquí solo se le da forma compacta
+# al resultado para el LLM (la app usa el endpoint, que llama al MISMO comando).
+
+
+def _shape_tarea(fila: dict[str, Any], extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Envelope compacto de una tarea para el LLM, desde la fila canónica."""
+    datos: dict[str, Any] = {
+        "id": fila.get("id"),
+        "titulo": fila.get("titulo"),
+        "vence_en_legible": _resumen_fecha(fila.get("vence_en")),
+    }
+    if extra:
+        datos.update(extra)
+    return _ok(datos)
+
+
 async def _crear_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
-    try:
-        body = TareaCreate(**args)
-    except ValidationError as e:
-        return _err_validacion(e)
-
-    payload = body.model_dump(mode="json", exclude_none=True)
-    fila = await db.insert("tareas", payload)
-    return _ok(
-        {
-            "id": fila["id"],
-            "titulo": fila["titulo"],
-            "vence_en_legible": _resumen_fecha(fila.get("vence_en")),
-            "prioridad": fila["prioridad"],
-        }
-    )
-
-
-# Tope del lote: el guardrail "no vacíes todo el currículo". Si el modelo
-# intenta crear más de esto de una, lo paramos y le pedimos que ofrezca el
-# resto por partes (la próxima sesión/semana). A propósito: no enterrar al
-# usuario en tareas.
-_MAX_LOTE_TAREAS = 12
+    res = await _registro.ejecutar(db, "crear_tarea", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    fila = res["datos"]
+    return _shape_tarea(fila, {"prioridad": fila.get("prioridad")})
 
 
 async def _crear_tareas(db: Postgrest, args: dict) -> dict[str, Any]:
-    """Crea un lote de tareas en una sola acción. Valida TODAS antes de
-    insertar ninguna (o se crea el lote válido entero, o se reporta el
-    error sin crear nada a medias). Aplica los defaults de proyecto/curso/
-    categoría a los items que no los traigan."""
-    items = args.get("tareas")
-    if not isinstance(items, list) or not items:
-        return _error(
-            "validacion",
-            "Pásame `tareas`: una lista con al menos una tarea.",
-        )
-    if len(items) > _MAX_LOTE_TAREAS:
-        return _error(
-            "validacion",
-            f"Son {len(items)} tareas de una — demasiadas. Propón el "
-            f"siguiente trozo digerible (la próxima sesión o semana, hasta "
-            f"{_MAX_LOTE_TAREAS}) y ofrece el resto por partes.",
-        )
-
-    # Defaults del lote: se aplican a cada item que no traiga el suyo.
-    defaults = {
-        k: args.get(k)
-        for k in ("proyecto_id", "curso_id", "categoria_id")
-        if args.get(k)
-    }
-
-    # 1) Validar TODAS primero — fail fast, sin crear nada a medias.
-    validadas: list[dict[str, Any]] = []
-    for i, item in enumerate(items):
-        if not isinstance(item, dict):
-            return _error(
-                "validacion", f"La tarea #{i + 1} no es un objeto válido."
-            )
-        combinado = {**defaults, **item}
-        try:
-            body = TareaCreate(**combinado)
-        except ValidationError as e:
-            val = _err_validacion(e)
-            val["mensaje"] = f"Tarea #{i + 1}: {val['mensaje']}"
-            return val
-        validadas.append(body.model_dump(mode="json", exclude_none=True))
-
-    # 2) Insertar el lote completo.
-    creadas: list[dict[str, Any]] = []
-    for payload in validadas:
-        fila = await db.insert("tareas", payload)
-        creadas.append(
-            {
-                "id": fila["id"],
-                "titulo": fila["titulo"],
-                "vence_en_legible": _resumen_fecha(fila.get("vence_en")),
-            }
-        )
-    return _ok(
-        {
-            "total": len(creadas),
-            "proyecto_id": defaults.get("proyecto_id"),
-            "tareas": creadas,
-        }
-    )
+    """Crea un lote de tareas. Envoltorio del comando `crear_tareas`."""
+    res = await _registro.ejecutar(db, "crear_tareas", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    creadas = res["datos"].get("tareas", [])
+    return _ok({
+        "total": len(creadas),
+        "proyecto_id": res["datos"].get("proyecto_id"),
+        "tareas": [
+            {"id": f.get("id"), "titulo": f.get("titulo"),
+             "vence_en_legible": _resumen_fecha(f.get("vence_en"))}
+            for f in creadas
+        ],
+    })
 
 
 async def _crear_evento(db: Postgrest, args: dict) -> dict[str, Any]:
@@ -3110,125 +3066,25 @@ async def _crear_apunte(db: Postgrest, args: dict) -> dict[str, Any]:
 
 
 async def _completar_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
-    raw_id = args.get("tarea_id")
-    if not raw_id:
-        return _error(
-            "validacion",
-            "Falta el `tarea_id`.",
-            sugerencia="Mira el contexto vivo y vuelve a llamarme con el id.",
-        )
-    try:
-        tarea_id = str(UUID(str(raw_id)))
-    except (ValueError, TypeError):
-        return _error(
-            "validacion",
-            f"El id «{raw_id}» no es un UUID válido.",
-        )
-
-    actual = await db.get("tareas", tarea_id)
-    if actual is None:
-        return _error(
-            "no_existe",
-            "Esa tarea ya no está en el hub (puede que la borraran).",
-            sugerencia="Revisa la lista actualizada y vuelve a intentar.",
-        )
-    if actual.get("completada"):
-        return _ok(
-            {
-                "id": tarea_id,
-                "titulo": actual["titulo"],
-                "ya_estaba_completada": True,
-            }
-        )
-
-    ahora = datetime.now(timezone.utc).isoformat()
-    fila = await db.update(
-        "tareas",
-        tarea_id,
-        {"completada": True, "completada_en": ahora},
-    )
-    if fila is None:
-        return _error(
-            "interno",
-            "No se pudo marcar la tarea (la BD no la devolvió).",
-        )
-
-    # Repetición: si la tarea tenía patrón y `vence_en`, crear la
-    # próxima instancia. Replicamos la lógica del router de tareas
-    # para mantener consistencia.
-    if actual.get("repeticion") and actual.get("vence_en"):
-        await _crear_siguiente_instancia(db, actual, actual["repeticion"])
-
-    # Árbol vivo (Paso 2) + set del día (Paso 3): si la tarea estaba enlazada,
-    # marca el nodo y el item del set como hechos. Best-effort.
-    try:
-        await arbol_proyecto.marcar_por_tarea(db, tarea_id=tarea_id, estado="hecho")
-        await planificador_diario.marcar_item_por_tarea(db, tarea_id=tarea_id, estado="hecho")
-    except Exception:  # noqa: BLE001
-        pass
-
-    return _ok(
-        {
-            "id": tarea_id,
-            "titulo": actual["titulo"],
-            "repetida": bool(actual.get("repeticion")),
-        }
-    )
+    """Envoltorio del comando `completar_tarea` (repetición + sync ya viven ahí)."""
+    res = await _registro.ejecutar(db, "completar_tarea", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    d = res["datos"]
+    if d.get("ya_estaba_completada"):
+        return _ok({"id": d.get("id"), "titulo": d.get("titulo"), "ya_estaba_completada": True})
+    return _ok({"id": d.get("id"), "titulo": d.get("titulo"), "repetida": bool(d.get("repetida"))})
 
 
 async def _reabrir_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
-    raw_id = args.get("tarea_id")
-    if not raw_id:
-        return _error(
-            "validacion",
-            "Falta el `tarea_id`.",
-            sugerencia=(
-                "Busca la tarea en «Tareas completadas hoy» del "
-                "contexto y vuelve a llamarme con su id."
-            ),
-        )
-    try:
-        tarea_id = str(UUID(str(raw_id)))
-    except (ValueError, TypeError):
-        return _error(
-            "validacion",
-            f"El id «{raw_id}» no es un UUID válido.",
-        )
-
-    actual = await db.get("tareas", tarea_id)
-    if actual is None:
-        return _error(
-            "no_existe",
-            "Esa tarea ya no está en el hub (puede que la borraran).",
-        )
-    if not actual.get("completada"):
-        return _ok(
-            {
-                "id": tarea_id,
-                "titulo": actual["titulo"],
-                "ya_estaba_pendiente": True,
-            }
-        )
-
-    fila = await db.update(
-        "tareas",
-        tarea_id,
-        {"completada": False, "completada_en": None},
-    )
-    if fila is None:
-        return _error(
-            "interno",
-            "No se pudo reabrir la tarea (la BD no la devolvió).",
-        )
-
-    # Árbol vivo + set del día: si la tarea estaba enlazada, vuelve a pendiente.
-    try:
-        await arbol_proyecto.marcar_por_tarea(db, tarea_id=tarea_id, estado="pendiente")
-        await planificador_diario.marcar_item_por_tarea(db, tarea_id=tarea_id, estado="aceptado")
-    except Exception:  # noqa: BLE001
-        pass
-
-    return _ok({"id": tarea_id, "titulo": actual["titulo"]})
+    """Envoltorio del comando `reabrir_tarea`."""
+    res = await _registro.ejecutar(db, "reabrir_tarea", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    d = res["datos"]
+    if d.get("ya_estaba_pendiente"):
+        return _ok({"id": d.get("id"), "titulo": d.get("titulo"), "ya_estaba_pendiente": True})
+    return _ok({"id": d.get("id"), "titulo": d.get("titulo")})
 
 
 async def _marcar_accion_siguiente_hecha(
@@ -3289,14 +3145,11 @@ async def _marcar_accion_siguiente_hecha(
 
     ahora = datetime.now(timezone.utc).isoformat()
     if not tarea.get("completada"):
-        await db.update(
-            "tareas",
-            tarea_sig_id,
-            {"completada": True, "completada_en": ahora},
+        # Completar la tarea por el COMANDO canónico: gana repetición + sync de
+        # árbol/set, igual que cualquier otra forma de completar (D5).
+        await _registro.ejecutar(
+            db, "completar_tarea", {"tarea_id": tarea_sig_id}, origen="accion_siguiente"
         )
-        # repetición
-        if tarea.get("repeticion") and tarea.get("vence_en"):
-            await _crear_siguiente_instancia(db, tarea, tarea["repeticion"])
 
     await db.update(
         "proyectos",
@@ -3385,55 +3238,25 @@ def _validar_uuid(raw: Any, campo: str) -> tuple[str | None, dict | None]:
 
 
 async def _editar_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
-    tarea_id, err = _validar_uuid(args.get("tarea_id"), "tarea_id")
-    if err:
-        return err
-    # Sacamos `tarea_id` antes de validar con Pydantic.
-    campos = {k: v for k, v in args.items() if k != "tarea_id"}
-    if not campos:
-        return _error(
-            "validacion",
-            "No me pasaste qué campo cambiar.",
-            sugerencia="Vuelve a llamarme con al menos un campo además del id.",
-        )
-    try:
-        body = TareaUpdate(**campos)
-    except ValidationError as e:
-        return _err_validacion(e)
-    payload = body.model_dump(mode="json", exclude_unset=True)
-    fila = await db.update("tareas", tarea_id, payload)
-    if fila is None:
-        return _error("no_existe", "Esa tarea ya no está en el hub.")
-    return _ok(
-        {
-            "id": tarea_id,
-            "titulo": fila["titulo"],
-            "vence_en_legible": _resumen_fecha(fila.get("vence_en")),
-        }
-    )
+    """Envoltorio del comando `editar_tarea`."""
+    res = await _registro.ejecutar(db, "editar_tarea", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    return _shape_tarea(res["datos"])
 
 
 async def _eliminar_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
-    tarea_id, err = _validar_uuid(args.get("tarea_id"), "tarea_id")
-    if err:
-        return err
-    actual = await db.get("tareas", tarea_id)
-    if actual is None:
-        return _error("no_existe", "Esa tarea ya no está en el hub.")
-    ahora = datetime.now(timezone.utc).isoformat()
-    fila = await db.update(
-        "tareas", tarea_id, {"eliminado_en": ahora}
-    )
-    if fila is None:
-        return _error("interno", "No se pudo mandar la tarea a la papelera.")
-    return _ok(
-        {
-            "id": tarea_id,
-            "titulo": actual["titulo"],
-            "reversible": True,
-            "nota": "Está en la papelera; el usuario puede restaurarla desde la app.",
-        }
-    )
+    """Envoltorio del comando `eliminar_tarea` (borrado suave → papelera)."""
+    res = await _registro.ejecutar(db, "eliminar_tarea", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    fila = res["datos"]
+    return _ok({
+        "id": fila.get("id"),
+        "titulo": fila.get("titulo"),
+        "reversible": True,
+        "nota": "Está en la papelera; el usuario puede restaurarla desde la app.",
+    })
 
 
 async def _editar_evento(db: Postgrest, args: dict) -> dict[str, Any]:
@@ -3964,41 +3787,9 @@ async def _consultar_gasto(db: Postgrest, _args: dict) -> dict[str, Any]:
     )
 
 
-# ── Repetición (copia de la lógica del router de tareas) ─────────────
-
-
-def _avanzar_fecha(iso: str, repeticion: str) -> str:
-    dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-    if repeticion == "diaria":
-        nuevo = dt + timedelta(days=1)
-    elif repeticion == "semanal":
-        nuevo = dt + timedelta(weeks=1)
-    elif repeticion == "mensual":
-        nuevo = dt + timedelta(days=30)
-    elif repeticion == "anual":
-        nuevo = dt + timedelta(days=365)
-    else:
-        nuevo = dt
-    return nuevo.isoformat()
-
-
-async def _crear_siguiente_instancia(
-    db: Postgrest, original: dict, repeticion: str
-) -> None:
-    nueva: dict = {
-        "titulo": original["titulo"],
-        "prioridad": original["prioridad"],
-        "repeticion": repeticion,
-        "vence_en": _avanzar_fecha(original["vence_en"], repeticion),
-    }
-    for campo in ("nota", "categoria_id", "curso_id", "proyecto_id"):
-        if original.get(campo) is not None:
-            nueva[campo] = original[campo]
-    if original.get("recordar_en"):
-        nueva["recordar_en"] = _avanzar_fecha(
-            original["recordar_en"], repeticion
-        )
-    await db.insert("tareas", nueva)
+# La repetición de tareas (avanzar fecha + crear siguiente instancia) ya NO vive
+# aquí: es la lógica canónica del comando `editar_tarea`/`completar_tarea` en
+# `comandos/tareas.py`. Antes estaba duplicada en este módulo y en el router.
 
 
 # ─────────────────────────────────────────────────────────────────────

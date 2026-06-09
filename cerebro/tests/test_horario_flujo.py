@@ -23,6 +23,12 @@ class FakeDB:
                 filas = [f for f in filas if f.get(k) == v]
         return filas
 
+    async def get(self, tabla, id_):
+        for f in self.tablas.get(tabla, []):
+            if f.get("id") == id_:
+                return f
+        return None
+
     async def insert(self, tabla, row):
         fila = {"id": f"{tabla}-{len(self.inserts)}", **row}
         self.tablas.setdefault(tabla, []).append(fila)
@@ -79,12 +85,15 @@ def test_agendar_engancha_tarea_existente_sin_crear_evento():
 
 
 def test_completar_bloque_cierra_nodo_y_tarea():
-    db = FakeDB()
-    r = asyncio.run(horario.completar_bloque(db, tarea_id="t1", nodo_id="n1"))
+    # La tarea existe y está pendiente (la completada va por el comando canónico,
+    # que exige un id UUID — más estricto que el camino directo anterior).
+    tid = "11111111-1111-1111-1111-111111111111"
+    db = FakeDB({"tareas": [{"id": tid, "titulo": "X", "completada": False}]})
+    r = asyncio.run(horario.completar_bloque(db, tarea_id=tid, nodo_id="n1"))
     assert r["ok"] is True
     tablas = {t for t, _, _ in db.updates}
     assert "arbol_nodos" in tablas  # marcó el nodo hecho
-    assert "tareas" in tablas       # completó la tarea
+    assert "tareas" in tablas       # completó la tarea (vía comando completar_tarea)
     # El nodo quedó 'hecho' y la tarea 'completada'.
     assert any(t == "arbol_nodos" and p.get("estado") == "hecho" for t, _, p in db.updates)
     assert any(t == "tareas" and p.get("completada") is True for t, _, p in db.updates)
