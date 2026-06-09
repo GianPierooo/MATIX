@@ -116,8 +116,23 @@ sesiones (una por día), el modelo existente; la recurrencia general de
 `comandos/http.py`, compartido por los 4 routers. Borrados de Universidad son
 duros → la IA pide confirmación.
 
-Siguiente: Fase 3 (Calendario) — incluye la recurrencia general de eventos
-(G5) que esta fase dejó fuera a propósito.
+Avance — Fase 3 (Calendario / Eventos): HECHO. Eventos migrado al registro:
+crear/editar/eliminar/restaurar/consultar como comandos (`comandos/eventos.py`),
+con el endpoint de la app y la tool de la IA envolviendo el MISMO handler. Se
+creó el motor de recurrencia ÚNICO (`comandos/recurrencia.py`): una sola fuente
+de verdad para "esto se repite". `horario` lo importa y re-exporta (compat);
+las sesiones de clase (Universidad) y los eventos semanales miden el día con la
+misma vara, así la recurrencia de clases que la Fase 2 dejó pendiente de G5
+quedó reconciliada. Recurrencia general (G5): diaria/semanal(días)/mensual +
+fin nunca/hasta/conteo, con editar/borrar recurrente en los tres alcances
+estilo Google Calendar (toda_serie / solo_esta / esta_y_futuras); "solo_esta"
+usa la columna nueva `recurrencia_excepciones` (migración 0046, aditiva).
+Consolidó D4: formulario manual, OCR de sílabo e IA crean por `crear_evento` —
+una sola ruta con acceso a recurrencia; el router conserva la orquestación de
+Google Calendar sobre el comando.
+
+Siguiente: Fase 4+ — Proyectos, Planificador y el resto de secciones al mismo
+patrón; gate de confirmación de acciones consecuentes (anotado desde Fase 1).
 
 Parqueado para 2.0 (no entra en 1.0):
 
