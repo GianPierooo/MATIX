@@ -33,6 +33,8 @@ CORE: frozenset[str] = frozenset({
     "consultar_tareas", "consultar_eventos", "consultar_proyectos",
     "consultar_apuntes", "consultar_movimientos", "consultar_uso",
     "consultar_gasto",
+    # Universidad (read) — «¿qué cursos llevo?», «¿qué evaluaciones tengo?»
+    "consultar_cursos", "consultar_sesiones_clase", "consultar_evaluaciones",
     # Memoria + RAG de apuntes + historial
     "recordar", "actualizar_memoria", "olvidar", "buscar_memoria",
     "buscar_apuntes", "leer_apunte", "buscar_en_historial",
@@ -67,6 +69,16 @@ _GRUPOS: list[tuple[frozenset[str], re.Pattern[str]]] = [
         r"\b(proyect|fase|arbol|nodo|intake|perfil|entrevista|descompon|"
         r"hito|avanc|meta|milestone|sprint|roadmap|material|biblioteca|"
         r"bloque|skill|curso)\w*")),
+    # Universidad: cursos, sesiones de clase, evaluaciones (mutaciones)
+    (frozenset({
+        "crear_curso", "editar_curso", "eliminar_curso",
+        "crear_sesion_clase", "crear_sesiones_clase", "editar_sesion_clase",
+        "eliminar_sesion_clase", "crear_evaluacion", "editar_evaluacion",
+        "eliminar_evaluacion",
+    }), re.compile(
+        r"\b(curso|materia|clase|profesor|universidad|\buni\b|facultad|ciclo|"
+        r"semestre|examen|parcial|\bfinal(es)?\b|entrega|evaluacion|nota|"
+        r"calificacion|silabo|syllabus|aula)\w*")),
     # Planificador diario / horario
     (frozenset({
         "proponer_set_dia", "ver_set_dia", "aceptar_set_dia", "saltar_item_set",

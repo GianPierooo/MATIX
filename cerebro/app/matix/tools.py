@@ -1041,6 +1041,283 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         },
     },
+    # ── Universidad: cursos, sesiones de clase, evaluaciones ─────────
+    # Envoltorios sobre los comandos de app/comandos/universidad.py (misma
+    # ruta canónica que la app). Antes la IA NO veía esta sección.
+    {
+        "type": "function",
+        "function": {
+            "name": "crear_curso",
+            "description": (
+                "Crea un CURSO de la universidad (una materia). Úsala cuando el "
+                "usuario diga «llevo Cálculo este ciclo» o «agrega el curso de "
+                "Química». Para registrar sus clases o exámenes, usa después "
+                "`crear_sesiones_clase` / `crear_evaluacion` con el `curso_id`."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nombre": {"type": "string", "description": "Nombre del curso."},
+                    "profesor": {"type": "string", "description": "Profesor, opcional."},
+                    "color": {"type": "string", "description": "Color HEX opcional (#RRGGBB)."},
+                },
+                "required": ["nombre"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "editar_curso",
+            "description": "Edita un curso existente (nombre, profesor o color).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "curso_id": {**_UUID, "description": "Id del curso a editar."},
+                    "nombre": {"type": "string"},
+                    "profesor": {"type": "string"},
+                    "color": {"type": "string"},
+                },
+                "required": ["curso_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "eliminar_curso",
+            "description": (
+                "Borra un curso. IRREVERSIBLE: arrastra sus evaluaciones y "
+                "sesiones de clase. Pide confirmación al usuario antes."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "curso_id": {**_UUID, "description": "Id del curso a borrar."},
+                    "confirmado": _CONFIRMADO,
+                },
+                "required": ["curso_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_cursos",
+            "description": (
+                "Lista los cursos que lleva el usuario (SOLO LECTURA). Úsala "
+                "para «¿qué cursos llevo?» o para obtener el `curso_id` de un "
+                "curso por su nombre antes de crear una evaluación o sesión."
+            ),
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "crear_sesion_clase",
+            "description": (
+                "Crea UNA sesión de clase semanal (un solo día). Para una clase "
+                "que cae varios días (p.ej. lunes y miércoles), usa "
+                "`crear_sesiones_clase` en su lugar."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "curso_id": {**_UUID, "description": "Curso de la clase."},
+                    "dia_semana": {
+                        "type": "integer", "minimum": 0, "maximum": 6,
+                        "description": "Día: 0=lunes, 1=martes … 6=domingo.",
+                    },
+                    "hora_inicio": {"type": "string", "description": "Hora de inicio, formato HH:MM (24h)."},
+                    "hora_fin": {"type": "string", "description": "Hora de fin, formato HH:MM (24h)."},
+                    "ubicacion": {"type": "string", "description": "Aula o lugar, opcional."},
+                },
+                "required": ["curso_id", "dia_semana", "hora_inicio", "hora_fin"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "crear_sesiones_clase",
+            "description": (
+                "Crea una clase RECURRENTE: una sesión por cada día de la "
+                "semana que toca, a la MISMA hora. Úsala para «Cálculo lunes y "
+                "miércoles 8-10» → `dias_semana=[0, 2]`. (Esta es la recurrencia "
+                "del horario; no usa la repetición del calendario.)"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "curso_id": {**_UUID, "description": "Curso de la clase."},
+                    "dias_semana": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 0, "maximum": 6},
+                        "description": "Días que cae la clase. 0=lunes … 6=domingo. P.ej. [0, 2].",
+                    },
+                    "hora_inicio": {"type": "string", "description": "Hora de inicio, HH:MM (24h)."},
+                    "hora_fin": {"type": "string", "description": "Hora de fin, HH:MM (24h)."},
+                    "ubicacion": {"type": "string", "description": "Aula o lugar, opcional."},
+                },
+                "required": ["curso_id", "dias_semana", "hora_inicio", "hora_fin"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "editar_sesion_clase",
+            "description": "Edita una sesión de clase (día, hora o ubicación).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sesion_id": {**_UUID, "description": "Id de la sesión a editar."},
+                    "curso_id": _UUID,
+                    "dia_semana": {"type": "integer", "minimum": 0, "maximum": 6},
+                    "hora_inicio": {"type": "string", "description": "HH:MM (24h)."},
+                    "hora_fin": {"type": "string", "description": "HH:MM (24h)."},
+                    "ubicacion": {"type": "string"},
+                },
+                "required": ["sesion_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "eliminar_sesion_clase",
+            "description": "Borra una sesión de clase del horario. Pide confirmación antes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sesion_id": {**_UUID, "description": "Id de la sesión a borrar."},
+                    "confirmado": _CONFIRMADO,
+                },
+                "required": ["sesion_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_sesiones_clase",
+            "description": (
+                "Lista el horario de clases (SOLO LECTURA). Úsala para «¿qué "
+                "clases tengo?» o «¿a qué hora es Cálculo?». Filtra por "
+                "`curso_id` si la pregunta es de un curso concreto."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "curso_id": {**_UUID, "description": "Filtra por curso, opcional."},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "crear_evaluacion",
+            "description": (
+                "Crea una EVALUACIÓN de un curso: examen, entrega, proyecto. "
+                "Úsala para «el parcial de Física es el 20 de junio» o «tengo "
+                "una entrega de Cálculo el viernes». Necesita el `curso_id` (si "
+                "no lo tienes, primero `consultar_cursos`)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "curso_id": {**_UUID, "description": "Curso de la evaluación."},
+                    "titulo": {"type": "string", "description": "Título, p.ej. «Parcial 1»."},
+                    "tipo": {
+                        "type": "string",
+                        "enum": ["entrega", "examen", "proyecto", "otro"],
+                        "description": "Tipo de evaluación.",
+                    },
+                    "fecha": {**_FECHA_HORA, "description": "Cuándo es. " + _FECHA_HORA["description"]},
+                    "descripcion": {"type": "string", "description": "Detalle libre, opcional."},
+                    "peso": {"type": "number", "description": "Peso en la nota final (%), opcional."},
+                    "recordar_en": {**_FECHA_HORA, "description": "Cuándo recordar, opcional."},
+                },
+                "required": ["curso_id", "titulo", "tipo", "fecha"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "editar_evaluacion",
+            "description": (
+                "Edita una evaluación: cambiar fecha, peso, o registrar la nota "
+                "obtenida (`nota_obtenida` / `nota_maxima`)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "evaluacion_id": {**_UUID, "description": "Id de la evaluación a editar."},
+                    "curso_id": _UUID,
+                    "titulo": {"type": "string"},
+                    "tipo": {"type": "string", "enum": ["entrega", "examen", "proyecto", "otro"]},
+                    "fecha": _FECHA_HORA,
+                    "descripcion": {"type": "string"},
+                    "peso": {"type": "number"},
+                    "nota_obtenida": {"type": "number", "description": "Nota que sacó el usuario."},
+                    "nota_maxima": {"type": "number", "description": "Nota máxima posible (default 20)."},
+                    "recordar_en": _FECHA_HORA,
+                },
+                "required": ["evaluacion_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "eliminar_evaluacion",
+            "description": "Borra una evaluación. Pide confirmación antes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "evaluacion_id": {**_UUID, "description": "Id de la evaluación a borrar."},
+                    "confirmado": _CONFIRMADO,
+                },
+                "required": ["evaluacion_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_evaluaciones",
+            "description": (
+                "Lista evaluaciones con filtros (SOLO LECTURA). Úsala para «¿qué "
+                "evaluaciones tengo esta semana?», «¿qué exámenes me quedan de "
+                "Física?». Calcula `desde`/`hasta` (YYYY-MM-DD) con la fecha de "
+                "hoy del contexto si la pregunta abarca un período. RESUME en "
+                "lenguaje natural, no vuelques la lista cruda."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "curso_id": {**_UUID, "description": "Filtra por curso, opcional."},
+                    "desde": {"type": "string", "description": "YYYY-MM-DD: desde esta fecha (inclusive)."},
+                    "hasta": {"type": "string", "description": "YYYY-MM-DD: hasta esta fecha (inclusive)."},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
     # ── Apuntes: listado plano (sin RAG) ─────────────────────────────
     {
         "type": "function",
@@ -2991,6 +3268,123 @@ async def _crear_tareas(db: Postgrest, args: dict) -> dict[str, Any]:
             for f in creadas
         ],
     })
+
+
+# ── Universidad: ENVOLTORIOS sobre los comandos (comandos/universidad.py) ─────
+# La lógica vive UNA sola vez en el comando; aquí solo se le da forma al
+# resultado para el LLM. La app usa los endpoints, que llaman al MISMO comando.
+
+
+async def _crear_curso(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "crear_curso", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    c = res["datos"]
+    return _ok({"id": c.get("id"), "nombre": c.get("nombre"), "profesor": c.get("profesor")})
+
+
+async def _editar_curso(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "editar_curso", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    c = res["datos"]
+    return _ok({"id": c.get("id"), "nombre": c.get("nombre")})
+
+
+async def _eliminar_curso(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "eliminar_curso", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    c = res["datos"]
+    return _ok({
+        "id": c.get("id"),
+        "nombre": c.get("nombre"),
+        "nota": "Curso borrado junto con sus evaluaciones y sesiones (irreversible).",
+    })
+
+
+async def _consultar_cursos(db: Postgrest, args: dict) -> dict[str, Any]:
+    return await _registro.ejecutar(db, "consultar_cursos", args, origen="ia")
+
+
+async def _crear_sesion_clase(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "crear_sesion_clase", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    s = res["datos"]
+    return _ok({
+        "id": s.get("id"),
+        "dia_semana": s.get("dia_semana"),
+        "hora_inicio": s.get("hora_inicio"),
+        "hora_fin": s.get("hora_fin"),
+    })
+
+
+async def _crear_sesiones_clase(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "crear_sesiones_clase", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    creadas = res["datos"].get("sesiones", [])
+    return _ok({
+        "total": len(creadas),
+        "sesiones": [
+            {"id": s.get("id"), "dia_semana": s.get("dia_semana"),
+             "hora_inicio": s.get("hora_inicio"), "hora_fin": s.get("hora_fin")}
+            for s in creadas
+        ],
+    })
+
+
+async def _editar_sesion_clase(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "editar_sesion_clase", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    s = res["datos"]
+    return _ok({"id": s.get("id"), "dia_semana": s.get("dia_semana")})
+
+
+async def _eliminar_sesion_clase(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "eliminar_sesion_clase", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    return _ok({"id": res["datos"].get("id"), "nota": "Sesión de clase borrada."})
+
+
+async def _consultar_sesiones_clase(db: Postgrest, args: dict) -> dict[str, Any]:
+    return await _registro.ejecutar(db, "consultar_sesiones_clase", args, origen="ia")
+
+
+async def _crear_evaluacion(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "crear_evaluacion", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    e = res["datos"]
+    return _ok({
+        "id": e.get("id"),
+        "titulo": e.get("titulo"),
+        "tipo": e.get("tipo"),
+        "fecha_legible": _resumen_fecha(e.get("fecha")),
+    })
+
+
+async def _editar_evaluacion(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "editar_evaluacion", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    e = res["datos"]
+    return _ok({"id": e.get("id"), "titulo": e.get("titulo")})
+
+
+async def _eliminar_evaluacion(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "eliminar_evaluacion", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    e = res["datos"]
+    return _ok({"id": e.get("id"), "titulo": e.get("titulo"), "nota": "Evaluación borrada."})
+
+
+async def _consultar_evaluaciones(db: Postgrest, args: dict) -> dict[str, Any]:
+    return await _registro.ejecutar(db, "consultar_evaluaciones", args, origen="ia")
 
 
 async def _crear_evento(db: Postgrest, args: dict) -> dict[str, Any]:
@@ -6027,6 +6421,20 @@ _HANDLERS = {
     "crear_evento": _crear_evento,
     "crear_apunte": _crear_apunte,
     "crear_proyecto": _crear_proyecto,
+    # Universidad: cursos, sesiones de clase, evaluaciones
+    "crear_curso": _crear_curso,
+    "editar_curso": _editar_curso,
+    "eliminar_curso": _eliminar_curso,
+    "consultar_cursos": _consultar_cursos,
+    "crear_sesion_clase": _crear_sesion_clase,
+    "crear_sesiones_clase": _crear_sesiones_clase,
+    "editar_sesion_clase": _editar_sesion_clase,
+    "eliminar_sesion_clase": _eliminar_sesion_clase,
+    "consultar_sesiones_clase": _consultar_sesiones_clase,
+    "crear_evaluacion": _crear_evaluacion,
+    "editar_evaluacion": _editar_evaluacion,
+    "eliminar_evaluacion": _eliminar_evaluacion,
+    "consultar_evaluaciones": _consultar_evaluaciones,
     # Editar
     "editar_tarea": _editar_tarea,
     "editar_evento": _editar_evento,
@@ -6169,6 +6577,20 @@ TABLAS_AFECTADAS = {
     "eliminar_tarea": ["tareas"],
     "eliminar_evento": ["eventos"],
     "eliminar_apunte": ["apuntes"],
+    # Universidad
+    "crear_curso": ["cursos"],
+    "editar_curso": ["cursos"],
+    "eliminar_curso": ["cursos", "evaluaciones", "sesiones_clase"],
+    "consultar_cursos": [],  # solo lectura
+    "crear_sesion_clase": ["sesiones_clase"],
+    "crear_sesiones_clase": ["sesiones_clase"],
+    "editar_sesion_clase": ["sesiones_clase"],
+    "eliminar_sesion_clase": ["sesiones_clase"],
+    "consultar_sesiones_clase": [],  # solo lectura
+    "crear_evaluacion": ["evaluaciones"],
+    "editar_evaluacion": ["evaluaciones"],
+    "eliminar_evaluacion": ["evaluaciones"],
+    "consultar_evaluaciones": [],  # solo lectura
     "aparcar_proyecto": ["proyectos"],
     "terminar_proyecto": ["proyectos"],
     "reactivar_proyecto": ["proyectos"],
@@ -6281,6 +6703,10 @@ _REQUIERE_CONFIRMACION = {
     "eliminar_movimiento",  # finanzas: borrado PERMANENTE
     "olvidar",              # memoria: borrado PERMANENTE
     "eliminar_proyecto",    # borra el proyecto + árbol/perfil (deshacer import)
+    # Universidad: borrados DUROS e irreversibles.
+    "eliminar_curso",       # arrastra evaluaciones y sesiones del curso
+    "eliminar_sesion_clase",
+    "eliminar_evaluacion",
 }
 
 

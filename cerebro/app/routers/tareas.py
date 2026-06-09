@@ -25,6 +25,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ..comandos import registro
+from ..comandos.http import datos_o_http as _datos_o_http
 from ..db import Postgrest, get_db
 from ..schemas.tareas import TareaCreate, TareaRead, TareaUpdate
 from ..security import require_api_key
@@ -36,23 +37,6 @@ router = APIRouter(
 )
 
 TABLE = "tareas"
-
-# Mapa tipo-de-error del comando → status HTTP del endpoint.
-_STATUS = {
-    "no_existe": status.HTTP_404_NOT_FOUND,
-    "validacion": status.HTTP_400_BAD_REQUEST,
-    "prohibida": status.HTTP_403_FORBIDDEN,
-    "interno": status.HTTP_500_INTERNAL_SERVER_ERROR,
-    "desconocido": status.HTTP_400_BAD_REQUEST,
-}
-
-
-def _datos_o_http(res: dict) -> dict:
-    """Resultado canónico del comando → fila (ok) o HTTPException (error)."""
-    if res.get("ok"):
-        return res["datos"]
-    code = _STATUS.get(res.get("tipo"), status.HTTP_400_BAD_REQUEST)
-    raise HTTPException(status_code=code, detail=res.get("mensaje", "No se pudo."))
 
 
 @router.get("", response_model=list[TareaRead])
