@@ -91,6 +91,18 @@ deterministas, y migraciones siempre aplicadas vía helper.
 
 El norte de la 2.0 vive en [`docs/Matix_2.0_Norte_Capa_de_Comandos.md`](Matix_2.0_Norte_Capa_de_Comandos.md).
 
+Avance — Fase 1 (cimiento de la capa de comandos): HECHO. Existe un registro
+tipado de comandos (`cerebro/app/comandos/`): cada comando declara nombre,
+params, riesgo (segura/consecuente/prohibida) y UN handler único, con logging
+por invocación. El comando es la única fuente de lógica; el endpoint de la app
+(UI) y la tool de la IA son envoltorios delgados sobre el MISMO handler — una
+sola ruta canónica. Tareas migrado como piloto (crear/lote/editar/completar/
+reabrir/eliminar/restaurar). Consolidó dos bugs reales: D1 (la captura rápida
+crea siempre Tarea, nunca Evento) y D5 (completar por checkbox, por comando o
+por el bloque de Tu día deja el mismo estado, con repetición y sync de árbol).
+Siguiente: fase 2+ migra Universidad, Calendario y demás secciones al mismo
+patrón.
+
 Parqueado para 2.0 (no entra en 1.0):
 
 - Agente PC completo y Capa 6 restante (ejecutar comandos, control real más
