@@ -25,10 +25,15 @@ from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ..comandos.recurrencia import ocurre_en, sesion_ocurre_en
 from ..db import Postgrest
 from . import creacion_proyecto
 
 logger = logging.getLogger("matix.horario")
+
+# `ocurre_en` se re-exporta desde aquí por compatibilidad (lo importan
+# `asistencia_eventos` y los tests). El motor vive en `comandos/recurrencia`.
+__all__ = ["ocurre_en", "sesion_ocurre_en"]
 
 LIMA = ZoneInfo("America/Lima")
 
@@ -72,46 +77,6 @@ def min_a_hhmm(m: int) -> str:
     """Minutos → 'HH:MM' (acota 0..1439). PURO."""
     m = max(0, min(24 * 60 - 1, int(m)))
     return f"{m // 60:02d}:{m % 60:02d}"
-
-
-def ocurre_en(evento: dict[str, Any], fecha: date) -> bool:
-    """¿Este evento cae en `fecha`? Maneja eventos sueltos y recurrentes
-    (diaria/semanal/mensual) con su fin (nunca/hasta/conteo). PURO.
-
-    Expande la recurrencia que en la BD vive solo como REGLA (no materializada)."""
-    ini = _parse_dt(evento.get("inicia_en"))
-    if ini is None:
-        return False
-    ini_d = ini.astimezone(LIMA).date()
-    freq = (evento.get("recurrencia_freq") or "").strip().lower()
-    if not freq:
-        return ini_d == fecha
-    if fecha < ini_d:
-        return False
-    fin_tipo = (evento.get("recurrencia_fin_tipo") or "").strip().lower()
-    if fin_tipo == "hasta":
-        hasta = _parse_date(evento.get("recurrencia_hasta"))
-        if hasta and fecha > hasta:
-            return False
-
-    if freq == "diaria":
-        cae = True
-    elif freq == "semanal":
-        dias = evento.get("recurrencia_dias_semana") or [ini.astimezone(LIMA).isoweekday()]
-        cae = fecha.isoweekday() in dias
-    elif freq == "mensual":
-        cae = fecha.day == ini_d.day
-    else:
-        cae = False
-    if not cae:
-        return False
-
-    if fin_tipo == "conteo":
-        conteo = evento.get("recurrencia_conteo")
-        if conteo:
-            if _ordinal_ocurrencia(freq, evento.get("recurrencia_dias_semana"), ini_d, fecha) > int(conteo):
-                return False
-    return True
 
 
 def fusionar_ocupados(
@@ -466,25 +431,6 @@ def pool_sugerencias(fuera: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 # ── Helpers de recurrencia / fechas (puros) ──────────────────────────────────
 
-def _ordinal_ocurrencia(freq: str, dias_semana: Any, inicio: date, fecha: date) -> int:
-    """Número de ocurrencia (1-based) de `fecha` desde `inicio` para la regla, para
-    chequear el fin por conteo. PURO."""
-    if freq == "diaria":
-        return (fecha - inicio).days + 1
-    if freq == "semanal":
-        dias = set(dias_semana or [inicio.isoweekday()])
-        n = 0
-        d = inicio
-        while d <= fecha:
-            if d.isoweekday() in dias:
-                n += 1
-            d = date.fromordinal(d.toordinal() + 1)
-        return n
-    if freq == "mensual":
-        return (fecha.year - inicio.year) * 12 + (fecha.month - inicio.month) + 1
-    return 1
-
-
 def _parse_dt(valor: Any) -> datetime | None:
     if isinstance(valor, datetime):
         return valor if valor.tzinfo else valor.replace(tzinfo=timezone.utc)
@@ -553,9 +499,10 @@ async def _compromisos_fijos(
             cursos = {c["id"]: c.get("nombre", "Clase") for c in await db.list("cursos")}
         except Exception:  # noqa: BLE001
             cursos = {}
-    dow = fecha.weekday()  # 0=Lun
     for s in sesiones:
-        if s.get("dia_semana") != dow:
+        # Mismo motor que los eventos recurrentes: "¿esta clase cae hoy?".
+        dia = s.get("dia_semana")
+        if dia is None or not sesion_ocurre_en(dia, fecha):
             continue
         ini = hhmm_a_min(s.get("hora_inicio") or "")
         fin = hhmm_a_min(s.get("hora_fin") or "")

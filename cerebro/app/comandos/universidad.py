@@ -35,6 +35,7 @@ from ..db import Postgrest
 from ..schemas.cursos import CursoCreate, CursoUpdate
 from ..schemas.evaluaciones import EvaluacionCreate, EvaluacionUpdate
 from ..schemas.sesiones_clase import SesionClaseCreate, SesionClaseUpdate
+from . import recurrencia as _recurrencia
 from .registro import Comando, RegistroComandos, Riesgo, error, ok
 
 T_CURSOS = "cursos"
@@ -159,11 +160,11 @@ async def cmd_crear_sesiones_clase(db: Postgrest, params: dict[str, Any]) -> dic
     dias = params.get("dias_semana")
     if not isinstance(dias, list) or not dias:
         return error("validacion", "Pásame `dias_semana`: una lista de días (0=lunes … 6=domingo).")
-    # Únicos y ordenados, para no duplicar el mismo día.
-    try:
-        dias_norm = sorted({int(d) for d in dias})
-    except (ValueError, TypeError):
-        return error("validacion", "`dias_semana` debe ser una lista de enteros (0–6).")
+    # Únicos y ordenados, para no duplicar el mismo día. El modelo de día (0–6)
+    # lo valida el motor de recurrencia ÚNICO, el mismo que usan los eventos.
+    if not all(_recurrencia.es_indice_valido(d) for d in dias):
+        return error("validacion", "`dias_semana` debe ser una lista de enteros (0=lunes … 6=domingo).")
+    dias_norm = sorted({int(d) for d in dias})
     if len(dias_norm) > _MAX_SESIONES:
         return error("validacion", f"Demasiados días ({len(dias_norm)}); el máximo es {_MAX_SESIONES}.")
     base = {k: v for k, v in params.items() if k != "dias_semana"}

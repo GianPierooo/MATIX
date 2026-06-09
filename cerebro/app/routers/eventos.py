@@ -34,6 +34,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from googleapiclient.errors import HttpError
 
+from ..comandos import registro
+from ..comandos.http import datos_o_http as _datos_o_http
 from ..db import Postgrest, get_db
 from ..google import calendar as gcal
 from ..google import oauth as goauth
@@ -108,25 +110,22 @@ async def obtener(evento_id: UUID, db: Postgrest = Depends(get_db)) -> dict:
 
 @router.post("", response_model=EventoRead, status_code=status.HTTP_201_CREATED)
 async def crear(body: EventoCreate, db: Postgrest = Depends(get_db)) -> dict:
-    """Crea un evento manual y, si hay Google conectado, lo empuja
-    al Calendar del usuario. Manual = hub primero, push best-effort.
-    """
-    row = await db.insert(
-        TABLE, body.model_dump(mode="json", exclude_none=True)
+    """Crea un evento por el comando `crear_evento` (misma ruta que la IA y el
+    OCR de sílabo) y, si hay Google conectado, lo empuja best-effort. Manual =
+    hub primero, push best-effort."""
+    res = await registro.ejecutar(
+        db, "crear_evento", body.model_dump(mode="json", exclude_none=True), origen="ui"
     )
+    row = _datos_o_http(res)
     email = await _email_google_si_hay(db)
     if email is None:
         return row
     try:
-        patch = await gcal.push_evento(
-            db, email=email, fila=row, accion="crear"
-        )
+        patch = await gcal.push_evento(db, email=email, fila=row, accion="crear")
     except (HttpError, RuntimeError) as e:
         logger.warning(
-            "Push a Google falló para evento %s — queda local "
-            "hasta el próximo sync: %s",
-            row["id"],
-            e,
+            "Push a Google falló para evento %s — queda local hasta el próximo "
+            "sync: %s", row["id"], e,
         )
         return row
     return await db.update(TABLE, row["id"], patch)
@@ -134,58 +133,61 @@ async def crear(body: EventoCreate, db: Postgrest = Depends(get_db)) -> dict:
 
 @router.patch("/{evento_id}", response_model=EventoRead)
 async def actualizar(
-    evento_id: UUID, body: EventoUpdate, db: Postgrest = Depends(get_db)
+    evento_id: UUID,
+    body: EventoUpdate,
+    db: Postgrest = Depends(get_db),
+    alcance: str = Query(default="toda_serie"),
+    ocurrencia_fecha: str | None = Query(default=None),
 ) -> dict:
+    """Edita un evento por el comando `editar_evento`. `alcance` controla los
+    eventos recurrentes: toda_serie (default) / solo_esta / esta_y_futuras
+    (con `ocurrencia_fecha` YYYY-MM-DD para las dos últimas)."""
     actual = await db.get(TABLE, str(evento_id))
     if actual is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Evento no encontrado"
         )
-    payload = body.model_dump(mode="json", exclude_unset=True)
-    # La fila proyectada (la que iría a Google) combina el estado
-    # actual con el patch — Google espera el objeto completo, no
-    # solo el delta.
-    fila_proyectada = {**actual, **payload}
+    edits = body.model_dump(mode="json", exclude_unset=True)
+    params: dict[str, Any] = {**edits, "evento_id": str(evento_id), "alcance": alcance}
+    if ocurrencia_fecha:
+        params["ocurrencia_fecha"] = ocurrencia_fecha
 
     email = await _email_google_si_hay(db)
     tiene_external = bool(actual.get("external_id"))
-    accion_google = "editar" if tiene_external else "crear"
+    es_serie_entera = alcance == "toda_serie"
 
-    # Para `origen='google'`: empujar a Google PRIMERO. Si rebota,
-    # no aplicamos al hub.
-    if actual.get("origen") == "google" and email and tiene_external:
+    # `origen='google'` + serie entera: empujar a Google PRIMERO; si rebota, no
+    # tocamos el hub (el comando ni se llama).
+    if actual.get("origen") == "google" and email and tiene_external and es_serie_entera:
         try:
             patch_google = await gcal.push_evento(
-                db,
-                email=email,
-                fila=fila_proyectada,
-                accion="editar",
+                db, email=email, fila={**actual, **edits}, accion="editar"
             )
         except HttpError as e:
             raise HTTPException(
                 status_code=_http_status_de_google(e),
                 detail=f"Google rechazó la edición: {e}",
             ) from e
-        payload = {**payload, **patch_google}
-        row = await db.update(TABLE, str(evento_id), payload)
+        row = _datos_o_http(await registro.ejecutar(db, "editar_evento", params, origen="ui"))
+        if patch_google:
+            row = await db.update(TABLE, str(evento_id), patch_google)
         return row
 
-    # Para `origen='manual'`: hub primero, Google después best-effort.
-    row = await db.update(TABLE, str(evento_id), payload)
-    if email is None:
+    # Resto (manual, o sin external, o alcance que parte la serie): hub por el
+    # comando primero.
+    row = _datos_o_http(await registro.ejecutar(db, "editar_evento", params, origen="ui"))
+    # Sin push inmediato a Google si se partió la serie: las filas nuevas
+    # sincronizan en el próximo ciclo (igual que cualquier evento manual nuevo).
+    if email is None or not es_serie_entera:
         return row
+    accion_google = "editar" if tiene_external else "crear"
     try:
         patch_google = await gcal.push_evento(
-            db,
-            email=email,
-            fila={**row, **payload},
-            accion=accion_google,
+            db, email=email, fila=row, accion=accion_google
         )
     except (HttpError, RuntimeError) as e:
         logger.warning(
-            "Push a Google falló al editar evento %s — queda local: %s",
-            row["id"],
-            e,
+            "Push a Google falló al editar evento %s — queda local: %s", row["id"], e,
         )
         return row
     if patch_google:
@@ -194,10 +196,15 @@ async def actualizar(
 
 
 @router.delete("/{evento_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def eliminar(evento_id: UUID, db: Postgrest = Depends(get_db)) -> None:
-    """Borrado suave. Si el evento estaba sincronizado con Google,
-    también lo borra allá (best-effort para manuales; obligatorio
-    para google = si Google rebota, no aplicamos el soft-delete)."""
+async def eliminar(
+    evento_id: UUID,
+    db: Postgrest = Depends(get_db),
+    alcance: str = Query(default="toda_serie"),
+    ocurrencia_fecha: str | None = Query(default=None),
+) -> None:
+    """Borrado suave por el comando `eliminar_evento`. `alcance`: toda_serie
+    (default, manda la serie a papelera y borra en Google si aplica) /
+    solo_esta / esta_y_futuras (tocan la regla; no sincronizan a Google)."""
     actual = await db.get(TABLE, str(evento_id))
     if actual is None:
         raise HTTPException(
@@ -206,80 +213,54 @@ async def eliminar(evento_id: UUID, db: Postgrest = Depends(get_db)) -> None:
 
     email = await _email_google_si_hay(db)
     tiene_external = bool(actual.get("external_id"))
+    es_serie_entera = alcance == "toda_serie"
 
-    # `origen='google'`: borrar en Google primero. Si rebota,
-    # no aplicamos.
-    if actual.get("origen") == "google" and email and tiene_external:
-        try:
-            await gcal.push_evento(
-                db, email=email, fila=actual, accion="borrar"
-            )
-        except HttpError as e:
-            raise HTTPException(
-                status_code=_http_status_de_google(e),
-                detail=f"Google rechazó el borrado: {e}",
-            ) from e
+    # Borrado en Google solo cuando se borra la serie ENTERA (es lo único que
+    # quita el evento de allá). Detachar/cortar la recurrencia no se sincroniza.
+    if es_serie_entera and email and tiene_external:
+        if actual.get("origen") == "google":
+            try:
+                await gcal.push_evento(db, email=email, fila=actual, accion="borrar")
+            except HttpError as e:
+                raise HTTPException(
+                    status_code=_http_status_de_google(e),
+                    detail=f"Google rechazó el borrado: {e}",
+                ) from e
+        else:  # manual: best-effort
+            try:
+                await gcal.push_evento(db, email=email, fila=actual, accion="borrar")
+            except (HttpError, RuntimeError) as e:
+                logger.warning(
+                    "Push delete a Google falló para evento %s — sigo con "
+                    "soft-delete local: %s", actual["id"], e,
+                )
 
-    # `origen='manual'`: borrar en Google best-effort y siempre
-    # soft-delete local.
-    if actual.get("origen") == "manual" and email and tiene_external:
-        try:
-            await gcal.push_evento(
-                db, email=email, fila=actual, accion="borrar"
-            )
-        except (HttpError, RuntimeError) as e:
-            logger.warning(
-                "Push delete a Google falló para evento %s — sigo "
-                "con soft-delete local: %s",
-                actual["id"],
-                e,
-            )
-
-    row = await db.update(
-        TABLE, str(evento_id), {"eliminado_en": _ahora_iso()}
-    )
-    if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Evento no encontrado"
-        )
+    params: dict[str, Any] = {"evento_id": str(evento_id), "alcance": alcance}
+    if ocurrencia_fecha:
+        params["ocurrencia_fecha"] = ocurrencia_fecha
+    res = await registro.ejecutar(db, "eliminar_evento", params, origen="ui")
+    _datos_o_http(res)  # levanta el status que toque si hubo error; 204 si ok
 
 
 @router.post("/{evento_id}/restaurar", response_model=EventoRead)
 async def restaurar(
     evento_id: UUID, db: Postgrest = Depends(get_db)
 ) -> dict:
-    """Saca de papelera. Para los eventos con external_id, dispara
-    un push 'crear' a Google porque allá ya no existe (lo borramos
-    cuando se mandó a papelera). Google asigna un nuevo ID; lo
-    guardamos."""
-    actual = await db.get(TABLE, str(evento_id))
-    if actual is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Evento no encontrado"
-        )
-
-    # Limpiamos external_id viejo (el evento de Google ya fue borrado)
-    # y volvemos a empujar si hay conexión.
-    payload: dict[str, Any] = {
-        "eliminado_en": None,
-        "external_id": None,
-        "external_account": None,
-        "google_updated_at": None,
-    }
-    row = await db.update(TABLE, str(evento_id), payload)
+    """Saca de papelera por el comando `restaurar_evento`. Para los eventos con
+    external_id, dispara un push 'crear' a Google porque allá ya no existe."""
+    res = await registro.ejecutar(
+        db, "restaurar_evento", {"evento_id": str(evento_id)}, origen="ui"
+    )
+    row = _datos_o_http(res)
 
     email = await _email_google_si_hay(db)
     if email is None:
         return row
     try:
-        patch_google = await gcal.push_evento(
-            db, email=email, fila=row, accion="crear"
-        )
+        patch_google = await gcal.push_evento(db, email=email, fila=row, accion="crear")
     except (HttpError, RuntimeError) as e:
         logger.warning(
-            "Push tras restaurar evento %s falló — queda local: %s",
-            row["id"],
-            e,
+            "Push tras restaurar evento %s falló — queda local: %s", row["id"], e,
         )
         return row
     return await db.update(TABLE, str(evento_id), patch_google)

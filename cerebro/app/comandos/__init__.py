@@ -10,6 +10,7 @@ Uso desde un envoltorio (router o tool):
 """
 from __future__ import annotations
 
+from . import eventos as _eventos
 from . import tareas as _tareas
 from . import universidad as _universidad
 from .registro import Comando, RegistroComandos, Riesgo, error, ok, registro
@@ -17,5 +18,6 @@ from .registro import Comando, RegistroComandos, Riesgo, error, ok, registro
 # Poblar el registro. Cada sección registra sus comandos aquí.
 _tareas.registrar(registro)
 _universidad.registrar(registro)
+_eventos.registrar(registro)
 
 __all__ = ["registro", "RegistroComandos", "Comando", "Riesgo", "ok", "error"]

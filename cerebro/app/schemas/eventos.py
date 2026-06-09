@@ -67,6 +67,9 @@ class EventoRead(BaseModel):
     recurrencia_fin_tipo: str | None = None
     recurrencia_hasta: date | None = None
     recurrencia_conteo: int | None = None
+    # Fechas detachadas/borradas de la serie con alcance "solo_esta". El motor
+    # de recurrencia las salta; la app las usa para no pintar esas ocurrencias.
+    recurrencia_excepciones: list[date] | None = None
     eliminado_en: datetime | None = None
     # Capa 4 Paso 1: origen del evento. "manual" para los creados
     # desde la app, "google" para los sync-eados.
