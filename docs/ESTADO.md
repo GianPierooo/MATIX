@@ -100,8 +100,24 @@ sola ruta canónica. Tareas migrado como piloto (crear/lote/editar/completar/
 reabrir/eliminar/restaurar). Consolidó dos bugs reales: D1 (la captura rápida
 crea siempre Tarea, nunca Evento) y D5 (completar por checkbox, por comando o
 por el bloque de Tu día deja el mismo estado, con repetición y sync de árbol).
-Siguiente: fase 2+ migra Universidad, Calendario y demás secciones al mismo
-patrón.
+
+Avance — Fase 2 (Universidad): HECHO. La sección Universidad entera pasó al
+registro con el mismo patrón. Comandos en `comandos/universidad.py`: cursos
+(crear/editar/eliminar/consultar), sesiones de clase (crear, crear_sesiones_
+clase recurrente, editar/eliminar/consultar) y evaluaciones (crear/editar/
+eliminar/consultar con filtro por curso y rango de fechas). Los routers
+`cursos`/`evaluaciones`/`sesiones_clase` quedaron como envoltorios (POST/PATCH/
+DELETE → comando; GET de lectura directos). Hito de capacidad: la IA ahora VE
+Universidad — 13 tools nuevas (antes la sección era invisible para Matix), así
+responde «¿qué cursos llevo?» o «¿qué evaluaciones tengo esta semana?». La
+recurrencia de clases NO usó G5: una clase «lunes y miércoles» es N filas de
+sesiones (una por día), el modelo existente; la recurrencia general de
+`crear_evento` queda para Fase 3 (Calendario). Helper comando→HTTP extraído a
+`comandos/http.py`, compartido por los 4 routers. Borrados de Universidad son
+duros → la IA pide confirmación.
+
+Siguiente: Fase 3 (Calendario) — incluye la recurrencia general de eventos
+(G5) que esta fase dejó fuera a propósito.
 
 Parqueado para 2.0 (no entra en 1.0):
 
