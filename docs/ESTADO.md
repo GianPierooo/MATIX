@@ -40,9 +40,13 @@ Superficie que quedó viva y se usa a diario:
   (con árbol, fase actual, capacidad estimada y modalidad), Finanzas básicas
   (movimientos, categorías, consultas), y la búsqueda global desde Inicio.
 - **Chat + voz con Matix**: chat persistente con historial, modo voz manos
-  libres, wake word entrenado por el usuario, transcripción Whisper, TTS cloud
-  con respaldo en la voz nativa del dispositivo (cadena device-first para la
-  cámara), captura rápida desde Inicio (tarea o apunte en un toque).
+  libres, wake word entrenado por el usuario, transcripción Whisper, captura
+  rápida desde Inicio (tarea o apunte en un toque). **Voz UNIFICADA**: una
+  sola voz del dispositivo (flutter_tts) en TODOS los puntos (chat, manos
+  libres, cámara, briefing, cierre), config centralizada en `VozConfig`/
+  `VozPrefs` (voz/tono/velocidad) que todos aplican; ajuste "Voz de Matix" en
+  Ajustes (elige voz es, sliders, probar, ayuda voces Google). El cloud
+  (OpenAI tts-1) es solo ÚLTIMO recurso; ElevenLabs fuera por defecto.
 - **Memoria + RAG + modo tutor**: memoria personal de Matix (lo que sabe del
   usuario), RAG sobre apuntes y biblioteca de material por skill/bloque
   (calistenia, inglés con bloques 1-6 ingeridos, etc.), recall semántico del
@@ -147,10 +151,12 @@ SOLO-BACKEND (existe en el cerebro, sin pantalla propia en la app).
   otro. Editable desde Ajustes → Modelo. GET/POST `/api/v1/modelos[/proveedor]`.
 - Visión (cámara/imágenes): por la MISMA abstracción → gpt-4o-mini o Claude
   (ambos ven imágenes), con failover. La cámara revive aunque OpenAI no esté.
-- TTS (texto→voz): cadena de respaldo **ElevenLabs (si hay key) → OpenAI tts-1
-  → voz NATIVA del dispositivo (flutter_tts) → texto**. El endpoint `/matix/voz`
-  devuelve 503 si todo el cloud cae; la app baja a la voz del teléfono. Header
-  `X-TTS-Proveedor` para observabilidad.
+- TTS (texto→voz): voz UNIFICADA del DISPOSITIVO (flutter_tts) como la voz de
+  Matix en toda la app; **cadena device-first**: voz del dispositivo → (último
+  recurso) OpenAI tts-1 vía `/matix/voz` → texto. ElevenLabs FUERA por defecto
+  (gate `tts_elevenlabs_activo`, código conservado). Config centralizada en la
+  app (`VozConfig`/`VozPrefs`): misma voz/tono/velocidad en chat, manos libres,
+  cámara, briefing y cierre; ajuste "Voz de Matix" en Ajustes.
 - STT (voz→texto): Whisper (`whisper-1`, "es") + filtro de alucinaciones;
   **respaldo NATIVO** de Android (`speech_to_text`) cuando Whisper no responde.
 - Embeddings (RAG): OpenAI `text-embedding-3-small`. Degradan elegante: sin

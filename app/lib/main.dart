@@ -20,6 +20,7 @@ import 'features/eventos/presentation/nuevo_evento_screen.dart';
 import 'features/eventos/providers/eventos_providers.dart';
 import 'features/horario/providers/horario_providers.dart';
 import 'features/matix/data/captura_apunte_repository.dart';
+import 'features/matix/data/tts_service.dart';
 import 'features/matix/presentation/manos_libres_screen.dart';
 import 'features/matix/providers/captura_apunte_providers.dart';
 import 'features/matix/providers/manos_libres_providers.dart';
@@ -122,6 +123,11 @@ class _MatixAppState extends ConsumerState<MatixApp>
     // Push (FCM · Capa 1): pide permiso, registra el token en el cerebro y
     // escucha mensajes. Best-effort.
     unawaited(ref.read(pushServiceProvider).inicializar());
+    // Voz de Matix: calienta el motor TTS del dispositivo al arrancar (carga el
+    // idioma es-* y la voz/tono/velocidad de la config centralizada) para que
+    // la PRIMERA vez que Matix hable no pague la latencia de configuración ni
+    // falle. Best-effort: si el motor no está, la primera `hablar` lo prepara.
+    unawaited(VozDispositivoFlutterTts().preparar());
     // Deep link de push (Capa 2): tocar un push (app en background/cerrada)
     // enruta al evento/tarea. El payload viaja en `data['payload']`.
     try {

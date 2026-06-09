@@ -19,6 +19,7 @@ import '../features/cierre/presentation/cierre_screen.dart';
 import '../features/cierre/providers/cierre_providers.dart';
 import '../features/google/presentation/conexion_google_tile.dart';
 import '../features/matix/presentation/accesibilidad_screen.dart';
+import '../features/matix/presentation/voz_matix_screen.dart';
 import '../features/memoria/presentation/sobre_mi_screen.dart';
 import '../features/modelos/presentation/modelo_screen.dart';
 import '../features/nudges/providers/nudges_providers.dart';
@@ -236,6 +237,15 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
             subtitle: 'Qué modelo de IA usa Matix para conversar.',
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const ModeloScreen()),
+            ),
+          ),
+          _Accion(
+            label: 'Voz de Matix',
+            icon: Icons.record_voice_over_outlined,
+            subtitle: 'La voz del dispositivo que usa Matix en todos lados. '
+                'Elígela y ajusta tono y velocidad.',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const VozMatixScreen()),
             ),
           ),
           const _WakeWordTile(),

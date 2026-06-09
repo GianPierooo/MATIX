@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../../api/matix_client.dart';
 import '../../../config.dart';
+import 'voz_config.dart';
 
 /// Reproductor de audio detrás de una interfaz chica, para poder testear el
 /// TTS sin tocar el reproductor real ni el sistema de archivos.
@@ -79,18 +80,26 @@ class ReproductorAudioPlayers implements ReproductorAudio {
 /// nube (OpenAI/ElevenLabs vía cerebro) no responde, hablamos con esto en vez
 /// de quedarnos en texto. Interfaz chica para poder inyectar un fake en tests.
 abstract class VozDispositivo {
-  /// Lee `texto` con la voz del teléfono. Devuelve `true` si habló.
+  /// Lee `texto` con la voz del teléfono SIN esperar a que termine (modo
+  /// interrumpible: una nueva `hablar` corta la anterior). Para la cámara en
+  /// vivo. Devuelve `true` si arrancó a hablar.
   Future<bool> hablar(String texto);
+
+  /// Lee `texto` y RESUELVE cuando el audio TERMINA (o lo cortó `detener`).
+  /// Para el chat / manos libres / briefings / cierre, donde el flujo espera a
+  /// que Matix termine de hablar antes de seguir. Devuelve `true` si habló.
+  Future<bool> hablarYEsperar(String texto);
+
   Future<void> detener();
 
-  /// Inicializa el motor EAGER (idioma, volumen, velocidad, modo FLUSH). Idem-
-  /// potente. Devuelve true si el motor quedó listo para hablar de inmediato.
-  /// Hacerlo al abrir la cámara evita que el primer frame pague la latencia de
-  /// configuración (que en algunos OEM se traga la primera frase entera).
+  /// Inicializa el motor EAGER (idioma + voz/tono/velocidad de la config
+  /// centralizada `VozConfig`). Idempotente. Devuelve true si quedó listo para
+  /// hablar de inmediato. Hacerlo al arrancar/abrir pantalla evita que la
+  /// primera frase pague la latencia de configuración.
   Future<bool> preparar();
 
   /// El último idioma TTS que se logró setear (`es-419`, `es-PE`, …). Útil para
-  /// diagnosticar en qué locale habla el motor del Honor del user. Null si nada.
+  /// diagnosticar en qué locale habla el motor. Null si nada.
   String? get idiomaActivo;
 }
 
@@ -106,10 +115,18 @@ abstract class VozDispositivo {
 /// pantalla — antes el config corría dentro de `hablar()` y la primera frase
 /// pagaba la latencia.
 class VozDispositivoFlutterTts implements VozDispositivo {
+  VozDispositivoFlutterTts({VozPrefs? prefs}) : _prefs = prefs ?? VozPrefs();
+
+  final VozPrefs _prefs;
   FlutterTts? _instancia;
   FlutterTts get _tts => _instancia ??= FlutterTts();
   bool _configurado = false;
   String? _idiomaActivo;
+  // Completer que resuelve cuando la frase TERMINA de sonar (lo dispara el
+  // completion/cancel/error handler). Lo usa `hablarYEsperar`. Para la cámara
+  // (`hablar`) no se setea → su completion no espera a nadie.
+  Completer<void>? _finHabla;
+  bool _handlersListos = false;
 
   /// Orden de intento: español Latam primero (el motor del Honor del user suele
   /// venir con `es-419`/`es-PE` y NO con `es-ES`). Antes solo intentábamos
@@ -128,23 +145,46 @@ class VozDispositivoFlutterTts implements VozDispositivo {
   @override
   String? get idiomaActivo => _idiomaActivo;
 
+  void _instalarHandlers() {
+    if (_handlersListos) return;
+    void resolver() {
+      final c = _finHabla;
+      if (c != null && !c.isCompleted) c.complete();
+      _finHabla = null;
+    }
+
+    _tts.setCompletionHandler(resolver);
+    _tts.setCancelHandler(resolver);
+    _tts.setErrorHandler((_) => resolver());
+    _handlersListos = true;
+  }
+
   @override
   Future<bool> preparar() async {
     if (_configurado) return true;
     try {
-      // Volumen + velocidad para narración en vivo: clara y un toque por encima
-      // del default lento de Android (~0.5).
+      _instalarHandlers();
+      // Config CENTRALIZADA: tono y velocidad salen de `VozConfig` (misma para
+      // toda la app). Si el storage no tiene nada, usa los defaults del modelo.
+      VozConfig cfg;
+      try {
+        cfg = await _prefs.cargar();
+      } catch (_) {
+        cfg = const VozConfig();
+      }
       await _tts.setVolume(1.0);
-      await _tts.setSpeechRate(0.55);
-      await _tts.setPitch(1.0);
+      await _tts.setSpeechRate(cfg.rate);
+      await _tts.setPitch(cfg.pitch);
       // Modo FLUSH: una nueva `speak()` corta la anterior. Si el motor no lo
       // soporta (algún OEM raro), no es fatal: caemos a `stop()` antes de cada
       // speak. Por eso va en try/catch.
       try {
         await _tts.setQueueMode(0);
       } catch (_) {}
-      // FALSO: `speak()` retorna en cuanto ENCOLA, no cuando termina. Para la
-      // cámara queremos esto: el caller no espera el fin de la frase.
+      // FALSO: `speak()` retorna al ENCOLAR, no al terminar. La cámara lo
+      // necesita así (interrumpible); el chat usa `hablarYEsperar`, que espera
+      // el handler de completion. (No mezclamos con awaitSpeakCompletion(true)
+      // para no romper el modo interrumpible de la cámara.)
       await _tts.awaitSpeakCompletion(false);
       // Idioma: primero el preferido disponible, sin lanzar si no está.
       _idiomaActivo = await _setearPrimerIdiomaDisponible();
@@ -152,12 +192,55 @@ class VozDispositivoFlutterTts implements VozDispositivo {
         debugPrint('[tts][dispositivo] ningún idioma es-* disponible en el motor');
         return false;
       }
-      debugPrint('[tts][dispositivo] preparado (lang=$_idiomaActivo)');
+      // Voz elegida por el usuario (Ajustes → Voz de Matix), si la hay. Es lo
+      // que unifica el TIMBRE en todos los puntos. Si no eligió, queda la voz
+      // por defecto del motor para el idioma.
+      await _aplicarVozElegida(cfg);
+      debugPrint('[tts][dispositivo] preparado (lang=$_idiomaActivo, voz=${cfg.voiceName ?? "default"})');
       _configurado = true;
       return true;
     } catch (e) {
       debugPrint('[tts][dispositivo] preparar falló: $e');
       return false;
+    }
+  }
+
+  Future<void> _aplicarVozElegida(VozConfig cfg) async {
+    if (!cfg.tieneVozElegida) return;
+    try {
+      await _tts.setVoice({
+        'name': cfg.voiceName!,
+        if ((cfg.locale ?? '').isNotEmpty) 'locale': cfg.locale!,
+      });
+    } catch (e) {
+      // Voz ya no disponible (se desinstaló): seguimos con la del idioma.
+      debugPrint('[tts][dispositivo] setVoice falló (${cfg.voiceName}): $e');
+    }
+  }
+
+  /// Voces del dispositivo en español, ordenadas (mejor primero). Para el
+  /// ajuste "Voz de Matix". Vacío si el motor no expone voces.
+  Future<List<VozDisponible>> voces() async {
+    try {
+      final crudas = await _tts.getVoices as List<dynamic>?;
+      return vocesEspanol(normalizarVoces(crudas));
+    } catch (e) {
+      debugPrint('[tts][dispositivo] getVoices falló: $e');
+      return const [];
+    }
+  }
+
+  /// Re-aplica una `VozConfig` AL VUELO (tras elegir en Ajustes / para "probar
+  /// voz"). No persiste (de eso se encarga `VozPrefs`); solo configura el motor.
+  Future<void> aplicar(VozConfig cfg) async {
+    final c = cfg.saneada;
+    if (!_configurado) await preparar();
+    try {
+      await _tts.setSpeechRate(c.rate);
+      await _tts.setPitch(c.pitch);
+      await _aplicarVozElegida(c);
+    } catch (e) {
+      debugPrint('[tts][dispositivo] aplicar falló: $e');
     }
   }
 
@@ -203,11 +286,45 @@ class VozDispositivoFlutterTts implements VozDispositivo {
   }
 
   @override
+  Future<bool> hablarYEsperar(String texto) async {
+    try {
+      if (!_configurado) {
+        final ok = await preparar();
+        if (!ok) return false;
+      }
+      await _tts.stop();
+      final fin = _finHabla = Completer<void>();
+      final r = await _tts.speak(texto);
+      if (r != null && r != 1) {
+        _finHabla = null;
+        return false;
+      }
+      // Espera a que el handler de completion resuelva. Tope de seguridad por
+      // si el motor no dispara el handler (algún OEM): estimamos ~12 chars/s y
+      // dejamos margen, capado a 60s, para no colgar el flujo manos-libres.
+      final tope = Duration(
+        milliseconds: (texto.length * 90).clamp(2000, 60000),
+      );
+      await fin.future.timeout(tope, onTimeout: () {});
+      return true;
+    } catch (e) {
+      debugPrint('[tts][dispositivo] hablarYEsperar falló: $e');
+      _finHabla = null;
+      return false;
+    }
+  }
+
+  @override
   Future<void> detener() async {
     if (_instancia == null) return; // no instanciar solo para parar
     try {
       await _instancia!.stop();
     } catch (_) {}
+    // Resuelve cualquier `hablarYEsperar` en curso (el stop no siempre dispara
+    // el cancel handler en todos los motores).
+    final c = _finHabla;
+    if (c != null && !c.isCompleted) c.complete();
+    _finHabla = null;
   }
 }
 
@@ -319,30 +436,39 @@ class TtsService implements TtsBase {
     if (t.isEmpty) return;
     _epoca++; // esta narración supera a cualquier descarga en vuelo
 
-    // Si veníamos reproduciendo, cortamos y limpiamos.
+    // Si veníamos reproduciendo (cloud), cortamos y limpiamos.
     if (_completer != null && !_completer!.isCompleted) {
       _completer!.complete();
       _completer = null;
       await _rep.detener();
     }
+    await _voz.detener();
 
-    _onInicio = onInicio;
-    _inicioNotificado = false;
+    // DEVICE-FIRST (voz unificada de Matix): el habla es la del dispositivo,
+    // gratis e instantánea. `onInicio` dispara al empezar (el motor del device
+    // no expone un "started playing" como audioplayers; lo aproximamos al
+    // arranque del speak, que tiene latencia mínima). `hablarYEsperar` resuelve
+    // cuando el audio TERMINA → el flujo manos-libres reanuda en el momento
+    // correcto.
+    onInicio?.call();
+    final hablo = await _voz.hablarYEsperar(t);
+    if (hablo) {
+      _emitir(ProveedorTts.dispositivo, true);
+      return;
+    }
 
+    // ÚLTIMO RECURSO: el TTS del dispositivo falló por completo (raro). Cae al
+    // cloud (OpenAI tts-1 vía el cerebro). Si tampoco, silencio (el texto ya
+    // está en pantalla). Nunca lanza.
+    _emitir(ProveedorTts.dispositivo, false, 'speak devolvió false');
     try {
-      // 1) Pedir el mp3 al cerebro (esto NO suena todavía).
       final mp3 = await _descargar(t);
-      // 2) Reproducir; `onInicio` dispara cuando entra en `playing`, y el
-      // completer se resuelve al terminar (o por `detener`).
       _completer = Completer<void>();
       await _rep.reproducir(mp3);
       await _completer!.future;
+      _emitir(ProveedorTts.cloud, true, 'último recurso');
     } catch (_) {
-      // TTS en la nube caído (sin crédito / 5xx) → voz NATIVA del dispositivo
-      // (piso siempre disponible). Si el dispositivo tampoco habla, silencio
-      // (el texto ya está en pantalla). Nunca lanza.
-      onInicio?.call();
-      await _voz.hablar(t);
+      _emitir(ProveedorTts.cloud, false, 'cloud no disponible');
     }
   }
 

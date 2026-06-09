@@ -54,37 +54,51 @@ http.Client _mockSecuencia(List<int> codigos, {void Function()? alPedir}) {
   });
 }
 
+/// Voz del dispositivo fake: el `hablar` device-first la usa primero.
+class _VozFake implements VozDispositivo {
+  _VozFake({this.ok = true});
+  bool ok;
+  int hableYEspere = 0;
+  @override
+  Future<bool> hablar(String texto) async => ok;
+  @override
+  Future<bool> hablarYEsperar(String texto) async {
+    hableYEspere++;
+    return ok;
+  }
+
+  @override
+  Future<void> detener() async {}
+  @override
+  Future<bool> preparar() async => ok;
+  @override
+  String? get idiomaActivo => ok ? 'es-419' : null;
+}
+
 Future<void> _tick() => Future<void>.delayed(const Duration(milliseconds: 10));
 
 void main() {
-  test('hablar: onInicio dispara al SONAR (no al descargar) y resuelve al fin',
-      () async {
+  test('hablar: DEVICE-FIRST — habla por el dispositivo, onInicio dispara, '
+      'sin cloud', () async {
     final rep = _FakeReproductor();
-    final tts = TtsService(inner: _mockMp3(), reproductor: rep);
+    final voz = _VozFake(ok: true);
+    final tts = TtsService(inner: _mockMp3(), reproductor: rep, vozDispositivo: voz);
     var sono = false;
-    var termino = false;
 
-    final fut = tts.hablar('hola', onInicio: () => sono = true)
-      ..then((_) => termino = true);
+    await tts.hablar('hola', onInicio: () => sono = true);
 
-    await _tick(); // descarga + reproducir
-    expect(rep.reproducirCount, 1);
-    expect(sono, isFalse); // descargó pero aún no suena → sin desfase
-
-    rep.sonar();
-    await _tick();
-    expect(sono, isTrue); // el visual arranca acá, junto al audio
-    expect(termino, isFalse);
-
-    rep.completar();
-    await fut;
-    expect(termino, isTrue);
+    expect(voz.hableYEspere, 1); // habló el dispositivo
+    expect(sono, isTrue); // onInicio se notificó
+    expect(rep.reproducirCount, 0); // NO sonó el cloud
+    expect(tts.ultimoEvento?.proveedor, ProveedorTts.dispositivo);
   });
 
   test('detener: corta el audio y resuelve el hablar en curso (juntos)',
       () async {
     final rep = _FakeReproductor();
-    final tts = TtsService(inner: _mockMp3(), reproductor: rep);
+    // Device falla → hablar cae al cloud; detener corta esa reproducción.
+    final voz = _VozFake(ok: false);
+    final tts = TtsService(inner: _mockMp3(), reproductor: rep, vozDispositivo: voz);
 
     final fut = tts.hablar('hola');
     await _tick();

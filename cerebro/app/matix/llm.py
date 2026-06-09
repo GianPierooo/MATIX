@@ -1442,16 +1442,17 @@ async def hablar(
     model: str = "tts-1",
     formato: str = "mp3",
 ) -> tuple[bytes, str]:
-    """Convierte `texto` a audio. Cadena de respaldo CLOUD:
-    ElevenLabs (si hay key) → OpenAI tts-1. Devuelve `(audio_bytes, proveedor)`.
-
-    Si TODO el cloud falla, relanza `RuntimeError`: el caller (la app) cae a la
-    voz NATIVA del dispositivo (flutter_tts). `voz` aplica a OpenAI; ElevenLabs
-    usa el voice_id de config.
+    """Convierte `texto` a audio. La voz por defecto de Matix es la del
+    DISPOSITIVO (flutter_tts en la app); este endpoint cloud es el ÚLTIMO
+    recurso cuando el device falla. Cadena cloud: **OpenAI tts-1** (único por
+    defecto). ElevenLabs queda FUERA salvo que se active explícito
+    (`settings.tts_elevenlabs_activo` y haya key). Devuelve `(audio_bytes,
+    proveedor)`; si el cloud falla, relanza `RuntimeError` y la app usa la voz
+    del dispositivo. `voz` aplica a OpenAI.
     """
     errores: list[str] = []
 
-    if settings.elevenlabs_api_key:
+    if settings.tts_elevenlabs_activo and settings.elevenlabs_api_key:
         try:
             audio = await _con_reintentos(
                 lambda: _eleven_tts(texto, formato), etiqueta="tts-eleven"

@@ -212,8 +212,29 @@ async def test_tts_sin_eleven_usa_openai(monkeypatch):
     assert prov == "openai"
 
 
-async def test_tts_con_eleven_usa_eleven(monkeypatch):
+async def test_tts_eleven_con_key_pero_flag_off_usa_openai(monkeypatch):
+    # NUEVO default (voz unificada): aunque haya key de ElevenLabs, si el flag
+    # tts_elevenlabs_activo está OFF, ElevenLabs queda FUERA de la cadena y el
+    # cloud es OpenAI (último recurso). La voz por defecto es la del dispositivo.
     monkeypatch.setattr(llm.settings, "elevenlabs_api_key", "k")
+    monkeypatch.setattr(llm.settings, "tts_elevenlabs_activo", False)
+
+    async def fake_eleven(texto, formato):
+        raise AssertionError("ElevenLabs no debe llamarse con el flag OFF")
+
+    async def fake_openai(texto, voz, model, formato):
+        return b"AUDIO_OPENAI"
+
+    monkeypatch.setattr(llm, "_eleven_tts", fake_eleven)
+    monkeypatch.setattr(llm, "_openai_tts", fake_openai)
+    audio, prov = await llm.hablar("hola")
+    assert prov == "openai"
+
+
+async def test_tts_con_eleven_activo_usa_eleven(monkeypatch):
+    # Solo si se ACTIVA explícito (flag + key) ElevenLabs vuelve a la cadena.
+    monkeypatch.setattr(llm.settings, "elevenlabs_api_key", "k")
+    monkeypatch.setattr(llm.settings, "tts_elevenlabs_activo", True)
 
     async def fake_eleven(texto, formato):
         return b"AUDIO_ELEVEN"
@@ -225,6 +246,7 @@ async def test_tts_con_eleven_usa_eleven(monkeypatch):
 
 async def test_tts_eleven_cae_a_openai(monkeypatch):
     monkeypatch.setattr(llm.settings, "elevenlabs_api_key", "k")
+    monkeypatch.setattr(llm.settings, "tts_elevenlabs_activo", True)
 
     async def eleven_falla(texto, formato):
         raise _ErrTransitorio()

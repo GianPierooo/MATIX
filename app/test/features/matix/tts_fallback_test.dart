@@ -34,6 +34,12 @@ class _VozFake implements VozDispositivo {
   }
 
   @override
+  Future<bool> hablarYEsperar(String texto) async {
+    veces++;
+    return ok;
+  }
+
+  @override
   Future<void> detener() async {
     detenciones++;
   }
