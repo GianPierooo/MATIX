@@ -226,6 +226,20 @@ String _mensajePcResultado(String accion, Map<String, dynamic> res) {
         return omitidos > 0
             ? 'Organicé tu carpeta: moví $n archivo(s), omití $omitidos.'
             : 'Organicé tu carpeta: moví $n archivo(s).';
+      // 6.2 — apps y tareas
+      case 'abrir_app':
+        final app = res['app'] ?? 'la app';
+        return 'Abrí $app en tu PC.';
+      case 'cerrar_app':
+        final app = res['app'] ?? 'la app';
+        if (res['tipo'] == 'nada_que_cerrar') {
+          return 'No tenía $app abierta en esta sesión.';
+        }
+        return 'Cerré $app en tu PC.';
+      case 'ejecutar_tarea':
+        final abiertas = (res['abiertas'] as List?)?.length;
+        if (abiertas != null) return 'Listo, abrí $abiertas app(s) para tu sesión.';
+        return 'Tarea ejecutada en tu PC.';
       default:
         return 'Hecho en tu PC.';
     }

@@ -63,7 +63,12 @@ async def _atender(
     # `crear_apunte` por error podría traer el contenido del archivo, y el
     # audit/transcripción no debe llevar contenido sensible (es la regla 7 de
     # CLAUDE.md). Para el debug, basta el nombre + ruta + confirmado.
-    ruta_audit = args.get("ruta") or args.get("origen") or args.get("carpeta") or ""
+    # Para acciones de archivo: ruta/origen/carpeta. Para apps/tareas (6.2):
+    # `nombre` (de la app o la tarea) — nunca el contenido, solo el identificador.
+    ruta_audit = (
+        args.get("ruta") or args.get("origen") or args.get("carpeta")
+        or args.get("nombre") or ""
+    )
     log(
         f"acción recibida id={rid} nombre={nombre!r} ruta={ruta_audit!r} "
         f"confirmado={confirmado}"

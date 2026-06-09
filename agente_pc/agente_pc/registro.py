@@ -55,6 +55,17 @@ class Contexto:
     allowlist: list = field(default_factory=list)
     # Tope de lectura de texto en bytes (leer_archivo). Default 256 KB.
     max_lectura_bytes: int = 256 * 1024
+    # Fase 6.2 — apps lanzables (nombre→exe resuelto y verificado por
+    # `apps.resolver_apps`). Solo estas se pueden abrir.
+    apps: dict = field(default_factory=dict)
+    # Procesos lanzados en ESTA sesión (nombre→[pid]). Lo llena abrir_app y lo
+    # consume cerrar_app (solo cierra lo que abrió, jamás procesos ajenos).
+    procesos: dict = field(default_factory=dict)
+    # Inyección del lanzador/terminador de procesos (para tests sin spawn real).
+    # None → se usan los reales de `apps.py`. El handler resuelve el default,
+    # así Contexto no importa apps (evita ciclo de imports).
+    lanzador: Any = None
+    terminador: Any = None
 
 
 def _err(tipo: str, mensaje: str) -> dict[str, Any]:

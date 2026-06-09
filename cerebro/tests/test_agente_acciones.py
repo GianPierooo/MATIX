@@ -153,6 +153,40 @@ async def test_organizar_propone_con_plan(monkeypatch):
     assert res["datos"]["total"] == 1  # el plan viaja para que el modelo lo narre
 
 
+# ── 6.2: apps y tareas PROPONEN (gate); whitelist las admite ─────────────────
+
+
+async def test_apps_y_tareas_proponen_accion_dispositivo():
+    casos = [
+        ("pc_abrir_app", {"nombre": "code"}, "abrir_app"),
+        ("pc_cerrar_app", {"nombre": "code"}, "cerrar_app"),
+        ("pc_ejecutar_tarea", {"nombre": "sesion_de_foco", "params": {"apps": "code"}}, "ejecutar_tarea"),
+    ]
+    for tool, args, accion in casos:
+        res = await tools.ejecutar_tool(None, tool, args)
+        assert res["ok"] is True, tool
+        bloque = res["datos"]["accion_dispositivo"]
+        assert bloque["tipo"] == "pc_accion", tool
+        assert bloque["requiere_confirmacion"] is True, tool
+        assert bloque["datos"]["accion"] == accion, tool
+        # PROPONE: no ejecuta nada por sí mismo (no toca el canal del agente).
+
+
+async def test_pc_ejecutar_tarea_propaga_params():
+    res = await tools.ejecutar_tool(
+        None, "pc_ejecutar_tarea",
+        {"nombre": "abrir_proyecto", "params": {"carpeta": "Proyectos/X", "editor": "code"}},
+    )
+    bloque = res["datos"]["accion_dispositivo"]
+    assert bloque["datos"]["args"]["nombre"] == "abrir_proyecto"
+    assert bloque["datos"]["args"]["params"]["editor"] == "code"
+
+
+async def test_pc_abrir_app_valida_nombre():
+    res = await tools.ejecutar_tool(None, "pc_abrir_app", {})
+    assert res["ok"] is False and res["tipo"] == "validacion"
+
+
 # ── endpoint /agente/ejecutar: whitelist + estado desconectado ───────────────
 
 
@@ -160,6 +194,16 @@ async def test_endpoint_whitelist_rechaza_desconocida():
     with pytest.raises(HTTPException) as exc:
         await ejecutar_accion(EjecutarAccionBody(accion="eliminar_todo", args={}))
     assert exc.value.status_code == 400
+
+
+async def test_endpoint_whitelist_admite_acciones_6_2():
+    # Las acciones 6.2 están en la whitelist del endpoint (no dan 400 por
+    # whitelist). Con la PC desconectada, fallan limpio con pc_desconectada.
+    assert canal.conectado is False
+    for accion in ("abrir_app", "cerrar_app", "ejecutar_tarea"):
+        out = await ejecutar_accion(EjecutarAccionBody(accion=accion, args={"nombre": "code"}))
+        assert out["resultado"]["ok"] is False, accion
+        assert out["resultado"]["tipo"] == "pc_desconectada", accion
 
 
 async def test_endpoint_consecuente_desconectada_limpio():

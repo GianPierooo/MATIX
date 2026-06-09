@@ -253,7 +253,9 @@ abrir_en_telefono, leer_galeria (Fase 1) · leer_pantalla (C.0) · escribir_what
 (C.1). · PC (agente local · Capa 6): lectura (6.0b) pc_listar_carpeta,
 pc_buscar_archivos, pc_leer_archivo, pc_resumir_documento · organización (6.1,
 proponen y la app confirma) pc_mover_archivo, pc_renombrar_archivo,
-pc_crear_carpeta, pc_organizar_carpeta. (conf) = pide confirmación por ser destructiva.
+pc_crear_carpeta, pc_organizar_carpeta · apps y tareas (6.2, proponen y la app
+confirma) pc_abrir_app, pc_ejecutar_tarea, pc_cerrar_app. (conf) = pide
+confirmación por ser destructiva.
 
 ### Rendición de cuentas — push con botones de acción
 
@@ -357,7 +359,7 @@ verdad (`onAppWidgetOptionsChanged`: chico = solo el próximo, grande = la lista
 Fuente: monospace del sistema para la hora (Inter/JetBrains Mono no se pueden
 bundlear nativo sin GMS en el Honor; documentado).
 
-### Capa 6 — Agente de PC (6.0a cimiento · 6.0b lectura · 6.1 organización)
+### Capa 6 — Agente de PC (6.0a cimiento · 6.0b lectura · 6.1 organización · 6.2 apps y tareas)
 
 Daemon local `agente_pc/` (Python) que corre en la PC del usuario y abre una
 conexión SALIENTE persistente al cerebro (WebSocket sobre TLS, reconexión por
@@ -373,8 +375,14 @@ no), resumir_documento (PDF/DOCX/TXT/MD → bytes por el canal → extractor del
 cerebro reutilizado → resumen con el modelo mini). **6.1 (organización,
 CONSECUENTE con gate)** mover_archivo, renombrar_archivo, crear_carpeta,
 organizar_aplicar (por tipo/fecha/proyecto: primero PLAN, luego ejecución paso a
-paso revalidando cada movimiento). Sin borrado todavía (irreversible → fase
-propia con confirmación reforzada).
+paso revalidando cada movimiento). **6.2 (apps y tareas, CONSECUENTE con gate)**
+abrir_app (allowlist DURA de apps configurable + denylist hardcoded que gana:
+shells/terminales, intérpretes, sistema, instaladores, credenciales, y todo lo
+que viva en C:\Windows; lanzado con subprocess SIN shell), ejecutar_tarea
+(tareas PREDEFINIDAS y tipadas del registro `tareas.py` — sesion_de_foco,
+abrir_proyecto — que componen primitivas seguras; cero comandos arbitrarios),
+cerrar_app (graceful, solo los PIDs que el agente abrió esta sesión). Sin
+borrado todavía (irreversible → fase propia con confirmación reforzada).
 
 Rails: allowlist (default Documentos/Escritorio/Descargas, editable); denylist
 dura que GANA (.ssh, .env, llaves, .git, AppData/perfiles de navegador, sistema);

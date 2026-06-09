@@ -576,8 +576,13 @@ _DEFS = [
 
 
 def crear_registro() -> Registro:
-    """Registro con todas las acciones de las fases 6.0a/6.0b/6.1."""
+    """Registro con todas las acciones: archivos (6.0a/6.0b/6.1) + apps y
+    tareas tipadas (6.2). Importes locales para mantener el grafo de imports
+    plano (apps/tareas dependen de registro+seguridad, no de acciones)."""
+    from .apps import DEFS_APPS
+    from .tareas import DEFS_TAREAS
+
     reg = Registro()
-    for d in _DEFS:
+    for d in (*_DEFS, *DEFS_APPS, *DEFS_TAREAS):
         reg.registrar(d)
     return reg

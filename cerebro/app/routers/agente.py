@@ -30,7 +30,12 @@ router = APIRouter(prefix="/agente", tags=["agente"])
 # usuario (el gate del sheet). Whitelist explícita: nada fuera de aquí se
 # ejecuta por este canal. La lectura va por las tools del chat, no por aquí.
 _ACCIONES_CONFIRMABLES = frozenset(
-    {"mover_archivo", "renombrar_archivo", "crear_carpeta", "organizar_aplicar"}
+    {
+        # 6.1 — organización de archivos
+        "mover_archivo", "renombrar_archivo", "crear_carpeta", "organizar_aplicar",
+        # 6.2 — apps y tareas tipadas (el agente revalida allowlist+denylist)
+        "abrir_app", "cerrar_app", "ejecutar_tarea",
+    }
 )
 
 

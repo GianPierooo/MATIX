@@ -2780,6 +2780,83 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "pc_abrir_app",
+            "description": (
+                "PROPONE abrir una app del escritorio del usuario (ej. su editor, "
+                "el navegador). SOLO apps que el usuario tiene en su allowlist de "
+                "apps; cualquier otra (y SIEMPRE shells/terminales, instaladores, "
+                "herramientas de sistema) se rechaza. NO la abres tú: la app le "
+                "pide confirmar y recién entonces se abre. Di que la dejaste LISTA "
+                "para confirmar, no que ya la abriste."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nombre": {
+                        "type": "string",
+                        "description": "Nombre de la app en la allowlist (ej. 'code', 'chrome').",
+                    },
+                },
+                "required": ["nombre"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "pc_ejecutar_tarea",
+            "description": (
+                "PROPONE ejecutar una TAREA PREDEFINIDA en la PC. Tareas típicas: "
+                "'sesion_de_foco' (params {apps: 'code,chrome'}) abre un set de "
+                "apps; 'abrir_proyecto' (params {carpeta, editor}) abre una carpeta "
+                "con un editor. SOLO tareas registradas; NO comandos arbitrarios ni "
+                "shell. NO la ejecutas tú: la app pide confirmar. Di que la dejaste "
+                "lista para confirmar."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nombre": {
+                        "type": "string",
+                        "description": "Nombre de la tarea predefinida (ej. 'sesion_de_foco').",
+                    },
+                    "params": {
+                        "type": "object",
+                        "description": "Parámetros de la tarea, según la tarea.",
+                    },
+                },
+                "required": ["nombre"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "pc_cerrar_app",
+            "description": (
+                "PROPONE cerrar de forma ordenada las ventanas de una app que "
+                "Matix abrió en ESTA sesión (solo apps de la allowlist). Cierre "
+                "graceful: la app puede pedir guardar. NO la cierras tú: la app "
+                "pide confirmar. Di que la dejaste lista para confirmar."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nombre": {
+                        "type": "string",
+                        "description": "Nombre de la app en la allowlist.",
+                    },
+                },
+                "required": ["nombre"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 
@@ -5995,6 +6072,38 @@ async def _pc_organizar_carpeta(db: Postgrest, args: dict) -> dict[str, Any]:
     )
 
 
+async def _pc_abrir_app(db: Postgrest, args: dict) -> dict[str, Any]:
+    """PROPONE abrir una app (Fase 6.2). El cerebro NO valida la allowlist: eso
+    lo hace el AGENTE en su borde (allowlist + denylist dura). Aquí solo se
+    propone; el agente rechaza lo que no corresponda al confirmar."""
+    nombre = (args or {}).get("nombre")
+    if not nombre or not str(nombre).strip():
+        return _error("validacion", "Dime qué app abrir (debe estar en tu allowlist de apps).")
+    resumen = f"Abrir «{nombre}» en tu PC."
+    return _pc_propuesta("abrir_app", {"nombre": str(nombre).strip()}, resumen)
+
+
+async def _pc_cerrar_app(db: Postgrest, args: dict) -> dict[str, Any]:
+    nombre = (args or {}).get("nombre")
+    if not nombre or not str(nombre).strip():
+        return _error("validacion", "Dime qué app cerrar.")
+    resumen = f"Cerrar «{nombre}» en tu PC (las ventanas que abrí en esta sesión)."
+    return _pc_propuesta("cerrar_app", {"nombre": str(nombre).strip()}, resumen)
+
+
+async def _pc_ejecutar_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
+    nombre = (args or {}).get("nombre")
+    if not nombre or not str(nombre).strip():
+        return _error("validacion", "Dime qué tarea predefinida ejecutar.")
+    params = (args or {}).get("params") or {}
+    if not isinstance(params, dict):
+        return _error("validacion", "Los parámetros de la tarea deben ser un objeto.")
+    resumen = f"Ejecutar la tarea «{nombre}» en tu PC."
+    return _pc_propuesta(
+        "ejecutar_tarea", {"nombre": str(nombre).strip(), "params": params}, resumen
+    )
+
+
 _HANDLERS = {
     # Crear
     "crear_tarea": _crear_tarea,
@@ -6117,6 +6226,11 @@ _HANDLERS = {
     "pc_renombrar_archivo": _pc_renombrar_archivo,
     "pc_crear_carpeta": _pc_crear_carpeta,
     "pc_organizar_carpeta": _pc_organizar_carpeta,
+    # PC (Capa 6 · 6.2 apps y tareas): PROPONEN abrir/cerrar apps y tareas
+    # tipadas (el agente valida allowlist+denylist; la app confirma).
+    "pc_abrir_app": _pc_abrir_app,
+    "pc_ejecutar_tarea": _pc_ejecutar_tarea,
+    "pc_cerrar_app": _pc_cerrar_app,
 }
 
 
@@ -6229,6 +6343,9 @@ TABLAS_AFECTADAS = {
     "pc_renombrar_archivo": [],
     "pc_crear_carpeta": [],
     "pc_organizar_carpeta": [],
+    "pc_abrir_app": [],
+    "pc_ejecutar_tarea": [],
+    "pc_cerrar_app": [],
 }
 
 

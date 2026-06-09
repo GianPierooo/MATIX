@@ -14,6 +14,7 @@ Reglas:
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -154,3 +155,88 @@ def ruta_permitida(ruta: str, allowlist: list[Path]) -> Veredicto:
             return Veredicto(True, "ok")
 
     return Veredicto(False, "fuera de la allowlist")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fase 6.2 — Denylist de APPS (qué NO se puede LANZAR, aunque esté en la
+# allowlist de apps). Esto es distinto de la denylist de RUTAS de arriba:
+# aquí no protegemos lectura de archivos, protegemos contra LANZAR procesos
+# peligrosos (shells, instaladores, herramientas de sistema, credenciales).
+# La denylist GANA sobre la allowlist de apps: aunque el usuario la liste,
+# nunca se abre. Es HARDCODED a propósito — no editable por config.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Ejecutables prohibidos por BASENAME (comparación en minúsculas, con y sin
+# extensión). Cubre: shells/terminales (un shell = ejecución arbitraria, el
+# agujero que toda esta capa evita), intérpretes que serían shell-equivalentes
+# si se abren pelados, herramientas de sistema/registro/tareas, instaladores, y
+# gestor de credenciales.
+APPS_DENYLIST_BASENAMES: frozenset[str] = frozenset(
+    {
+        # Shells y terminales
+        "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe",
+        "bash", "bash.exe", "sh", "sh.exe", "zsh", "fish", "dash",
+        "wsl", "wsl.exe", "conhost", "conhost.exe", "wt", "wt.exe",
+        "windowsterminal", "windowsterminal.exe", "openconsole", "openconsole.exe",
+        "cscript", "cscript.exe", "wscript", "wscript.exe", "mshta", "mshta.exe",
+        # Intérpretes (shell-equivalentes si se lanzan sin sandbox)
+        "python", "python.exe", "pythonw", "pythonw.exe", "py", "py.exe",
+        "node", "node.exe", "ruby", "ruby.exe", "perl", "perl.exe",
+        # Herramientas de sistema / registro / tareas / red
+        "regedit", "regedit.exe", "regedt32", "regedt32.exe",
+        "taskmgr", "taskmgr.exe", "mmc", "mmc.exe", "msconfig", "msconfig.exe",
+        "control", "control.exe", "rundll32", "rundll32.exe",
+        "regsvr32", "regsvr32.exe", "sc", "sc.exe", "reg", "reg.exe",
+        "net", "net.exe", "net1", "net1.exe", "netsh", "netsh.exe",
+        "wmic", "wmic.exe", "taskkill", "taskkill.exe", "at", "at.exe",
+        "schtasks", "schtasks.exe", "bcdedit", "bcdedit.exe", "diskpart", "diskpart.exe",
+        # Instaladores
+        "msiexec", "msiexec.exe", "setup", "setup.exe",
+        "install", "install.exe", "installer", "installer.exe",
+        "unins000", "unins000.exe",
+        # Gestor de credenciales / seguridad
+        "credwiz", "credwiz.exe", "vaultcmd", "vaultcmd.exe", "keymgr", "keymgr.dll",
+        "rundll32.exe,keymgr.dll",  # forma típica de invocar el gestor de credenciales
+    }
+)
+
+
+def _dirs_denylist_apps() -> list[str]:
+    """Directorios cuyo contenido NUNCA se lanza como app: ahí viven shells y
+    herramientas de sistema. Program Files / LocalAppData NO están aquí: las
+    apps legítimas (editores, navegadores) viven en esos sitios. En POSIX, /bin
+    y /sbin tienen shells; /usr/bin tiene apps legítimas → no se bloquea."""
+    out: list[str] = []
+    for d in (
+        os.environ.get("SystemRoot", r"C:\Windows"),
+        r"C:\Windows",
+        "/bin",
+        "/sbin",
+    ):
+        if d:
+            out.append(_norm(d))
+    return out
+
+
+APPS_DENYLIST_DIRS: list[str] = _dirs_denylist_apps()
+
+
+def app_denylisted(exe_path: str) -> str | None:
+    """¿Este ejecutable está PROHIBIDO de lanzar? Devuelve el motivo o None.
+
+    La denylist GANA sobre cualquier allowlist. Se chequea por basename (corta
+    por `/` y `\\` de forma OS-agnóstica, para que funcione con rutas Windows
+    aunque el chequeo corra en otro SO — el agente vive en Windows) y por
+    directorio de sistema. PURO dado el string."""
+    if not exe_path or not str(exe_path).strip():
+        return "ruta vacía"
+    # Basename OS-agnóstico: corta por ambos separadores.
+    base = re.split(r"[/\\]", str(exe_path).strip())[-1].lower()
+    raiz = os.path.splitext(base)[0]
+    if base in APPS_DENYLIST_BASENAMES or raiz in APPS_DENYLIST_BASENAMES:
+        return f"ejecutable de sistema/shell prohibido ({base})"
+    real = _norm(exe_path)
+    for d in APPS_DENYLIST_DIRS:
+        if real == d or _dentro_de(real, d):
+            return "vive en un directorio de sistema (shells/herramientas)"
+    return None

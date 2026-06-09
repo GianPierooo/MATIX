@@ -1,10 +1,14 @@
-# Capa 6 — Agente de PC (Fase 6.0a · el cimiento)
+# Capa 6 — Agente de PC (6.0a/6.0b/6.1/6.2)
 
-Esta fase monta el **cimiento** de "PC y archivos": un agente local que corre en
-la computadora del usuario, un transporte seguro nube↔local, y el framework de
-acciones extensible. En 6.0a hay **una sola acción de prueba** (`listar_carpeta`,
-que devuelve solo nombres). NO se lee, mueve ni escribe nada todavía — eso llega
-en fases posteriores, con confirmación explícita.
+"PC y archivos": un agente local que corre en la computadora del usuario, un
+transporte seguro nube↔local, y un framework de acciones tipadas y extensible.
+Estado:
+- **6.0a** — cimiento (conexión, registry, rails) + `listar_carpeta`.
+- **6.0b** — lectura: `buscar_archivos`, `leer_archivo`, `resumir_documento`.
+- **6.1** — organización con gate: `mover`, `renombrar`, `crear_carpeta`,
+  `organizar`.
+- **6.2** — abrir/cerrar apps de una allowlist dura y ejecutar tareas tipadas,
+  todo con gate y sin shell (ver §1.1 y §2.1).
 
 > Resumen en una línea: la PC abre una conexión saliente al cerebro, se
 > autentica con un secreto, y solo deja que Matix vea lo que el usuario permitió,
@@ -68,19 +72,48 @@ ruta REAL resuelta (symlinks/`..`). Las **consecuentes** además exigen
 | `renombrar_archivo` | 6.1 | **consecuente** | `pc_renombrar_archivo` | renombra (nombre simple) |
 | `crear_carpeta` | 6.1 | **consecuente** | `pc_crear_carpeta` | crea una carpeta |
 | `organizar_aplicar` | 6.1 | **consecuente** | `pc_organizar_carpeta` | ejecuta el plan paso a paso |
+| `abrir_app` | 6.2 | **consecuente** | `pc_abrir_app` | abre una app de la allowlist de apps (sin shell) |
+| `cerrar_app` | 6.2 | **consecuente** | `pc_cerrar_app` | cierra (graceful) las instancias que el agente abrió esta sesión |
+| `ejecutar_tarea` | 6.2 | **consecuente** | `pc_ejecutar_tarea` | ejecuta una tarea PREDEFINIDA y tipada (no comandos) |
 
 `resumir_documento` (tool `pc_resumir_documento`): el agente manda los bytes
 (`leer_bytes`), el cerebro **reutiliza** el extractor `app/matix/
 extraccion_documentos.py` (PDF/DOCX/TXT/MD) y resume con el modelo **mini**
 (`gpt-4o-mini`). El texto del documento es DATO, no instrucciones.
 
-**Sin borrado en esta fase.** Eliminar es irreversible y queda fuera; irá en una
-acción propia con confirmación reforzada.
+**Sin borrado.** Eliminar es irreversible y queda fuera; irá en una acción
+propia con confirmación reforzada.
+
+#### 6.2 — Abrir apps y ejecutar tareas tipadas
+
+Las acciones 6.2 pueden **lanzar procesos** en la PC, así que el modelo de
+seguridad es más estricto (ver §2.1):
+
+- `abrir_app(nombre)` — abre un programa de la **allowlist de apps**
+  configurable (`AGENTE_PC_APPS_ALLOWLIST`, ver §3.3). Solo apps de la lista; la
+  **denylist dura** (shells, instaladores, herramientas de sistema, gestor de
+  credenciales) gana siempre. Se lanza con `subprocess` **sin shell** (args como
+  lista → cero interpolación).
+- `ejecutar_tarea(nombre, params)` — ejecuta una **tarea predefinida y tipada**
+  del registro de `agente_pc/tareas.py`. NO son comandos arbitrarios: cada tarea
+  compone primitivas seguras (abrir apps de la allowlist, abrir carpetas
+  permitidas). Las de ejemplo: `sesion_de_foco` (abre un set de apps) y
+  `abrir_proyecto` (abre una carpeta permitida con un editor de la allowlist).
+  Lo que no esté registrado, no se ejecuta. Ver §3.4 para registrar una nueva.
+- `cerrar_app(nombre)` — cierra de forma **ordenada (graceful, no force)** las
+  instancias de una app de la allowlist que el agente abrió **en esta sesión**
+  (rastreadas por PID). Nunca mata procesos ajenos ni fuerza el cierre (la app
+  puede preguntar por guardar).
+
+**CERO ejecución de shell.** No existe ninguna acción que tome un comando crudo.
+Solo `abrir_app` (allowlist) y `ejecutar_tarea` (registro). Si el modelo quiere
+algo fuera de eso, no puede — punto.
 
 ### 1.2 El gate de las acciones consecuentes (reusa el sheet del teléfono)
 
 Las tools `pc_mover_archivo` / `pc_renombrar_archivo` / `pc_crear_carpeta` /
-`pc_organizar_carpeta` **no ejecutan**: PROPONEN. Flujo:
+`pc_organizar_carpeta` / `pc_abrir_app` / `pc_ejecutar_tarea` / `pc_cerrar_app`
+**no ejecutan**: PROPONEN. Flujo:
 
 1. El modelo llama la tool → el cerebro devuelve un bloque `accion_dispositivo`
    de tipo `pc_accion` (el mismo canal que las acciones del teléfono), con un
@@ -147,6 +180,42 @@ exige `confirmado` y revalida cada ruta.
 12. **Permisos mínimos.** El agente corre con tu usuario normal. Si detecta que
     está **elevado** (administrador/root), se niega a arrancar.
 
+### 2.1 Seguridad de apps y tareas (Fase 6.2 — lanzar procesos)
+
+Lanzar procesos es más peligroso que leer archivos, así que `abrir_app`,
+`ejecutar_tarea` y `cerrar_app` suman estas garantías sobre las de arriba:
+
+1. **Allowlist DURA de apps.** Solo se abre lo que esté en
+   `AGENTE_PC_APPS_ALLOWLIST` (nombre→ruta/comando). Cualquier app fuera de la
+   lista → rechazada. Se resuelve al arrancar: una entrada que no existe o no
+   resuelve se **omite** (con aviso), no se incluye.
+2. **Denylist que gana sobre todo** (hardcoded en `seguridad.py`,
+   `app_denylisted`): terminales/shells (`cmd`, `powershell`, `pwsh`, `bash`,
+   `wsl`, `wt`, `conhost`…), intérpretes shell-equivalentes (`python`, `node`,
+   `cscript`/`wscript`/`mshta`), herramientas de sistema (`regedit`, `taskmgr`,
+   `mmc`, `rundll32`, `reg`, `netsh`, `sc`, `schtasks`, `diskpart`…),
+   instaladores (`msiexec`, `setup`, `install`…) y el gestor de credenciales
+   (`credwiz`, `vaultcmd`, `keymgr`). Además, **nada que viva en `C:\Windows`**
+   (ni `/bin` `/sbin` en POSIX) se lanza. Aunque el usuario los ponga en su
+   allowlist, **nunca** se abren. No es editable por config.
+3. **CERO shell arbitrario.** El lanzador usa `subprocess.Popen([exe, *args],
+   shell=False)`: la lista de argumentos NUNCA pasa por un shell → no hay
+   inyección. No existe ninguna acción que acepte un comando crudo.
+4. **Tareas solo del registro.** `ejecutar_tarea` solo corre tareas
+   **registradas** en `tareas.py`, con parámetros **tipados**, que componen
+   primitivas seguras (abrir apps de la allowlist, abrir carpetas permitidas).
+   Una tarea desconocida o con params mal tipados → rechazada.
+5. **Gate por acción.** Las tres son `consecuente`: exigen `confirmado=true`
+   (tras el OK del usuario en el sheet). El modelo solo propone.
+6. **Cierre acotado y graceful.** `cerrar_app` solo cierra los PIDs que el
+   agente abrió **en esta sesión**, de forma ordenada (Windows: `taskkill /PID`
+   sin `/F`; POSIX: SIGTERM) — nunca fuerza ni toca procesos ajenos.
+7. **Falla cerrado.** Nombre con separadores/metacaracteres, app fuera de la
+   allowlist, exe en la denylist, carpeta no permitida → rechazado, sin lanzar.
+8. **Anti-inyección.** El contenido leído de un archivo es DATO: jamás dispara
+   una app ni una tarea. Abrir/ejecutar solo viene de una orden directa y
+   confirmada del usuario.
+
 ---
 
 ## 3. Cómo correr el agente en tu PC
@@ -182,11 +251,12 @@ Requisitos: Python 3.12+ y [uv](https://docs.astral.sh/uv/).
    Salida esperada con el logger nuevo (cada línea dice qué pasó):
 
    ```
-   17:42:01 [INFO] matix.agente: arranque: 9 acciones (buscar_archivos, crear_carpeta, leer_archivo, leer_bytes, listar_carpeta, mover_archivo, organizar_aplicar, planificar_organizacion, renombrar_archivo)
+   17:42:01 [INFO] matix.agente: arranque: 12 acciones (abrir_app, buscar_archivos, cerrar_app, crear_carpeta, ejecutar_tarea, leer_archivo, leer_bytes, listar_carpeta, mover_archivo, organizar_aplicar, planificar_organizacion, renombrar_archivo)
    17:42:01 [INFO] matix.agente: arranque: 3 carpetas en allowlist
    17:42:01 [INFO] matix.agente:   - permitida: C:\Users\TU\Documents
    17:42:01 [INFO] matix.agente:   - permitida: C:\Users\TU\Desktop
    17:42:01 [INFO] matix.agente:   - permitida: C:\Users\TU\Downloads
+   17:42:01 [INFO] matix.agente: arranque: 2 apps en allowlist (chrome, code)
    17:42:01 [INFO] matix.agente: arranque: conectando a cerebro wss://matix-production.up.railway.app/api/v1/agente/ws
    17:42:01 [INFO] matix.agente: arranque: host esperado (anti-impostor) matix-production.up.railway.app
    17:42:01 [INFO] matix.agente: arranque: corriendo. Ctrl+C para detener (kill switch).
@@ -271,10 +341,25 @@ Lo que cubre:
    - leer `.env` dentro de la sandbox → rechazado (denylist por nombre).
    - leer `.ssh/id_rsa` → rechazado (denylist por nombre).
    - `renombrar_archivo` sin `confirmado=true` → bloqueado por el registry.
-4. **Audit log** (`agente_pc/audit.log`):
+4. **Apps y tareas (6.2)** — con un lanzador SIMULADO (no abre ventanas
+   durante el test; la lógica de allowlist/denylist/gate/audit sí es real):
+   - `abrir_app` de una app de la allowlist → ok (el lanzador se invoca con el
+     exe resuelto).
+   - `abrir_app` fuera de la allowlist → rechazado, sin lanzar.
+   - `abrir_app` denylisted (`cmd`) → rechazado por seguridad (defensa en
+     profundidad del handler).
+   - shell arbitrario IMPOSIBLE: no existe acción de comando crudo, y un
+     "comando" como nombre de app se rechaza.
+   - `abrir_app` sin `confirmado=true` → bloqueado por el gate consecuente.
+   - `ejecutar_tarea` `sesion_de_foco` (con una app de la allowlist) → ok.
+   - `ejecutar_tarea` desconocida → rechazada (solo tareas predefinidas).
+   - `cerrar_app` de lo abierto en la sesión → ok (cierre graceful por PID).
+5. **Audit log** (`agente_pc/audit.log`):
    - tras la sesión hay AL MENOS 6 líneas nuevas (una por acción ejecutada).
    - el log **no contiene contenido sensible**: ni el texto leído, ni el de
      `.env`, ni la "clave" del falso `id_rsa`.
+
+Total: **19 pruebas** (11 base + 8 de 6.2).
 
 Imprime un resumen "X/Y pruebas pasaron" y sale con `0` si todo pasó, `1`
 si algo falló. La sandbox se limpia al terminar (si el script muere a mitad,
@@ -309,6 +394,63 @@ Cambia `AGENTE_PC_ALLOWLIST` en `agente_pc/.env` y reinicia el agente. La
 **denylist gana** siempre: `.ssh`, `.env`, llaves, etc. siguen ocultos aunque los
 metas dentro de una carpeta permitida.
 
+### 3.3 Editar qué apps puede abrir (Fase 6.2)
+
+Edita `AGENTE_PC_APPS_ALLOWLIST` en `agente_pc/.env` y reinicia el agente.
+Formato: `nombre=ruta_o_comando`, separados por `;` o saltos de línea.
+
+```
+AGENTE_PC_APPS_ALLOWLIST=code=C:\Users\TU\AppData\Local\Programs\Microsoft VS Code\Code.exe;chrome=chrome
+```
+
+- `nombre`: como te referirás a la app en el chat (`code`, `chrome`).
+- `ruta_o_comando`: la ruta absoluta del `.exe`, o un comando del PATH.
+
+Al arrancar, el agente **resuelve y verifica** cada entrada y loggea las que
+omite (no existe, no resuelve, o cae en la denylist). En los logs verás:
+
+```
+17:42:01 [INFO] matix.agente: arranque: 2 apps en allowlist (chrome, code)
+17:42:01 [WARNING] matix.agente: apps: app «shell» → «C:\Windows\System32\cmd.exe»: BLOQUEADA por la denylist (...). Omitida.
+```
+
+La **denylist no es negociable** (vive en `seguridad.py`, no en `.env`): aunque
+listes `cmd`, `powershell`, un instalador o algo en `C:\Windows`, **nunca** se
+abre. Eso es a propósito — un shell sería ejecución arbitraria, el agujero que
+toda esta capa evita.
+
+### 3.4 Registrar una tarea tipada nueva (Fase 6.2)
+
+Las tareas viven en `agente_pc/agente_pc/tareas.py`. Agregar una = registrar un
+`TareaDef` (nombre, descripción, parámetros tipados, handler) que use SOLO las
+primitivas seguras — nunca shell ni rutas/apps sin validar:
+
+```python
+def _tarea_abrir_inbox(params, ctx):
+    # Compone primitivas seguras: abre apps de la allowlist, valida carpetas.
+    return _abrir(ctx, params["app"])  # _abrir ya valida allowlist + denylist
+
+_registrar(TareaDef(
+    "abrir_inbox",
+    "Abre tu cliente de correo.",
+    (Param("app", str, requerido=True),),
+    _tarea_abrir_inbox,
+))
+```
+
+Reglas para una tarea nueva:
+- Usa `_abrir(ctx, nombre_app, args?)` para lanzar (ya valida allowlist +
+  denylist + rastrea el PID). NUNCA llames a `subprocess` directo ni construyas
+  comandos.
+- Valida toda carpeta con `ruta_permitida(ruta, ctx.allowlist)` antes de usarla.
+- Declara los parámetros con `Param(nombre, tipo, requerido)`: el registry los
+  valida por ti.
+- Falla cerrado: ante params faltantes o algo fuera de la allowlist, devuelve
+  `{"ok": False, "tipo": "...", "mensaje": "..."}`.
+
+El transporte, el gate y el cerebro NO cambian: la nueva tarea se invoca con
+`pc_ejecutar_tarea(nombre="abrir_inbox", params={...})` y pasa por el mismo gate.
+
 ### Detenerlo (kill switch)
 
 - **Ctrl+C** en la terminal donde corre → cierra limpio y sale.
@@ -330,6 +472,13 @@ canal, el agente valida la ruta contra la allowlist/denylist, devuelve los
 **nombres** (sin contenido) y el modelo te los presenta. En **Ajustes →
 Conexión** ves el estado **PC: conectada / desconectada** (con un botón para
 recomprobar).
+
+Con la Fase 6.2, además (cada una pide confirmación en el sheet antes de actuar):
+
+> abre VS Code  ·  arranca una sesión de foco con code y chrome  ·
+> abre la carpeta del proyecto X con el editor  ·  cierra Chrome
+
+(Las apps deben estar en tu `AGENTE_PC_APPS_ALLOWLIST`; ver §3.3.)
 
 ---
 
@@ -378,25 +527,31 @@ traduce a un mensaje amable. Nunca se bloquea.
 
 ## 7. Tests
 
-- `agente_pc/tests/` — rails de seguridad (allowlist/denylist, escape con `..`,
-  ocultar secretos, raíces de sistema), registry (niveles de riesgo, validación)
-  y la acción `listar_carpeta`. Corre con `uv run pytest` desde `agente_pc/`.
-- `cerebro/tests/test_agente_canal.py` — el canal: desconectado responde limpio,
-  round-trip por id, timeout, newest-wins, y la tool `pc_listar_carpeta` cuando no
-  hay PC.
+- `agente_pc/tests/` — rails de seguridad (allowlist/denylist de rutas Y de
+  apps, escape con `..`, ocultar secretos, raíces de sistema), registry
+  (niveles de riesgo, validación), las acciones de archivo, y 6.2:
+  `test_apps.py` (abrir/cerrar, denylist gana, gate consecuente, lanzador real
+  sin shell, resolución) y `test_tareas.py` (tareas tipadas, fail-closed,
+  inyección imposible). Corre con `uv run pytest` desde `agente_pc/`.
+- `agente_pc/scripts/test_e2e.py` — el e2e de un comando (ver §3.1), 19 pruebas.
+- `cerebro/tests/test_agente_acciones.py` — las tools del cerebro proponen vía
+  el gate (incl. `pc_abrir_app`/`pc_ejecutar_tarea`/`pc_cerrar_app`), la
+  whitelist del endpoint admite las acciones 6.2, falla cerrado sin PC, y el
+  contenido leído es DATO.
 
-Los tres gates (app Flutter, cerebro, agente) corren en CI en cada push.
+Los gates (app Flutter, cerebro) corren en CI en cada push; los del agente se
+corren localmente (`uv run pytest` en `agente_pc/`).
 
 ---
 
-## 8. Qué falta (post-6.0b/6.1)
+## 8. Qué falta (post-6.2)
 
 - **Borrado** (eliminar/papelera) con confirmación reforzada — deliberadamente
-  fuera de 6.1 por ser irreversible.
+  fuera por ser irreversible.
 - **Escritura** de contenido en archivos (crear/editar texto) con gate.
-- Más acciones de lectura/organización (abrir con la app por defecto, comprimir,
-  etc.).
+- Más tareas tipadas a medida del flujo del usuario (se registran en `tareas.py`).
 - Empaquetado del agente para arrancarlo con doble clic / al iniciar sesión.
 
 > Hecho hasta aquí: 6.0a (cimiento) · 6.0b (lectura: buscar, leer, resumir) ·
-> 6.1 (organización con gate: mover, renombrar, crear carpeta, organizar).
+> 6.1 (organización con gate: mover, renombrar, crear carpeta, organizar) ·
+> 6.2 (abrir/cerrar apps de allowlist + tareas tipadas, con gate y sin shell).

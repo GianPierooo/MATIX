@@ -39,6 +39,15 @@ def test_pc_se_dispara_por_keyword():
     assert "pc_resumir_documento" in out
 
 
+def test_pc_apps_se_disparan_por_keyword():
+    # 6.2: abrir apps / sesión de foco / editor deben traer las tools de apps.
+    for msg in ["abre el editor en la pc", "arranca una sesión de foco",
+                "abre chrome", "lanza el programa"]:
+        out = _nombres(st.filtrar_tools(TOOL_DEFINITIONS, msg))
+        assert "pc_abrir_app" in out, msg
+        assert "pc_ejecutar_tarea" in out, msg
+
+
 def test_telefono_se_dispara_por_keyword():
     out = _nombres(st.filtrar_tools(TOOL_DEFINITIONS, "mándale un whatsapp a Ana"))
     assert "escribir_whatsapp" in out

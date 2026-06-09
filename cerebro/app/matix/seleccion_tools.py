@@ -92,14 +92,18 @@ _GRUPOS: list[tuple[frozenset[str], re.Pattern[str]]] = [
         r"\b(whatsapp|wasap|wsp|sms|correo|email|mail|llam|telefon|marca a|"
         r"abre|abri|lanza|galeri|ultima foto|pantalla|mapa|navega a|"
         r"mensaje a|escribele|mandale)\w*")),
-    # PC / archivos (agente local)
+    # PC / archivos / apps (agente local)
     (frozenset({
         "pc_listar_carpeta", "pc_buscar_archivos", "pc_leer_archivo",
         "pc_resumir_documento", "pc_mover_archivo", "pc_renombrar_archivo",
         "pc_crear_carpeta", "pc_organizar_carpeta",
+        # 6.2 — abrir/cerrar apps y tareas tipadas
+        "pc_abrir_app", "pc_ejecutar_tarea", "pc_cerrar_app",
     }), re.compile(
         r"\b(archivo|carpeta|pc|compu|laptop|escritorio|descarga|"
-        r"document|pdf|docx|\.txt|organiza|mueve|renombr|disco)\w*")),
+        r"document|pdf|docx|\.txt|organiza|mueve|renombr|disco|"
+        r"app|aplicacion|programa|abre|abrir|abri|lanza|cierra|cerrar|"
+        r"foco|sesion|editor|vscode|chrome|navegador)\w*")),
 ]
 
 # Si el mensaje es largo o "complejo", no arriesgamos potencia: van TODAS.

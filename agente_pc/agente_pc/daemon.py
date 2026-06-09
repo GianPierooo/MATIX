@@ -179,9 +179,16 @@ async def _run(config: ConfigAgente, log: logging.Logger) -> int:
     stop = asyncio.Event()
     _instalar_senales(stop)
     registro = crear_registro()
+    # Fase 6.2: resolvemos la allowlist de apps (verifica que el exe exista y NO
+    # esté en la denylist). Cada entrada omitida deja un aviso accionable.
+    from . import apps as _apps
+    apps_resueltas, avisos_apps = _apps.resolver_apps(config.apps_specs)
+    for aviso in avisos_apps:
+        log.warning("apps: %s", aviso)
     ctx = Contexto(
         allowlist=config.allowlist,
         max_lectura_bytes=config.agente_pc_max_lectura_kb * 1024,
+        apps=apps_resueltas,
     )
     log.info(
         "arranque: %d acciones (%s)",
@@ -190,6 +197,10 @@ async def _run(config: ConfigAgente, log: logging.Logger) -> int:
     log.info("arranque: %d carpetas en allowlist", len(config.allowlist))
     for p in config.allowlist:
         log.info("  - permitida: %s", p)
+    log.info(
+        "arranque: %d apps en allowlist (%s)",
+        len(apps_resueltas), ", ".join(sorted(apps_resueltas)) or "ninguna",
+    )
     log.info("arranque: conectando a cerebro %s", config.cerebro_ws_url)
     log.info("arranque: host esperado (anti-impostor) %s", config.host_esperado)
     log.info("arranque: corriendo. Ctrl+C para detener (kill switch).")

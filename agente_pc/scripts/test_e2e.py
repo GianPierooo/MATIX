@@ -147,13 +147,32 @@ def _ejecutar(reg, nombre: str, args: dict[str, Any], ctx: Contexto, *, confirma
     e2e perdería la cobertura de la línea de audit por acción."""
     resultado = asyncio.run(reg.ejecutar(nombre, args, ctx, confirmado=confirmado))
     # Misma ruta-de-audit que el cliente: la principal (ruta/origen/carpeta).
-    ruta = args.get("ruta") or args.get("origen") or args.get("carpeta") or ""
+    ruta = (args.get("ruta") or args.get("origen") or args.get("carpeta")
+            or args.get("nombre") or "")
     auditoria_registrar(
         accion=nombre, ruta=str(ruta),
         ok=bool(resultado.get("ok")),
         detalle=str(resultado.get("tipo", "")),
     )
     return resultado
+
+
+class _LanzadorFakeE2E:
+    """Lanzador inyectable para el e2e: registra (exe, args), NO spawnea apps
+    reales (no abrimos ventanas durante el test). Devuelve pids crecientes."""
+
+    def __init__(self) -> None:
+        self.llamadas: list = []
+        self._pid = 9000
+
+    def __call__(self, exe: str, args: list) -> dict:
+        self.llamadas.append((exe, list(args)))
+        self._pid += 1
+        return {"ok": True, "pid": self._pid}
+
+
+def _terminador_fake_e2e(_pid: int) -> bool:
+    return True
 
 
 def _crear_sandbox_en(base: Path, etiqueta: str) -> Path:
@@ -206,7 +225,7 @@ def _audit_lineas_recientes(audit_path: Path, desde: int) -> list[str]:
 
 def correr_pruebas_seguras(suite: Suite, reg, ctx: Contexto, sandbox: Path) -> None:
     _print()
-    _print("[1/3] Acciones SEGURAS sobre la sandbox …")
+    _print("[1/4] Acciones SEGURAS sobre la sandbox …")
 
     # listar_carpeta
     def _t_listar() -> bool:
@@ -258,7 +277,7 @@ def correr_pruebas_seguras(suite: Suite, reg, ctx: Contexto, sandbox: Path) -> N
 def correr_pruebas_seguridad(suite: Suite, reg, ctx: Contexto, sandbox: Path,
                              fuera: Path) -> None:
     _print()
-    _print("[2/3] Casos de SEGURIDAD que DEBEN fallar …")
+    _print("[2/4] Casos de SEGURIDAD que DEBEN fallar …")
 
     # Fuera de la allowlist (otro tmp distinto, allowlisteado en ningún sitio).
     def _t_fuera() -> bool:
@@ -320,9 +339,92 @@ def correr_pruebas_seguridad(suite: Suite, reg, ctx: Contexto, sandbox: Path,
     )
 
 
+def correr_pruebas_apps_tareas(suite: Suite, reg, ctx: Contexto, lanzador) -> None:
+    """Fase 6.2 — abrir/cerrar apps + tareas tipadas. El lanzador es un FAKE
+    que registra (exe, args): NO abre apps reales (no queremos ventanas en la
+    pantalla durante el test). La lógica de allowlist/denylist/gate/audit SÍ es
+    real — que es lo que importa verificar."""
+    _print()
+    _print("[3/4] Apps y tareas (6.2) — lanzador simulado (no abre ventanas)…")
+
+    def _t_abrir_ok() -> bool:
+        n0 = len(lanzador.llamadas)
+        r = _ejecutar(reg, "abrir_app", {"nombre": "fakeapp"}, ctx, confirmado=True)
+        return r.get("ok") and len(lanzador.llamadas) == n0 + 1
+
+    suite.correr("abrir_app de la allowlist → ok (lanzador invocado)", _t_abrir_ok,
+                 detalle="fakeapp lanzada con su exe resuelto")
+
+    def _t_abrir_no_allow() -> bool:
+        n0 = len(lanzador.llamadas)
+        r = _ejecutar(reg, "abrir_app", {"nombre": "inkscape"}, ctx, confirmado=True)
+        return (not r.get("ok") and r.get("tipo") == "no_permitida"
+                and len(lanzador.llamadas) == n0)
+
+    suite.correr("abrir_app fuera de la allowlist → rechazado", _t_abrir_no_allow,
+                 detalle="no se lanza nada")
+
+    def _t_abrir_denylist() -> bool:
+        n0 = len(lanzador.llamadas)
+        r = _ejecutar(reg, "abrir_app", {"nombre": "trampa"}, ctx, confirmado=True)
+        return (not r.get("ok") and r.get("tipo") == "denylist"
+                and len(lanzador.llamadas) == n0)
+
+    suite.correr("abrir_app denylisted (cmd) → rechazado por seguridad", _t_abrir_denylist,
+                 detalle="la denylist gana sobre la allowlist")
+
+    def _t_no_shell() -> bool:
+        sin_accion_shell = all(
+            reg.get(x) is None
+            for x in ("ejecutar_comando", "shell", "run", "exec", "system")
+        )
+        n0 = len(lanzador.llamadas)
+        r = _ejecutar(reg, "abrir_app", {"nombre": "rm -rf /"}, ctx, confirmado=True)
+        rechazado = not r.get("ok") and len(lanzador.llamadas) == n0
+        return sin_accion_shell and rechazado
+
+    suite.correr("shell arbitrario IMPOSIBLE (no hay acción + nombre rechazado)",
+                 _t_no_shell, detalle="solo abrir_app(allowlist) y ejecutar_tarea(registro)")
+
+    def _t_gate() -> bool:
+        n0 = len(lanzador.llamadas)
+        r = _ejecutar(reg, "abrir_app", {"nombre": "fakeapp"}, ctx, confirmado=False)
+        return (not r.get("ok") and r.get("tipo") == "requiere_confirmacion"
+                and len(lanzador.llamadas) == n0)
+
+    suite.correr("abrir_app sin confirmado → bloqueado (gate consecuente)", _t_gate,
+                 detalle="el gate corta antes de lanzar")
+
+    def _t_tarea_ok() -> bool:
+        n0 = len(lanzador.llamadas)
+        r = _ejecutar(
+            reg, "ejecutar_tarea",
+            {"nombre": "sesion_de_foco", "params": {"apps": "fakeapp"}},
+            ctx, confirmado=True,
+        )
+        return r.get("ok") and len(lanzador.llamadas) == n0 + 1
+
+    suite.correr("ejecutar_tarea 'sesion_de_foco' → ok", _t_tarea_ok,
+                 detalle="abre las apps de la allowlist que pide la tarea")
+
+    def _t_tarea_desconocida() -> bool:
+        r = _ejecutar(reg, "ejecutar_tarea", {"nombre": "formatear_disco"}, ctx, confirmado=True)
+        return not r.get("ok") and r.get("tipo") == "no_registrada"
+
+    suite.correr("ejecutar_tarea desconocida → rechazada", _t_tarea_desconocida,
+                 detalle="solo tareas predefinidas")
+
+    def _t_cerrar() -> bool:
+        r = _ejecutar(reg, "cerrar_app", {"nombre": "fakeapp"}, ctx, confirmado=True)
+        return r.get("ok") and r.get("tipo") in ("app_cerrada", "nada_que_cerrar")
+
+    suite.correr("cerrar_app de lo abierto en sesión → ok", _t_cerrar,
+                 detalle="cierre graceful de los PIDs rastreados")
+
+
 def correr_pruebas_audit(suite: Suite, audit_offset: int) -> None:
     _print()
-    _print("[3/3] Audit log …")
+    _print("[4/4] Audit log …")
 
     def _t_audit_tiene_entradas() -> bool:
         lineas = _audit_lineas_recientes(RUTA_AUDIT, audit_offset)
@@ -358,7 +460,7 @@ def correr_pruebas_audit(suite: Suite, audit_offset: int) -> None:
 
 def correr_test_conexion(suite: Suite) -> None:
     _print()
-    _print("[0/3] Test de conexión al cerebro (autotest)…")
+    _print("[0/4] Test de conexión al cerebro (autotest)…")
     if os.environ.get("SKIP_CONEXION"):
         _print(f"  {BULLET} saltado (SKIP_CONEXION=1)")
         return
@@ -402,13 +504,27 @@ def main() -> int:
 
     try:
         reg = crear_registro()
-        ctx = Contexto(allowlist=[sandbox], max_lectura_bytes=256 * 1024)
+        # Fase 6.2: apps de prueba. 'fakeapp' es un exe REAL bajo la sandbox
+        # (resuelve y NO está en la denylist) → abrir_app la acepta. 'trampa'
+        # apunta a cmd.exe (denylisted) para probar la defensa en profundidad
+        # del handler. El lanzador es FAKE (no abrimos ventanas).
+        fakeapp = sandbox / "fakeapp.exe"
+        fakeapp.write_bytes(b"MZ")  # un archivo cualquiera; el lanzador es fake
+        lanzador = _LanzadorFakeE2E()
+        ctx = Contexto(
+            allowlist=[sandbox],
+            max_lectura_bytes=256 * 1024,
+            apps={"fakeapp": str(fakeapp), "trampa": r"C:\Windows\System32\cmd.exe"},
+            lanzador=lanzador,
+            terminador=_terminador_fake_e2e,
+        )
         if VERBOSE:
             _print(f"  sandbox: {sandbox}")
             _print(f"  fuera:   {fuera}")
 
         correr_pruebas_seguras(suite, reg, ctx, sandbox)
         correr_pruebas_seguridad(suite, reg, ctx, sandbox, fuera)
+        correr_pruebas_apps_tareas(suite, reg, ctx, lanzador)
         # Aseguramos una entrada de audit explícita para que el chequeo de
         # audit nunca falle por timing en máquinas raras: registramos una
         # acción "sintética" del propio script.
