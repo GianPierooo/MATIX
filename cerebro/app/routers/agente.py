@@ -35,6 +35,11 @@ _ACCIONES_CONFIRMABLES = frozenset(
         "mover_archivo", "renombrar_archivo", "crear_carpeta", "organizar_aplicar",
         # 6.2 — apps y tareas tipadas (el agente revalida allowlist+denylist)
         "abrir_app", "cerrar_app", "ejecutar_tarea",
+        # 6.3 — control de pantalla: SOLO la acción irreversible YA confirmada
+        # por el usuario en el gate. Los primitivos del bucle (capturar/accion/
+        # iniciar/terminar) NO son confirmables por aquí: solo los conduce el
+        # cerebro dentro de pc_controlar_pantalla.
+        "pantalla_accion_confirmada",
     }
 )
 

@@ -187,6 +187,73 @@ async def test_pc_abrir_app_valida_nombre():
     assert res["ok"] is False and res["tipo"] == "validacion"
 
 
+# ── 6.3: pc_controlar_pantalla (bucle de control) ────────────────────────────
+
+
+async def test_controlar_pantalla_control_desactivado(monkeypatch):
+    # Si el agente reporta control desactivado al iniciar sesión, la tool lo
+    # surfacea claro y NO corre el bucle.
+    async def fake_enviar(nombre, args, **kw):
+        if nombre == "pantalla_control_iniciar":
+            return {"ok": False, "tipo": "control_desactivado",
+                    "mensaje": "el control de pantalla está DESACTIVADO"}
+        return {"ok": True}
+
+    monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
+    res = await tools.ejecutar_tool(None, "pc_controlar_pantalla", {"objetivo": "haz algo"})
+    assert res["ok"] is False and res["tipo"] == "control_desactivado"
+
+
+async def test_controlar_pantalla_irreversible_propone_gate(monkeypatch):
+    # Inicia sesión OK; la visión dice irreversible → la tool PROPONE la acción
+    # confirmada por el gate (pantalla_accion_confirmada) y termina la sesión.
+    enviados = []
+
+    async def fake_enviar(nombre, args, **kw):
+        enviados.append(nombre)
+        if nombre == "pantalla_capturar":
+            return {"ok": True, "imagen": "data:image/jpeg;base64,Zg==", "ancho": 800, "alto": 600}
+        return {"ok": True}
+
+    async def fake_interpretar(imagen, objetivo, **kw):
+        return {"prohibida": False, "terminado": False, "irreversible": True,
+                "accion": {"tipo": "click", "x": 3, "y": 4}, "descripcion": "botón Comprar"}
+
+    monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
+    monkeypatch.setattr(tools.llm, "interpretar_pantalla", fake_interpretar)
+    res = await tools.ejecutar_tool(None, "pc_controlar_pantalla", {"objetivo": "compra el libro"})
+    assert res["ok"] is True
+    bloque = res["datos"]["accion_dispositivo"]
+    assert bloque["tipo"] == "pc_accion"
+    assert bloque["datos"]["accion"] == "pantalla_accion_confirmada"
+    assert bloque["datos"]["args"]["accion"] == {"tipo": "click", "x": 3, "y": 4}
+    # La sesión se cerró pase lo que pase.
+    assert "pantalla_control_terminar" in enviados
+
+
+async def test_controlar_pantalla_prohibida_aborta(monkeypatch):
+    async def fake_enviar(nombre, args, **kw):
+        if nombre == "pantalla_capturar":
+            return {"ok": True, "imagen": "x", "ancho": 800, "alto": 600}
+        return {"ok": True}
+
+    async def fake_interpretar(imagen, objetivo, **kw):
+        return {"prohibida": True, "terminado": False, "irreversible": False,
+                "accion": None, "motivo": "pantalla de login"}
+
+    monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
+    monkeypatch.setattr(tools.llm, "interpretar_pantalla", fake_interpretar)
+    res = await tools.ejecutar_tool(None, "pc_controlar_pantalla", {"objetivo": "entra"})
+    assert res["ok"] is True
+    assert res["datos"]["estado"] == "abortado"
+    assert "prohibida" in res["datos"]["mensaje"]
+
+
+async def test_controlar_pantalla_valida_objetivo():
+    res = await tools.ejecutar_tool(None, "pc_controlar_pantalla", {})
+    assert res["ok"] is False and res["tipo"] == "validacion"
+
+
 # ── endpoint /agente/ejecutar: whitelist + estado desconectado ───────────────
 
 

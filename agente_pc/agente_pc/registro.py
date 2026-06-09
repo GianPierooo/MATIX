@@ -66,6 +66,15 @@ class Contexto:
     # así Contexto no importa apps (evita ciclo de imports).
     lanzador: Any = None
     terminador: Any = None
+    # Fase 6.3 — control de pantalla. Master switch (OFF por defecto), tope de
+    # acciones por sesión, estado de la sesión, e inyectables (capturador /
+    # controlador / indicador) para tests sin tocar el mouse/pantalla reales.
+    control_pantalla: bool = False
+    max_acciones_pantalla: int = 40
+    pantalla_sesion: dict = field(default_factory=lambda: {"activa": False, "acciones": 0})
+    capturador: Any = None
+    controlador: Any = None
+    indicador: Any = None
 
 
 def _err(tipo: str, mensaje: str) -> dict[str, Any]:

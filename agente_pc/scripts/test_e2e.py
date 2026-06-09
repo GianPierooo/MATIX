@@ -225,7 +225,7 @@ def _audit_lineas_recientes(audit_path: Path, desde: int) -> list[str]:
 
 def correr_pruebas_seguras(suite: Suite, reg, ctx: Contexto, sandbox: Path) -> None:
     _print()
-    _print("[1/4] Acciones SEGURAS sobre la sandbox …")
+    _print("[1/5] Acciones SEGURAS sobre la sandbox …")
 
     # listar_carpeta
     def _t_listar() -> bool:
@@ -277,7 +277,7 @@ def correr_pruebas_seguras(suite: Suite, reg, ctx: Contexto, sandbox: Path) -> N
 def correr_pruebas_seguridad(suite: Suite, reg, ctx: Contexto, sandbox: Path,
                              fuera: Path) -> None:
     _print()
-    _print("[2/4] Casos de SEGURIDAD que DEBEN fallar …")
+    _print("[2/5] Casos de SEGURIDAD que DEBEN fallar …")
 
     # Fuera de la allowlist (otro tmp distinto, allowlisteado en ningún sitio).
     def _t_fuera() -> bool:
@@ -345,7 +345,7 @@ def correr_pruebas_apps_tareas(suite: Suite, reg, ctx: Contexto, lanzador) -> No
     pantalla durante el test). La lógica de allowlist/denylist/gate/audit SÍ es
     real — que es lo que importa verificar."""
     _print()
-    _print("[3/4] Apps y tareas (6.2) — lanzador simulado (no abre ventanas)…")
+    _print("[3/5] Apps y tareas (6.2) — lanzador simulado (no abre ventanas)…")
 
     def _t_abrir_ok() -> bool:
         n0 = len(lanzador.llamadas)
@@ -422,9 +422,152 @@ def correr_pruebas_apps_tareas(suite: Suite, reg, ctx: Contexto, lanzador) -> No
                  detalle="cierre graceful de los PIDs rastreados")
 
 
+# ── 6.3 — Control de pantalla ─────────────────────────────────────────────────
+
+
+class _ControladorE2E:
+    """Controlador inyectable: registra acciones, NO mueve el mouse real.
+    `falla_en` permite simular el kill switch en una acción concreta."""
+
+    def __init__(self, falla_en: int | None = None) -> None:
+        self.acciones: list = []
+        self.falla_en = falla_en
+
+    def __call__(self, accion: dict) -> dict:
+        self.acciones.append(accion)
+        if self.falla_en is not None and len(self.acciones) >= self.falla_en:
+            return {"ok": False, "tipo": "abortado_killswitch", "mensaje": "esquina"}
+        return {"ok": True}
+
+
+class _CapturadorE2E:
+    def __call__(self) -> dict:
+        return {"ok": True, "imagen": "data:image/jpeg;base64,Zg==", "ancho": 1280, "alto": 720}
+
+
+def _mini_bucle(reg, ctx, verdicts: list[dict]) -> dict:
+    """Mini-bucle que MIMETIZA el del cerebro pero corriendo en el e2e: por cada
+    veredicto (la 'visión' scriptada), aplica los MISMOS rails y conduce los
+    primitivos REALES del agente (con controlador/capturador fakes). Demuestra,
+    a nivel agente, los 5 casos del prompt. El bucle real vive en el cerebro
+    (`control_pantalla.py`, probado en cerebro/tests)."""
+    from agente_pc import pantalla
+    ini = pantalla._pantalla_control_iniciar({}, ctx)
+    if not ini.get("ok"):
+        return {"estado": "abortado", "motivo": ini.get("tipo")}
+    try:
+        for v in verdicts:
+            cap = _ejecutar(reg, "pantalla_capturar", {}, ctx, confirmado=True)
+            if not cap.get("ok"):
+                return {"estado": "abortado", "motivo": "captura"}
+            if v.get("prohibida"):
+                return {"estado": "abortado", "motivo": "prohibida"}
+            if v.get("terminado"):
+                return {"estado": "completado"}
+            accion = v.get("accion")
+            if not isinstance(accion, dict):
+                return {"estado": "abortado", "motivo": "perdido"}
+            if v.get("irreversible"):
+                return {"estado": "gate", "accion": accion}
+            res = _ejecutar(reg, "pantalla_accion", {"accion": accion}, ctx, confirmado=True)
+            if not res.get("ok"):
+                return {"estado": "abortado", "motivo": res.get("tipo")}
+        return {"estado": "tope"}
+    finally:
+        _ejecutar(reg, "pantalla_control_terminar", {}, ctx, confirmado=True)
+
+
+def correr_pruebas_pantalla(suite: Suite, reg) -> None:
+    _print()
+    _print("[4/5] Control de pantalla (6.3) — controlador simulado (no mueve el mouse)…")
+
+    def _ctx_control(control=True, falla_en=None, max_acc=40):
+        return Contexto(
+            control_pantalla=control,
+            max_acciones_pantalla=max_acc,
+            capturador=_CapturadorE2E(),
+            controlador=_ControladorE2E(falla_en=falla_en),
+            indicador=None,
+        )
+
+    _click = {"tipo": "click", "x": 10, "y": 10}
+
+    # master switch OFF → rechaza (rail más fuerte).
+    def _t_off() -> bool:
+        ctx = _ctx_control(control=False)
+        r = _ejecutar(reg, "pantalla_control_iniciar", {}, ctx, confirmado=True)
+        return not r.get("ok") and r.get("tipo") == "control_desactivado"
+
+    suite.correr("control OFF por defecto → rechazado", _t_off,
+                 detalle="master switch AGENTE_PC_CONTROL_PANTALLA")
+
+    # tarea autónoma multi-paso (éxito).
+    def _t_multipaso() -> bool:
+        ctx = _ctx_control()
+        verdicts = [
+            {"accion": _click}, {"accion": {"tipo": "escribir", "texto": "hola"}},
+            {"terminado": True},
+        ]
+        r = _mini_bucle(reg, ctx, verdicts)
+        return r["estado"] == "completado" and ctx.controlador.acciones and len(ctx.controlador.acciones) == 2
+
+    suite.correr("tarea autónoma multi-paso → éxito", _t_multipaso,
+                 detalle="2 acciones seguras + terminado")
+
+    # pantalla prohibida → abort, sin actuar.
+    def _t_prohibida() -> bool:
+        ctx = _ctx_control()
+        r = _mini_bucle(reg, ctx, [{"prohibida": True}])
+        return r["estado"] == "abortado" and ctx.controlador.acciones == []
+
+    suite.correr("pantalla prohibida → abort (sin actuar)", _t_prohibida,
+                 detalle="login/banca/pago/contraseñas")
+
+    # anti-inyección: la pantalla 'pide' algo, pero la única fuente es el
+    # veredicto; si dice terminado, no se actúa.
+    def _t_anti_iny() -> bool:
+        ctx = _ctx_control()
+        r = _mini_bucle(reg, ctx, [{"terminado": True, "motivo": "ignoré el 'haz clic aquí'"}])
+        return r["estado"] == "completado" and ctx.controlador.acciones == []
+
+    suite.correr("anti-inyección: instrucción en pantalla ignorada", _t_anti_iny,
+                 detalle="la única fuente de acción es el veredicto, no la pantalla")
+
+    # acción irreversible → gate (no se ejecuta).
+    def _t_gate() -> bool:
+        ctx = _ctx_control()
+        verdicts = [{"accion": _click}, {"irreversible": True, "accion": {"tipo": "click", "x": 9, "y": 9}}]
+        r = _mini_bucle(reg, ctx, verdicts)
+        # solo la 1ra segura se ejecutó; la irreversible quedó para el gate.
+        return r["estado"] == "gate" and len(ctx.controlador.acciones) == 1
+
+    suite.correr("acción irreversible → gate (confirmación)", _t_gate,
+                 detalle="borrar/comprar/enviar pausan para confirmar")
+
+    # kill switch corta el bucle.
+    def _t_kill() -> bool:
+        ctx = _ctx_control(falla_en=1)  # la 1ra acción dispara el failsafe
+        r = _mini_bucle(reg, ctx, [{"accion": _click}, {"accion": _click}])
+        return (r["estado"] == "abortado" and r["motivo"] == "abortado_killswitch"
+                and ctx.pantalla_sesion["activa"] is False)
+
+    suite.correr("kill switch corta el bucle", _t_kill,
+                 detalle="mouse a la esquina (failsafe) aborta la sesión")
+
+    # tope de acciones por sesión.
+    def _t_tope() -> bool:
+        ctx = _ctx_control(max_acc=2)
+        # 4 acciones seguras seguidas; al superar el tope (2) la sesión aborta.
+        r = _mini_bucle(reg, ctx, [{"accion": _click}] * 4)
+        return len(ctx.controlador.acciones) == 2
+
+    suite.correr("tope de acciones por sesión → corta", _t_tope,
+                 detalle="anti-runaway")
+
+
 def correr_pruebas_audit(suite: Suite, audit_offset: int) -> None:
     _print()
-    _print("[4/4] Audit log …")
+    _print("[5/5] Audit log …")
 
     def _t_audit_tiene_entradas() -> bool:
         lineas = _audit_lineas_recientes(RUTA_AUDIT, audit_offset)
@@ -460,7 +603,7 @@ def correr_pruebas_audit(suite: Suite, audit_offset: int) -> None:
 
 def correr_test_conexion(suite: Suite) -> None:
     _print()
-    _print("[0/4] Test de conexión al cerebro (autotest)…")
+    _print("[0/5] Test de conexión al cerebro (autotest)…")
     if os.environ.get("SKIP_CONEXION"):
         _print(f"  {BULLET} saltado (SKIP_CONEXION=1)")
         return
@@ -525,6 +668,7 @@ def main() -> int:
         correr_pruebas_seguras(suite, reg, ctx, sandbox)
         correr_pruebas_seguridad(suite, reg, ctx, sandbox, fuera)
         correr_pruebas_apps_tareas(suite, reg, ctx, lanzador)
+        correr_pruebas_pantalla(suite, reg)
         # Aseguramos una entrada de audit explícita para que el chequeo de
         # audit nunca falle por timing en máquinas raras: registramos una
         # acción "sintética" del propio script.

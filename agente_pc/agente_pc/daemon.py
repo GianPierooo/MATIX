@@ -189,6 +189,8 @@ async def _run(config: ConfigAgente, log: logging.Logger) -> int:
         allowlist=config.allowlist,
         max_lectura_bytes=config.agente_pc_max_lectura_kb * 1024,
         apps=apps_resueltas,
+        control_pantalla=config.agente_pc_control_pantalla,
+        max_acciones_pantalla=config.agente_pc_max_acciones_pantalla,
     )
     log.info(
         "arranque: %d acciones (%s)",
@@ -201,6 +203,14 @@ async def _run(config: ConfigAgente, log: logging.Logger) -> int:
         "arranque: %d apps en allowlist (%s)",
         len(apps_resueltas), ", ".join(sorted(apps_resueltas)) or "ninguna",
     )
+    if config.agente_pc_control_pantalla:
+        log.warning(
+            "arranque: CONTROL DE PANTALLA ACTIVADO (capacidad más peligrosa). "
+            "Tope %d acciones/sesión. Kill switch: mouse a una esquina o Ctrl+C.",
+            config.agente_pc_max_acciones_pantalla,
+        )
+    else:
+        log.info("arranque: control de pantalla DESACTIVADO (off por defecto).")
     log.info("arranque: conectando a cerebro %s", config.cerebro_ws_url)
     log.info("arranque: host esperado (anti-impostor) %s", config.host_esperado)
     log.info("arranque: corriendo. Ctrl+C para detener (kill switch).")

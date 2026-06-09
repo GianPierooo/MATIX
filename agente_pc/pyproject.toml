@@ -13,6 +13,15 @@ dependencies = [
     "python-dotenv>=1.0",
 ]
 
+# Fase 6.3 — control de pantalla. Opcional: solo se necesita si activas
+# AGENTE_PC_CONTROL_PANTALLA=1. Instálalo con `uv sync --extra control`.
+# pyautogui mueve mouse/teclado y captura la pantalla (trae Pillow). Lazy-import
+# en pantalla.py: sin esto, los demás módulos y los tests funcionan igual.
+[project.optional-dependencies]
+control = [
+    "pyautogui>=0.9.54",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",

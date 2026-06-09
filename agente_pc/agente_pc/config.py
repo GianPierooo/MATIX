@@ -86,6 +86,12 @@ class ConfigAgente(BaseSettings):
     # leen truncados. Evita volcar archivos enormes por el canal.
     agente_pc_max_lectura_kb: int = 256
 
+    # Fase 6.3 — CONTROL DE PANTALLA (capturar + mover mouse/teclear). La
+    # capacidad MÁS PELIGROSA: OFF por defecto. Actívala a conciencia.
+    agente_pc_control_pantalla: bool = False
+    # Tope de acciones (clicks/teclas) por sesión de control (anti-runaway).
+    agente_pc_max_acciones_pantalla: int = 40
+
     model_config = SettingsConfigDict(
         env_file=str(RUTA_ENV),
         env_file_encoding="utf-8",

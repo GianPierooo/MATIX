@@ -240,6 +240,9 @@ String _mensajePcResultado(String accion, Map<String, dynamic> res) {
         final abiertas = (res['abiertas'] as List?)?.length;
         if (abiertas != null) return 'Listo, abrí $abiertas app(s) para tu sesión.';
         return 'Tarea ejecutada en tu PC.';
+      // 6.3 — control de pantalla: acción irreversible ya confirmada
+      case 'pantalla_accion_confirmada':
+        return 'Listo, hice esa acción en tu pantalla.';
       default:
         return 'Hecho en tu PC.';
     }

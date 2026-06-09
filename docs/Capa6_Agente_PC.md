@@ -1,4 +1,4 @@
-# Capa 6 — Agente de PC (6.0a/6.0b/6.1/6.2)
+# Capa 6 — Agente de PC (6.0a/6.0b/6.1/6.2/6.3)
 
 "PC y archivos": un agente local que corre en la computadora del usuario, un
 transporte seguro nube↔local, y un framework de acciones tipadas y extensible.
@@ -9,6 +9,10 @@ Estado:
   `organizar`.
 - **6.2** — abrir/cerrar apps de una allowlist dura y ejecutar tareas tipadas,
   todo con gate y sin shell (ver §1.1 y §2.1).
+- **6.3** — CONTROL AUTÓNOMO DE PANTALLA (la capacidad más peligrosa): capturar
+  la pantalla, interpretarla con visión y mover mouse/teclear para tareas
+  multi-paso. OFF por defecto; rails duros, kill switch e indicador (ver §1.3 y
+  §2.2).
 
 > Resumen en una línea: la PC abre una conexión saliente al cerebro, se
 > autentica con un secreto, y solo deja que Matix vea lo que el usuario permitió,
@@ -75,6 +79,12 @@ ruta REAL resuelta (symlinks/`..`). Las **consecuentes** además exigen
 | `abrir_app` | 6.2 | **consecuente** | `pc_abrir_app` | abre una app de la allowlist de apps (sin shell) |
 | `cerrar_app` | 6.2 | **consecuente** | `pc_cerrar_app` | cierra (graceful) las instancias que el agente abrió esta sesión |
 | `ejecutar_tarea` | 6.2 | **consecuente** | `pc_ejecutar_tarea` | ejecuta una tarea PREDEFINIDA y tipada (no comandos) |
+| `pantalla_control_iniciar` | 6.3 | **consecuente** | (interno del bucle) | abre sesión de control + muestra el indicador |
+| `pantalla_capturar` | 6.3 | **consecuente** | (interno del bucle) | captura la pantalla para la visión (solo en sesión) |
+| `pantalla_accion` | 6.3 | **consecuente** | (interno del bucle) | UNA acción mouse/teclado (solo en sesión, con tope) |
+| `pantalla_accion_confirmada` | 6.3 | **consecuente** | (gate de `pc_controlar_pantalla`) | la acción irreversible que el usuario confirmó |
+| `pantalla_control_terminar` | 6.3 | segura | (interno del bucle) | cierra sesión + oculta el indicador |
+| (bucle) | 6.3 | — | `pc_controlar_pantalla` | orquesta capturar→visión→rails→actuar (vive en el cerebro) |
 
 `resumir_documento` (tool `pc_resumir_documento`): el agente manda los bytes
 (`leer_bytes`), el cerebro **reutiliza** el extractor `app/matix/
@@ -108,6 +118,29 @@ seguridad es más estricto (ver §2.1):
 **CERO ejecución de shell.** No existe ninguna acción que tome un comando crudo.
 Solo `abrir_app` (allowlist) y `ejecutar_tarea` (registro). Si el modelo quiere
 algo fuera de eso, no puede — punto.
+
+#### 6.3 — Control autónomo de pantalla (la capacidad MÁS PELIGROSA)
+
+`pc_controlar_pantalla(objetivo)` deja que Matix **mire la pantalla y controle
+mouse/teclado** para cumplir una tarea multi-paso sola. **OFF por defecto**: el
+usuario la activa con `AGENTE_PC_CONTROL_PANTALLA=1` y `uv sync --extra control`.
+
+Reparto de responsabilidades (reusa el canal, el audit, el kill switch y el
+patrón de abort):
+- El **bucle vive en el CEREBRO** (`app/matix/control_pantalla.py`), que es el
+  único que habla con la visión. El agente solo pone las "manos".
+- Cada paso del bucle: **capturar** (agente) → **interpretar** con la visión
+  más barata (`llm.interpretar_pantalla`, gpt-4o-mini detail low, JSON,
+  **falla cerrado**) → **rails** → **actuar** (agente). Acotado por
+  `MAX_PASOS=12`; captura UNA vez por paso (no a alta frecuencia → barato).
+- El agente expone primitivos (`pantalla_capturar`, `pantalla_accion`) que solo
+  funcionan **dentro de una sesión activa** y con el master switch ON. Las
+  acciones de mouse/teclado se ejecutan con `pyautogui` (FAILSAFE ON) — **sin
+  shell**. El texto tecleado **no** se audita textual (solo su longitud).
+
+Los rails (§2.2) son lo no negociable: pantalla prohibida → abort; lo que se ve
+es DATO (anti-inyección); acción irreversible → gate; kill switch + indicador;
+bucle acotado con abort; tope de acciones por sesión.
 
 ### 1.2 El gate de las acciones consecuentes (reusa el sheet del teléfono)
 
@@ -215,6 +248,41 @@ Lanzar procesos es más peligroso que leer archivos, así que `abrir_app`,
 8. **Anti-inyección.** El contenido leído de un archivo es DATO: jamás dispara
    una app ni una tarea. Abrir/ejecutar solo viene de una orden directa y
    confirmada del usuario.
+
+### 2.2 Rails del control de pantalla (Fase 6.3 — lo NO negociable)
+
+Es la capacidad más peligrosa: puede clickear y teclear en tu PC. Por eso:
+
+1. **OFF por defecto.** Sin `AGENTE_PC_CONTROL_PANTALLA=1` en `.env`, capturar y
+   actuar se rechazan (`control_desactivado`). No se enciende sola.
+2. **Pantallas PROHIBIDAS → abort.** La visión clasifica cada captura: si parece
+   LOGIN, BANCA, PASARELA DE PAGO/CHECKOUT, GESTOR DE CONTRASEÑAS o muestra DATOS
+   SENSIBLES → `prohibida=true`, el bucle ABORTA sin actuar. **Falla cerrado**:
+   si la visión cuelga, da error o no se puede parsear, se trata como prohibida.
+3. **Anti-inyección visual.** Lo que hay en pantalla (webs, correos, popups) es
+   DATO, jamás instrucción. Un "haz clic aquí" en pantalla NO dirige al agente:
+   la única fuente de la siguiente acción es el veredicto estructurado de la
+   visión guiado por el OBJETIVO del usuario, no el texto libre de la pantalla.
+4. **Confirmación SOLO en lo irreversible/destructivo.** Borrar, comprar, enviar
+   dinero, mensajes a terceros, cambios de sistema → la visión marca
+   `irreversible=true`, el bucle PARA y propone esa acción por el gate (sheet de
+   confirmación). El resto (navegar, escribir, scrollear) corre **autónomo, sin
+   pausar**.
+5. **Kill switch + indicador.** Mientras controla, un banner rojo siempre-encima
+   avisa (best-effort, tkinter). Kill switch del SO: **mover el mouse a una
+   esquina** (FAILSAFE de pyautogui) aborta la acción al instante; más Ctrl+C/
+   SIGTERM del daemon. Cualquier abort cierra la sesión y oculta el indicador.
+6. **Bucle acotado con abort.** `MAX_PASOS=12`. Si el piloto se pierde (no sabe
+   qué hacer / no devuelve acción válida), o el agente reporta error/kill switch,
+   ABORTA — nunca clickea a ciegas. Captura UNA vez por paso (no a alta
+   frecuencia) con la visión más barata → respeta el costo.
+7. **Tope de acciones por sesión.** `AGENTE_PC_MAX_ACCIONES_PANTALLA` (default
+   40): aunque el cerebro pidiera de más, el agente corta la sesión (anti-runaway).
+8. **Audit sin contenido.** Cada acción (click/tecla/scroll) deja una línea en
+   `audit.log`; el texto tecleado NO se audita textual (solo su longitud). La
+   denylist de apps de 6.2 sigue aplicando.
+9. **Permisos mínimos + sin shell.** Estos primitivos no ejecutan comandos; solo
+   mueven mouse y teclean. El agente sigue negándose a correr elevado.
 
 ---
 
@@ -354,12 +422,22 @@ Lo que cubre:
    - `ejecutar_tarea` `sesion_de_foco` (con una app de la allowlist) → ok.
    - `ejecutar_tarea` desconocida → rechazada (solo tareas predefinidas).
    - `cerrar_app` de lo abierto en la sesión → ok (cierre graceful por PID).
-5. **Audit log** (`agente_pc/audit.log`):
+5. **Control de pantalla (6.3)** — con un controlador SIMULADO (no mueve el
+   mouse real; los rails sí son reales):
+   - control OFF por defecto → rechazado (master switch).
+   - tarea autónoma multi-paso → éxito (acciones seguras + terminado).
+   - pantalla prohibida → abort, sin actuar.
+   - anti-inyección: instrucción en pantalla ignorada (la fuente es el veredicto).
+   - acción irreversible → gate (no se ejecuta sola).
+   - kill switch corta el bucle (failsafe).
+   - tope de acciones por sesión → corta (anti-runaway).
+   (El bucle REAL del cerebro se prueba en `cerebro/tests/test_control_pantalla.py`.)
+6. **Audit log** (`agente_pc/audit.log`):
    - tras la sesión hay AL MENOS 6 líneas nuevas (una por acción ejecutada).
    - el log **no contiene contenido sensible**: ni el texto leído, ni el de
      `.env`, ni la "clave" del falso `id_rsa`.
 
-Total: **19 pruebas** (11 base + 8 de 6.2).
+Total: **26 pruebas** (11 base + 8 de 6.2 + 7 de 6.3).
 
 Imprime un resumen "X/Y pruebas pasaron" y sale con `0` si todo pasó, `1`
 si algo falló. La sandbox se limpia al terminar (si el script muere a mitad,
@@ -451,6 +529,30 @@ Reglas para una tarea nueva:
 El transporte, el gate y el cerebro NO cambian: la nueva tarea se invoca con
 `pc_ejecutar_tarea(nombre="abrir_inbox", params={...})` y pasa por el mismo gate.
 
+### 3.5 Activar el control de pantalla (Fase 6.3 — la más peligrosa)
+
+OFF por defecto. Para activarla a conciencia:
+
+```bash
+cd agente_pc
+uv sync --extra control          # instala pyautogui (mouse/teclado/captura)
+# en agente_pc/.env:
+#   AGENTE_PC_CONTROL_PANTALLA=1
+#   AGENTE_PC_MAX_ACCIONES_PANTALLA=40   # tope por sesión (anti-runaway)
+```
+
+Al arrancar, el log lo dice claro:
+
+```
+17:42:01 [WARNING] matix.agente: arranque: CONTROL DE PANTALLA ACTIVADO (capacidad más peligrosa). Tope 40 acciones/sesión. Kill switch: mouse a una esquina o Ctrl+C.
+```
+
+Mientras Matix controla, verás un banner rojo siempre-encima. **Kill switch**:
+mueve el mouse a una esquina de la pantalla (corta la acción al instante) o
+Ctrl+C en la terminal del agente. Los rails (§2.2) son automáticos: ante una
+pantalla de login/banca/pago/contraseñas, ABORTA sola; ante una acción
+irreversible, PARA y te pide confirmar en la app.
+
 ### Detenerlo (kill switch)
 
 - **Ctrl+C** en la terminal donde corre → cierra limpio y sale.
@@ -479,6 +581,14 @@ Con la Fase 6.2, además (cada una pide confirmación en el sheet antes de actua
 > abre la carpeta del proyecto X con el editor  ·  cierra Chrome
 
 (Las apps deben estar en tu `AGENTE_PC_APPS_ALLOWLIST`; ver §3.3.)
+
+Con la Fase 6.3 (si activaste el control de pantalla, §3.5):
+
+> controla mi pantalla y rellena este formulario con mis datos  ·
+> en la pantalla, navega hasta la pestaña de ajustes
+
+Matix muestra el indicador, hace los pasos seguros solo, y si llega a una
+pantalla sensible aborta, o si toca algo irreversible te pide confirmar.
 
 ---
 
@@ -529,29 +639,38 @@ traduce a un mensaje amable. Nunca se bloquea.
 
 - `agente_pc/tests/` — rails de seguridad (allowlist/denylist de rutas Y de
   apps, escape con `..`, ocultar secretos, raíces de sistema), registry
-  (niveles de riesgo, validación), las acciones de archivo, y 6.2:
-  `test_apps.py` (abrir/cerrar, denylist gana, gate consecuente, lanzador real
-  sin shell, resolución) y `test_tareas.py` (tareas tipadas, fail-closed,
-  inyección imposible). Corre con `uv run pytest` desde `agente_pc/`.
-- `agente_pc/scripts/test_e2e.py` — el e2e de un comando (ver §3.1), 19 pruebas.
+  (niveles de riesgo, validación), las acciones de archivo, 6.2 (`test_apps.py`,
+  `test_tareas.py`) y 6.3 (`test_pantalla.py`: master switch off, sesión
+  requerida, tope, kill switch, validación de acción, audit sin contenido, gate
+  consecuente). Corre con `uv run pytest` desde `agente_pc/`.
+- `agente_pc/scripts/test_e2e.py` — el e2e de un comando (ver §3.1), 26 pruebas.
+- `cerebro/tests/test_control_pantalla.py` — el BUCLE de control (rails): multi-
+  paso éxito, prohibida→abort, anti-inyección, irreversible→gate, kill switch,
+  tope de pasos, piloto perdido→abort, captura fallida→abort.
 - `cerebro/tests/test_agente_acciones.py` — las tools del cerebro proponen vía
-  el gate (incl. `pc_abrir_app`/`pc_ejecutar_tarea`/`pc_cerrar_app`), la
-  whitelist del endpoint admite las acciones 6.2, falla cerrado sin PC, y el
-  contenido leído es DATO.
+  el gate (incl. `pc_abrir_app`/`pc_ejecutar_tarea`/`pc_cerrar_app` y
+  `pc_controlar_pantalla`: control off, prohibida→abort, irreversible→gate), la
+  whitelist del endpoint admite las acciones 6.2 + `pantalla_accion_confirmada`,
+  falla cerrado sin PC, y el contenido leído es DATO.
 
 Los gates (app Flutter, cerebro) corren en CI en cada push; los del agente se
 corren localmente (`uv run pytest` en `agente_pc/`).
 
 ---
 
-## 8. Qué falta (post-6.2)
+## 8. Qué falta (post-6.3)
 
 - **Borrado** (eliminar/papelera) con confirmación reforzada — deliberadamente
   fuera por ser irreversible.
 - **Escritura** de contenido en archivos (crear/editar texto) con gate.
 - Más tareas tipadas a medida del flujo del usuario (se registran en `tareas.py`).
+- Control de pantalla: reanudar el bucle tras confirmar la acción irreversible
+  (hoy el bucle PARA en ella; el resto es one-shot confirmado), y validación en
+  device de la latencia/coords reales.
 - Empaquetado del agente para arrancarlo con doble clic / al iniciar sesión.
 
 > Hecho hasta aquí: 6.0a (cimiento) · 6.0b (lectura: buscar, leer, resumir) ·
 > 6.1 (organización con gate: mover, renombrar, crear carpeta, organizar) ·
-> 6.2 (abrir/cerrar apps de allowlist + tareas tipadas, con gate y sin shell).
+> 6.2 (abrir/cerrar apps de allowlist + tareas tipadas, con gate y sin shell) ·
+> 6.3 (control autónomo de pantalla con rails, kill switch e indicador; OFF por
+> defecto).

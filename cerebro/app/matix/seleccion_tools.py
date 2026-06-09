@@ -99,11 +99,14 @@ _GRUPOS: list[tuple[frozenset[str], re.Pattern[str]]] = [
         "pc_crear_carpeta", "pc_organizar_carpeta",
         # 6.2 — abrir/cerrar apps y tareas tipadas
         "pc_abrir_app", "pc_ejecutar_tarea", "pc_cerrar_app",
+        # 6.3 — control autónomo de pantalla
+        "pc_controlar_pantalla",
     }), re.compile(
         r"\b(archivo|carpeta|pc|compu|laptop|escritorio|descarga|"
         r"document|pdf|docx|\.txt|organiza|mueve|renombr|disco|"
         r"app|aplicacion|programa|abre|abrir|abri|lanza|cierra|cerrar|"
-        r"foco|sesion|editor|vscode|chrome|navegador)\w*")),
+        r"foco|sesion|editor|vscode|chrome|navegador|"
+        r"pantalla|control|mouse|raton|teclea|clic|click|haz por mi|hazlo tu)\w*")),
 ]
 
 # Si el mensaje es largo o "complejo", no arriesgamos potencia: van TODAS.
