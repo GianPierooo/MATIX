@@ -4,6 +4,10 @@ Carga config, aplica las guardas (token presente, no elevado), monta el
 registry + contexto de seguridad, y corre el cliente WebSocket hasta el kill
 switch (Ctrl+C / SIGTERM).
 
+Filosofía de mensajes: cualquier fallo de arranque debe decir QUÉ está mal Y
+QUÉ COMANDO ejecutar para arreglarlo. Sin "access is denied" crípticos, sin
+"check your config" vagos. El usuario lee el mensaje, copia el comando, sigue.
+
 También expone el autotest:
     uv run python -m agente_pc --test-connection
 """
@@ -11,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import logging
 import os
 import signal
 import sys
@@ -19,8 +24,24 @@ from pathlib import Path
 from . import autotest
 from .acciones import crear_registro
 from .cliente import correr
-from .config import ConfigAgente, cargar_config
+from .config import RUTA_ENV, ConfigAgente, cargar_config
 from .registro import Contexto
+
+
+def _configurar_logging() -> logging.Logger:
+    """Logger `matix.agente` con formato estándar para todo el daemon. UN
+    handler — si el módulo se reimporta no se acumulan logs duplicados."""
+    log = logging.getLogger("matix.agente")
+    log.setLevel(logging.INFO)
+    if log.handlers:
+        return log
+    h = logging.StreamHandler(sys.stderr)
+    h.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+                          datefmt="%H:%M:%S")
+    )
+    log.addHandler(h)
+    return log
 
 
 def chequear_venv() -> str | None:
@@ -42,8 +63,11 @@ def chequear_venv() -> str | None:
     py = next((p for p in candidatos if p.exists()), None)
     if py is None:
         return (
-            "El .venv está ROTO (no encuentro su intérprete de Python). "
-            "Regenéralo: cd agente_pc && rm -rf .venv && uv sync"
+            "El .venv está ROTO: no encuentro su intérprete de Python. "
+            "Regenéralo así (PowerShell o bash):\n"
+            "  cd agente_pc\n"
+            "  Remove-Item -Recurse -Force .venv   # o `rm -rf .venv` en bash\n"
+            "  uv sync"
         )
     # `pyvenv.cfg` apunta al Python BASE que creó el venv. Si ese base ya no
     # existe (desinstalaste 3.12), invocar al python del venv falla cripticamente.
@@ -60,8 +84,64 @@ def chequear_venv() -> str | None:
             return None  # no podemos diagnosticar; deja que el daemon siga
     if base is not None and not base.exists():
         return (
-            f"El .venv apunta a un Python que ya no existe ({base}). "
-            "Regenéralo: cd agente_pc && rm -rf .venv && uv sync"
+            f"El .venv apunta a un Python que ya no existe ({base}).\n"
+            "Probablemente desinstalaste/actualizaste Python. Regenéralo:\n"
+            "  cd agente_pc\n"
+            "  Remove-Item -Recurse -Force .venv   # o `rm -rf .venv` en bash\n"
+            "  uv sync"
+        )
+    return None
+
+
+def chequear_env_file() -> str | None:
+    """¿Existe `agente_pc/.env`? Si no, mensaje con el `cp` exacto + nota de
+    qué rellenar. PURO (solo lee FS)."""
+    if RUTA_ENV.exists():
+        return None
+    raiz = RUTA_ENV.parent.name  # "agente_pc"
+    return (
+        f"Falta {raiz}/.env (config local del agente, GITIGNORED).\n"
+        "Crea uno desde la plantilla y rellena el token:\n"
+        f"  cp {raiz}/.env.example {raiz}/.env\n"
+        f"Luego edita {raiz}/.env y pon AGENTE_PC_TOKEN igual al de Railway\n"
+        "(el que el cerebro usa en la variable AGENTE_PC_TOKEN). Sin eso, el\n"
+        "cerebro rechaza la conexión y el agente no arranca."
+    )
+
+
+def diagnosticar_token(config: ConfigAgente) -> str | None:
+    """Si el token está mal antes de tocar la red, decirlo con detalle. Detecta:
+    - Token vacío (el caso de siempre).
+    - Token con espacios al borde (copy-paste pegó un espacio o salto de línea).
+    - Token muy corto (típico de placeholder pegado a medias).
+    PURO (sin red)."""
+    tok = config.agente_pc_token or ""
+    if not tok:
+        return (
+            "Falta AGENTE_PC_TOKEN en agente_pc/.env. Es el MISMO valor que la\n"
+            "variable AGENTE_PC_TOKEN del cerebro (en Railway y en\n"
+            "cerebro/.env para correr local). Sin este token, el cerebro\n"
+            "rechaza la conexión.\n"
+            "Si no tienes uno, genera con:\n"
+            "  python -c \"import secrets; print(secrets.token_urlsafe(48))\"\n"
+            "y pónlo en LOS DOS lados (Railway + agente_pc/.env)."
+        )
+    if tok != tok.strip():
+        return (
+            "AGENTE_PC_TOKEN tiene espacios o saltos de línea al borde. Eso\n"
+            "te va a dar HTTP 401 en el handshake con el cerebro porque NO\n"
+            "coincide byte a byte con el de Railway.\n"
+            "Edita agente_pc/.env, deja el token sin comillas y sin espacios\n"
+            "antes/después del =. Ejemplo correcto:\n"
+            "  AGENTE_PC_TOKEN=abc123...\n"
+            "(no `AGENTE_PC_TOKEN= abc123 `)."
+        )
+    if len(tok) < 24:
+        return (
+            f"AGENTE_PC_TOKEN parece muy corto ({len(tok)} chars). El cerebro\n"
+            "espera el token URLsafe de 48 bytes (~64 chars). ¿Pegaste el\n"
+            "placeholder de .env.example en vez del real de Railway?\n"
+            "Revisa agente_pc/.env y vuelve a pegar el de Railway entero."
         )
     return None
 
@@ -95,7 +175,7 @@ def _instalar_senales(stop: asyncio.Event) -> None:
                 pass
 
 
-async def _run(config: ConfigAgente) -> int:
+async def _run(config: ConfigAgente, log: logging.Logger) -> int:
     stop = asyncio.Event()
     _instalar_senales(stop)
     registro = crear_registro()
@@ -103,12 +183,21 @@ async def _run(config: ConfigAgente) -> int:
         allowlist=config.allowlist,
         max_lectura_bytes=config.agente_pc_max_lectura_kb * 1024,
     )
-    print(f"[agente] acciones registradas: {', '.join(registro.nombres())}")
-    print(f"[agente] carpetas permitidas: {len(config.allowlist)}")
-    print(f"[agente] cerebro: {config.cerebro_ws_url}")
-    print("[agente] corriendo. Ctrl+C para detener (kill switch).")
-    await correr(config, registro, ctx, stop, log=lambda m: print(f"[agente] {m}"))
-    print("[agente] detenido.")
+    log.info(
+        "arranque: %d acciones (%s)",
+        len(registro.nombres()), ", ".join(registro.nombres()),
+    )
+    log.info("arranque: %d carpetas en allowlist", len(config.allowlist))
+    for p in config.allowlist:
+        log.info("  - permitida: %s", p)
+    log.info("arranque: conectando a cerebro %s", config.cerebro_ws_url)
+    log.info("arranque: host esperado (anti-impostor) %s", config.host_esperado)
+    log.info("arranque: corriendo. Ctrl+C para detener (kill switch).")
+    # El cliente.correr ya tenía su propio `log` callable — lo enchufamos al
+    # logger estructurado para que cada eslabón del WS aparezca con la misma
+    # forma que el resto.
+    await correr(config, registro, ctx, stop, log=lambda m: log.info("ws: %s", m))
+    log.info("detenido.")
     return 0
 
 
@@ -123,53 +212,84 @@ def main(argv: list[str] | None = None) -> int:
             pass
 
     args = argv if argv is not None else sys.argv[1:]
+    log = _configurar_logging()
 
-    # Aviso TEMPRANO de .venv roto: vale tanto para el daemon como para el
-    # autotest. Sin esto, Windows tira "access is denied" críptico cuando el
-    # base Python que creó el venv ya no existe.
-    aviso_venv = chequear_venv()
-    if aviso_venv:
-        print(f"[agente] aviso: {aviso_venv}", file=sys.stderr)
-
-    # --test-connection: autotest de extremo a extremo y SALIR.
-    if "--test-connection" in args:
-        return autotest.ejecutar()
+    # --help SOLO: ningún chequeo lo bloquea, debe poder leerse aunque el
+    # entorno esté roto.
     if "--help" in args or "-h" in args:
         print(
             "Uso: python -m agente_pc [--test-connection]\n"
             "\n"
             "  (sin argumentos)    Arranca el daemon y queda corriendo hasta Ctrl+C.\n"
-            "  --test-connection   Prueba la conexión al cerebro y sale.\n"
+            "  --test-connection   Prueba la conexión al cerebro y sale (diagnóstico).\n"
+            "  -h / --help         Muestra esta ayuda.\n"
         )
         return 0
 
-    config = cargar_config()
+    # 1) .venv: aviso temprano antes de tocar nada. Sin esto, Windows tira
+    # "access is denied" críptico cuando el base Python que creó el venv ya no
+    # existe. NO es fatal por sí solo — el daemon a veces igual arranca si el
+    # venv todavía tiene el python — pero loggeamos.
+    aviso_venv = chequear_venv()
+    if aviso_venv:
+        log.error(".venv: %s", aviso_venv)
+        # Si el venv está REALMENTE roto el siguiente paso (cargar config) va
+        # a fallar igual: dejamos seguir para que el error real lo confirme.
 
-    if not config.agente_pc_token:
-        print(
-            "[agente] ERROR: falta AGENTE_PC_TOKEN en agente_pc/.env "
-            "(es el mismo secreto que el cerebro/Railway). No arranco sin él.",
-            file=sys.stderr,
+    # 2) .env: si no existe, no tiene sentido seguir. Mensaje accionable.
+    aviso_env = chequear_env_file()
+    if aviso_env:
+        log.error(".env: %s", aviso_env)
+        return 4
+
+    # --test-connection: autotest de extremo a extremo y SALIR. Lo ponemos
+    # DESPUÉS del chequeo de .env porque sin .env el autotest no tendría token.
+    if "--test-connection" in args:
+        return autotest.ejecutar()
+
+    # 3) Carga de config. Si pydantic explota (env malformado, tipos), lo
+    # convertimos en mensaje accionable.
+    try:
+        config = cargar_config()
+    except Exception as e:  # noqa: BLE001
+        log.error(
+            "config: no pude leer agente_pc/.env (%s: %s).\n"
+            "Revisa que el formato sea KEY=VALUE por línea, sin comillas "
+            "raras. Si dudas, compara con agente_pc/.env.example.",
+            type(e).__name__, e,
         )
+        return 5
+
+    # 4) Token: mensaje específico por tipo de problema (vacío vs con espacios
+    # vs muy corto). El cerebro responde HTTP 401 a token malo; con esto
+    # damos la pista ANTES de que la red haga ese viaje.
+    aviso_token = diagnosticar_token(config)
+    if aviso_token:
+        log.error("token: %s", aviso_token)
         return 2
 
+    # 5) Elevación: protección contra correr como admin/root sin saber.
     if _es_elevado() and not config.agente_pc_permitir_elevado:
-        print(
-            "[agente] ERROR: estás corriendo como administrador/root. El agente debe "
-            "correr con permisos MÍNIMOS del usuario. Ciérralo y ábrelo en una sesión "
-            "normal. (Override solo a conciencia: AGENTE_PC_PERMITIR_ELEVADO=1.)",
-            file=sys.stderr,
+        log.error(
+            "elevación: estás corriendo como administrador/root. El agente "
+            "debe correr con permisos MÍNIMOS del usuario.\n"
+            "Ciérralo y ábrelo en una sesión normal (sin 'Run as administrator').\n"
+            "Override solo a conciencia: pon AGENTE_PC_PERMITIR_ELEVADO=1 en .env."
         )
         return 3
 
+    # 6) Allowlist vacía: NO bloquea (el agente puede arrancar y conectar; el
+    # cerebro/usuario pueden ir poblando la allowlist editando .env). Pero
+    # avisamos clarito qué pasa.
     if not config.allowlist:
-        print(
-            "[agente] aviso: la allowlist está vacía; no veré ninguna carpeta hasta "
-            "que edites AGENTE_PC_ALLOWLIST en agente_pc/.env."
+        log.warning(
+            "allowlist VACÍA: el agente arrancará pero rechazará TODA acción "
+            "que toque archivos hasta que edites AGENTE_PC_ALLOWLIST en "
+            "agente_pc/.env (separadas por ';' o saltos de línea)."
         )
 
     try:
-        return asyncio.run(_run(config))
+        return asyncio.run(_run(config, log))
     except KeyboardInterrupt:
-        print("\n[agente] interrumpido.")
+        log.info("interrumpido por Ctrl+C.")
         return 0

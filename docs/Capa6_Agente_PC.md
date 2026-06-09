@@ -171,24 +171,48 @@ Requisitos: Python 3.12+ y [uv](https://docs.astral.sh/uv/).
 3. **Allowlist.** Ajusta `AGENTE_PC_ALLOWLIST` a tu gusto. Por defecto:
    `~/Documents;~/Desktop;~/Downloads`.
 
-4. **Correr** (desde `agente_pc/`):
+4. **Correr** (comando exacto, desde la raíz del repo):
 
    ```bash
+   cd agente_pc
    uv sync
    uv run python -m agente_pc
    ```
 
-   Salida esperada:
+   Salida esperada con el logger nuevo (cada línea dice qué pasó):
 
    ```
-   [agente] acciones registradas: listar_carpeta
-   [agente] carpetas permitidas: 3
-   [agente] cerebro: wss://matix-production.up.railway.app/api/v1/agente/ws
-   [agente] corriendo. Ctrl+C para detener (kill switch).
-   [agente] conectado al cerebro
+   17:42:01 [INFO] matix.agente: arranque: 9 acciones (buscar_archivos, crear_carpeta, leer_archivo, leer_bytes, listar_carpeta, mover_archivo, organizar_aplicar, planificar_organizacion, renombrar_archivo)
+   17:42:01 [INFO] matix.agente: arranque: 3 carpetas en allowlist
+   17:42:01 [INFO] matix.agente:   - permitida: C:\Users\TU\Documents
+   17:42:01 [INFO] matix.agente:   - permitida: C:\Users\TU\Desktop
+   17:42:01 [INFO] matix.agente:   - permitida: C:\Users\TU\Downloads
+   17:42:01 [INFO] matix.agente: arranque: conectando a cerebro wss://matix-production.up.railway.app/api/v1/agente/ws
+   17:42:01 [INFO] matix.agente: arranque: host esperado (anti-impostor) matix-production.up.railway.app
+   17:42:01 [INFO] matix.agente: arranque: corriendo. Ctrl+C para detener (kill switch).
+   17:42:01 [INFO] matix.agente: ws: abriendo WSS hacia wss://matix-production.up.railway.app/api/v1/agente/ws
+   17:42:01 [INFO] matix.agente: ws: TLS preparado; presentando X-Agente-PC-Token y handshake…
+   17:42:02 [INFO] matix.agente: ws: handshake OK: cerebro aceptó el token (auth confirmada).
+   17:42:02 [INFO] matix.agente: ws: 'hola' enviado; esperando acciones del cerebro.
    ```
 
-5. **Autotest de conexión** (desde `agente_pc/`): prueba la auth y el canal y
+   Cuando Matix manda una acción real, aparece:
+
+   ```
+   17:43:10 [INFO] matix.agente: ws: acción recibida id=abc123 nombre='listar_carpeta' ruta='~/Documents' confirmado=False
+   17:43:10 [INFO] matix.agente: ws: acción resuelta id=abc123 resultado=ok
+   17:43:10 [INFO] matix.agente: ws: resultado devuelto al cerebro id=abc123
+   ```
+
+5. **Errores de arranque accionables.** Si algo está mal, el mensaje te dice
+   QUÉ y CÓMO arreglarlo. Ejemplos:
+
+   - `.venv` roto: *"El .venv apunta a un Python que ya no existe (C:\\…\\Python312). Regenéralo: cd agente_pc && Remove-Item -Recurse -Force .venv && uv sync"*.
+   - `.env` ausente: *"Falta agente_pc/.env … Crea uno: cp agente_pc/.env.example agente_pc/.env"*.
+   - Token vacío / con espacios / muy corto: cada caso da un mensaje específico (token tiene espacios → "edita .env, deja el token sin comillas y sin espacios antes/después del ="; muy corto → "¿pegaste el placeholder en vez del de Railway?").
+   - Corriendo como administrador: *"el agente debe correr con permisos MÍNIMOS del usuario"*.
+
+6. **Autotest de conexión** (desde `agente_pc/`): prueba la auth y el canal y
    sale limpio. NO deja nada corriendo. Útil para diagnosticar antes de dejar
    el daemon vivo.
 
@@ -212,6 +236,72 @@ Requisitos: Python 3.12+ y [uv](https://docs.astral.sh/uv/).
    En Windows con `stdout` redirigido (cp1252) las marcas se imprimen como
    `[OK]` / `[X]` para no crashear con UnicodeEncodeError; en una terminal
    moderna salen `✓` / `✗`.
+
+### 3.1 Test end-to-end (`scripts/test_e2e.py`)
+
+Diagnóstico de UN COMANDO que verifica que TODA la cadena funciona — registry,
+allowlist, denylist, lectura, audit. No requiere que el cerebro esté arriba si
+pasas `SKIP_CONEXION=1`; si tienes `.env` válido, además corre el autotest de
+conexión.
+
+```bash
+cd agente_pc
+uv run python scripts/test_e2e.py
+# o sin tocar la red:
+SKIP_CONEXION=1 uv run python scripts/test_e2e.py
+# o con más detalle:
+E2E_VERBOSE=1 uv run python scripts/test_e2e.py
+```
+
+Lo que cubre:
+
+1. **[opcional] Autotest de conexión** — handshake TLS + token contra el
+   cerebro real. Se salta con `SKIP_CONEXION=1` o si no hay token.
+2. **Acciones seguras** sobre una sandbox temporal creada bajo
+   `agente_pc/.e2e_sandbox/` (no usa `%TEMP%` porque `AppData` está en la
+   denylist):
+   - `listar_carpeta` de la raíz oculta secretos (`.env`, `.ssh`).
+   - `buscar_archivos` con `*.md` encuentra el archivo.
+   - `leer_archivo` de un `.txt` devuelve el contenido.
+   - `leer_bytes` de un PDF devuelve base64 + nombre (listo para
+     `resumir_documento` en el cerebro).
+3. **Casos de seguridad que DEBEN fallar**:
+   - leer fuera de la allowlist → rechazado.
+   - path traversal con `../` → rechazado (la ruta real cae fuera).
+   - leer `.env` dentro de la sandbox → rechazado (denylist por nombre).
+   - leer `.ssh/id_rsa` → rechazado (denylist por nombre).
+   - `renombrar_archivo` sin `confirmado=true` → bloqueado por el registry.
+4. **Audit log** (`agente_pc/audit.log`):
+   - tras la sesión hay AL MENOS 6 líneas nuevas (una por acción ejecutada).
+   - el log **no contiene contenido sensible**: ni el texto leído, ni el de
+     `.env`, ni la "clave" del falso `id_rsa`.
+
+Imprime un resumen "X/Y pruebas pasaron" y sale con `0` si todo pasó, `1`
+si algo falló. La sandbox se limpia al terminar (si el script muere a mitad,
+puede quedar — está gitignored).
+
+### 3.2 Qué buscar en los logs si algo falla
+
+| Síntoma | Línea del log que la confirma | Probable causa |
+|---|---|---|
+| El comando ni siquiera muestra el banner | `.venv: El .venv apunta a un Python que ya no existe …` | Desinstalaste/actualizaste Python; regenera el venv como dice el mensaje. |
+| Sale `.env: Falta agente_pc/.env` y `exit 4` | esa línea | No copiaste la plantilla; corre `cp agente_pc/.env.example agente_pc/.env`. |
+| Sale `token: …` y `exit 2` | el mensaje específico (vacío / espacios / corto) | El `AGENTE_PC_TOKEN` no es el de Railway o está malformado. |
+| Conecta pero el cerebro nunca manda una acción | `ws: handshake OK …` + `ws: 'hola' enviado; esperando acciones del cerebro.` y nada más | Normal: el agente está en idle hasta que Matix llama una `pc_*`. |
+| Llega una acción pero falla | `ws: acción recibida …` + `ws: acción resuelta id=… resultado=error:rechazada` | Ruta fuera de la allowlist o en la denylist; revisa `AGENTE_PC_ALLOWLIST`. |
+| Llega una `consecuente` y nada cambia | `resultado=error:requiere_confirmacion` | El cerebro la cruzó sin `confirmado=true`; el usuario no aprobó en el sheet de la app. |
+| El agente cae y reintenta | `ws: conexión caída (…); reintento en ~Xs` | Red/Railway intermitente; el backoff exponencial lo maneja solo. |
+| Handshake rechazado | `ws: …` cierra con 1008 o `InvalidStatus 401/403` | Token no coincide con el de Railway. |
+| Falla TLS | `ws: tls_invalido …` | Reloj del sistema atrasado, o proxy/antivirus interceptando. |
+
+El audit log (`agente_pc/audit.log`) lleva UNA línea por acción ejecutada con
+el formato:
+
+```
+2026-06-08T17:43:10-05:00 | accion=listar_carpeta | ruta=C:\Users\TU\Documents | resultado=ok | <tipo>
+```
+
+NUNCA viaja contenido de archivos en el audit — el test e2e lo verifica.
 
 ### Editar qué puede ver
 

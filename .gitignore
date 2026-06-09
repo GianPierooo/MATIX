@@ -99,3 +99,7 @@ backups/
 # ----- Agente local (Capa 6) -----
 # El audit log del agente es local de cada máquina; nunca al repo.
 agente_pc/audit.log
+# Sandbox temporal del test e2e (scripts/test_e2e.py): se crea bajo el repo
+# del agente para evitar la denylist de AppData; se limpia al terminar, pero
+# si el script muere a mitad puede quedar — no la versionamos.
+agente_pc/.e2e_sandbox/
