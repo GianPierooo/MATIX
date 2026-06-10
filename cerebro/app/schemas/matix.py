@@ -252,6 +252,95 @@ class ExtraerEventosResponse(BaseModel):
     eventos: list[EventoPropuesto] = Field(default_factory=list)
 
 
+class TareaCap(BaseModel):
+    titulo: str
+    vence_en: date | None = None
+
+
+class SesionCap(BaseModel):
+    dia_semana: int = Field(ge=0, le=6)  # 0=lunes … 6=domingo
+    hora_inicio: str
+    hora_fin: str | None = None
+
+
+class EvalCap(BaseModel):
+    titulo: str
+    tipo: Literal["examen", "entrega", "proyecto", "otro"] = "otro"
+    fecha: date
+    peso: float | None = None
+
+
+class CursoCap(BaseModel):
+    nombre: str
+    profesor: str | None = None
+    sesiones: list[SesionCap] = Field(default_factory=list)
+    evaluaciones: list[EvalCap] = Field(default_factory=list)
+
+
+class EventoCap(BaseModel):
+    titulo: str
+    fecha: date
+    hora_inicio: str | None = None
+    hora_fin: str | None = None
+
+
+class ApunteCap(BaseModel):
+    titulo: str
+    contenido: str = ""
+
+
+class PropuestaCaptura(BaseModel):
+    """Lo que el digitalizador extrajo de una captura (Capa 7), para que la app
+    lo muestre y el usuario CONFIRME/EDITE antes de crear. Nada se persiste hasta
+    que se llama a `/matix/crear-desde-captura` con esta propuesta confirmada."""
+
+    tipo: Literal["tareas", "silabo", "horario", "eventos", "apunte"] = "apunte"
+    tareas: list[TareaCap] = Field(default_factory=list)
+    cursos: list[CursoCap] = Field(default_factory=list)
+    eventos: list[EventoCap] = Field(default_factory=list)
+    apunte: ApunteCap | None = None
+
+
+class DigitalizarRequest(BaseModel):
+    """Cuerpo de `/matix/digitalizar-captura` (Cámara · digitalización general).
+
+    Se pasa `texto` (OCR on-device — la imagen se queda en el teléfono) O
+    `imagen` (data URL base64, para usar el modelo de VISIÓN barato). UNA llamada
+    por captura. No persiste nada — devuelve la propuesta para confirmar."""
+
+    texto: str | None = None
+    imagen: str | None = None  # data:image/...;base64,...
+
+
+class DigitalizarResponse(BaseModel):
+    propuesta: PropuestaCaptura
+
+
+class ItemCreado(BaseModel):
+    tipo: str
+    id: str | None = None
+    titulo: str | None = None
+
+
+class ItemError(BaseModel):
+    tipo: str
+    titulo: str | None = None
+    mensaje: str
+
+
+class CrearCapturaRequest(BaseModel):
+    """Cuerpo de `/matix/crear-desde-captura`: la propuesta YA confirmada/editada
+    por el usuario. Crea cada ítem por los comandos canónicos."""
+
+    propuesta: PropuestaCaptura
+
+
+class CrearCapturaResponse(BaseModel):
+    creados: list[ItemCreado] = Field(default_factory=list)
+    errores: list[ItemError] = Field(default_factory=list)
+    total: int = 0
+
+
 class ClasificarCapturaRequest(BaseModel):
     """Cuerpo de `/matix/clasificar-captura` (Cámara inteligente).
 

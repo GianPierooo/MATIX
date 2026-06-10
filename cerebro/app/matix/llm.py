@@ -1251,6 +1251,228 @@ async def extraer_eventos_json(
     return eventos
 
 
+_DIAS_SESION = set(range(7))  # 0=lunes … 6=domingo (convención de sesiones_clase)
+_TIPOS_EVAL = {"examen", "entrega", "proyecto", "otro"}
+
+
+def _json_laxo(s: str) -> dict | None:
+    """Parsea JSON tolerante: quita cercos ```json y recorta al primer objeto.
+    El modo JSON de `_chat_json` ya da JSON limpio; la visión a veces lo envuelve."""
+    if not isinstance(s, str):
+        return None
+    t = s.strip()
+    if t.startswith("```"):
+        t = t.strip("`")
+        if t.lower().startswith("json"):
+            t = t[4:]
+    a, b = t.find("{"), t.rfind("}")
+    if a != -1 and b != -1 and b > a:
+        t = t[a : b + 1]
+    try:
+        out = json.loads(t)
+        return out if isinstance(out, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+_SYS_DIGITALIZAR = (
+    "Eres el digitalizador de Matix. Recibes el contenido de una foto que el "
+    "usuario apuntó con la cámara (pizarra, apuntes a mano, sílabo, horario "
+    "impreso o un documento), ya sea como TEXTO (OCR) o como IMAGEN. SOLO "
+    "digitalizas lo escrito: NO describes el entorno ni identificas objetos.\n"
+    "Hoy es {hoy} (zona horaria de Lima, Perú). Resuelve fechas relativas con hoy.\n\n"
+    "1) CLASIFICA el documento en `tipo`: 'tareas' (lista de pendientes), "
+    "'silabo' (sílabo de un curso: nombre, profesor, evaluaciones, clases), "
+    "'horario' (horario de clases: varios cursos con sus días/horas), 'eventos' "
+    "(fechas sueltas) o 'apunte' (notas/contenido sin estructura clara).\n"
+    "2) EXTRAE solo lo DATABLE, sin inventar nada. Si un campo no aparece, ponlo "
+    "en null (o lista vacía). Días de la semana: 0=lunes … 6=domingo. Horas en "
+    "HH:MM (24h). Fechas en YYYY-MM-DD.\n\n"
+    "Responde SOLO un objeto JSON con esta forma EXACTA (rellena solo lo que "
+    "corresponda al `tipo`, el resto vacío):\n"
+    '{"tipo": "tareas|silabo|horario|eventos|apunte",'
+    ' "tareas": [{"titulo": "...", "vence_en": "YYYY-MM-DD|null"}],'
+    ' "cursos": [{"nombre": "...", "profesor": "...|null",'
+    ' "sesiones": [{"dia_semana": 0, "hora_inicio": "10:00", "hora_fin": "12:00|null"}],'
+    ' "evaluaciones": [{"titulo": "...", "tipo": "examen|entrega|proyecto|otro",'
+    ' "fecha": "YYYY-MM-DD", "peso": 20}]}],'
+    ' "eventos": [{"titulo": "...", "fecha": "YYYY-MM-DD",'
+    ' "hora_inicio": "HH:MM|null", "hora_fin": "HH:MM|null"}],'
+    ' "apunte": {"titulo": "...", "contenido": "..."}}'
+)
+
+
+def _val_tareas(crudas: Any) -> list[dict]:
+    out: list[dict] = []
+    if not isinstance(crudas, list):
+        return out
+    for it in crudas:
+        if not isinstance(it, dict):
+            continue
+        titulo = it.get("titulo")
+        if not isinstance(titulo, str) or not titulo.strip():
+            continue
+        vence = it.get("vence_en")
+        if isinstance(vence, str) and len(vence.strip()) >= 10:
+            try:
+                date.fromisoformat(vence.strip()[:10])
+                vence = vence.strip()[:10]
+            except ValueError:
+                vence = None
+        else:
+            vence = None
+        out.append({"titulo": titulo.strip(), "vence_en": vence})
+    return out
+
+
+def _val_sesiones(crudas: Any) -> list[dict]:
+    out: list[dict] = []
+    if not isinstance(crudas, list):
+        return out
+    for it in crudas:
+        if not isinstance(it, dict):
+            continue
+        dia = it.get("dia_semana")
+        ini = _hhmm_valido(it.get("hora_inicio"))
+        if not isinstance(dia, int) or dia not in _DIAS_SESION or ini is None:
+            continue  # una sesión sin día válido u hora de inicio no es datable
+        out.append({"dia_semana": dia, "hora_inicio": ini, "hora_fin": _hhmm_valido(it.get("hora_fin"))})
+    return out
+
+
+def _val_evaluaciones(crudas: Any) -> list[dict]:
+    out: list[dict] = []
+    if not isinstance(crudas, list):
+        return out
+    for it in crudas:
+        if not isinstance(it, dict):
+            continue
+        titulo = it.get("titulo")
+        fecha = it.get("fecha")
+        if not isinstance(titulo, str) or not titulo.strip():
+            continue
+        if not isinstance(fecha, str) or len(fecha.strip()) < 10:
+            continue
+        try:
+            date.fromisoformat(fecha.strip()[:10])
+        except ValueError:
+            continue  # una evaluación sin fecha válida no es datable
+        tipo = it.get("tipo")
+        tipo = tipo if tipo in _TIPOS_EVAL else "otro"
+        peso = it.get("peso")
+        peso = float(peso) if isinstance(peso, (int, float)) else None
+        out.append({"titulo": titulo.strip(), "tipo": tipo, "fecha": fecha.strip()[:10], "peso": peso})
+    return out
+
+
+def _val_cursos(crudos: Any) -> list[dict]:
+    out: list[dict] = []
+    if not isinstance(crudos, list):
+        return out
+    for it in crudos:
+        if not isinstance(it, dict):
+            continue
+        nombre = it.get("nombre")
+        if not isinstance(nombre, str) or not nombre.strip():
+            continue
+        prof = it.get("profesor")
+        out.append({
+            "nombre": nombre.strip(),
+            "profesor": prof.strip() if isinstance(prof, str) and prof.strip() else None,
+            "sesiones": _val_sesiones(it.get("sesiones")),
+            "evaluaciones": _val_evaluaciones(it.get("evaluaciones")),
+        })
+    return out
+
+
+def _val_eventos_sueltos(crudos: Any) -> list[dict]:
+    out: list[dict] = []
+    if not isinstance(crudos, list):
+        return out
+    for it in crudos:
+        if not isinstance(it, dict):
+            continue
+        titulo = it.get("titulo")
+        fecha = it.get("fecha")
+        if not isinstance(titulo, str) or not titulo.strip():
+            continue
+        if not isinstance(fecha, str) or len(fecha.strip()) < 10:
+            continue
+        try:
+            date.fromisoformat(fecha.strip()[:10])
+        except ValueError:
+            continue
+        out.append({
+            "titulo": titulo.strip(), "fecha": fecha.strip()[:10],
+            "hora_inicio": _hhmm_valido(it.get("hora_inicio")),
+            "hora_fin": _hhmm_valido(it.get("hora_fin")),
+        })
+    return out
+
+
+_DOC_VACIO = {"tipo": "apunte", "tareas": [], "cursos": [], "eventos": [], "apunte": None}
+
+
+async def extraer_documento_json(
+    *,
+    texto: str | None = None,
+    imagen_data_url: str | None = None,
+    hoy: str,
+    model: str | None = None,
+) -> dict:
+    """Digitaliza una captura de cámara (Capa 7) — GENERALIZA el OCR de sílabo a
+    CUALQUIER documento/pizarra. UNA sola llamada al modelo BARATO:
+    - si llega `texto` (OCR on-device): por el modo JSON de chat;
+    - si llega `imagen_data_url`: por el pipeline de VISIÓN barato (con failover).
+    Clasifica (tareas/silabo/horario/eventos/apunte) y devuelve la estructura
+    canónica para los comandos. NO persiste; NO inventa (vacío si no hay nada
+    datable). Solo digitaliza lo escrito (no describe el entorno)."""
+    system = _SYS_DIGITALIZAR.replace("{hoy}", hoy)  # .replace, no .format (hay llaves JSON)
+    if imagen_data_url:
+        # Visión barata, con failover de proveedor (igual que la cámara en vivo).
+        modelo = _modelo_efectivo(model or "gpt-4o-mini")
+        permitir_failover = modelos_llm.proveedor_preferido() == "auto"
+        pedido = "Digitaliza este documento y responde SOLO el JSON pedido."
+
+        async def _intento(m: str) -> str:
+            return await _vision_en(m, system, pedido, imagen_data_url, max_tokens=1500)
+
+        if permitir_failover:
+            crudo, _eff, _hubo = await _con_failover(modelo, _intento)
+        else:
+            crudo = await _intento(modelo)
+    elif texto and texto.strip():
+        crudo = await _chat_json(
+            [{"role": "system", "content": system}, {"role": "user", "content": texto.strip()}],
+            model=model,
+            temperature=0.1,
+        )
+    else:
+        return dict(_DOC_VACIO)
+
+    datos = _json_laxo(crudo)
+    if not isinstance(datos, dict):
+        return dict(_DOC_VACIO)
+
+    tareas = _val_tareas(datos.get("tareas"))
+    cursos = _val_cursos(datos.get("cursos"))
+    eventos = _val_eventos_sueltos(datos.get("eventos"))
+    apunte = None
+    ap = datos.get("apunte")
+    if isinstance(ap, dict) and isinstance(ap.get("titulo"), str) and ap["titulo"].strip():
+        apunte = {
+            "titulo": ap["titulo"].strip(),
+            "contenido": ap.get("contenido") if isinstance(ap.get("contenido"), str) else "",
+        }
+
+    tipo = datos.get("tipo")
+    if tipo not in ("tareas", "silabo", "horario", "eventos", "apunte"):
+        # Deduce el tipo de lo que sí salió, para la etiqueta de la UI.
+        tipo = ("silabo" if cursos else "tareas" if tareas else "eventos" if eventos
+                else "apunte")
+    return {"tipo": tipo, "tareas": tareas, "cursos": cursos, "eventos": eventos, "apunte": apunte}
+
+
 async def repaso_semanal_json(
     datos: dict,
     *,

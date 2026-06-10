@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from fastapi.responses import Response
 
 from ..db import Postgrest, get_db
-from ..matix import extraccion_documentos, idempotencia, llm, muestras_voz
+from ..matix import digitalizacion, extraccion_documentos, idempotencia, llm, muestras_voz
 from ..matix.chat import capturar_apunte, conversar
 from ..matix.uso import medidor
 from ..schemas.matix import (
@@ -31,8 +31,12 @@ from ..schemas.matix import (
     ClasificarCapturaRequest,
     ClasificarCapturaResponse,
     ConteoMuestrasResponse,
+    CrearCapturaRequest,
+    CrearCapturaResponse,
     DesglosarTareaRequest,
     DesglosarTareaResponse,
+    DigitalizarRequest,
+    DigitalizarResponse,
     DocumentoExtraidoResponse,
     EstimarDuracionesRequest,
     EstimarDuracionesResponse,
@@ -298,6 +302,51 @@ async def extraer_eventos(body: ExtraerEventosRequest) -> dict:
             detail=f"Error llamando al modelo: {e}",
         ) from e
     return {"eventos": eventos}
+
+
+@router.post("/digitalizar-captura", response_model=DigitalizarResponse)
+async def digitalizar_captura(body: DigitalizarRequest) -> dict:
+    """Cámara · digitalización GENERAL (Capa 7). Apuntar la cámara a pizarra,
+    apuntes, sílabo, horario o documento → la app manda el OCR on-device
+    (`texto`) o la foto (`imagen` data URL para el modelo de visión barato) → el
+    cerebro clasifica y estructura en UNA sola llamada. NO persiste: devuelve la
+    propuesta para que el usuario CONFIRME/EDITE antes de crear (la creación va
+    por `/crear-desde-captura`). Solo digitaliza lo escrito; no describe el
+    entorno. Si no hay nada datable, las listas vienen vacías."""
+    if not (body.texto and body.texto.strip()) and not (body.imagen and body.imagen.strip()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pásame `texto` (OCR) o `imagen` (data URL).",
+        )
+    hoy = (
+        datetime.now(timezone.utc)
+        .astimezone(timezone(timedelta(hours=-5)))
+        .strftime("%Y-%m-%d")
+    )
+    try:
+        propuesta = await llm.extraer_documento_json(
+            texto=body.texto, imagen_data_url=body.imagen, hoy=hoy
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Error llamando al modelo: {e}"
+        ) from e
+    return {"propuesta": propuesta}
+
+
+@router.post("/crear-desde-captura", response_model=CrearCapturaResponse)
+async def crear_desde_captura(
+    body: CrearCapturaRequest, db: Postgrest = Depends(get_db)
+) -> dict:
+    """Crea lo que el usuario CONFIRMÓ de una captura (Capa 7). La cámara es un
+    cliente más de la capa: cada ítem se crea por su COMANDO canónico
+    (crear_tarea / crear_curso / crear_sesion_clase / crear_evaluacion /
+    crear_evento); el apunte por su insert + indexado. Best-effort por ítem:
+    devuelve `creados` y `errores`. Este endpoint SOLO se llama tras la
+    confirmación en la app — la extracción (que no persiste) es aparte."""
+    return await digitalizacion.crear_desde_captura(db, body.propuesta.model_dump(mode="json"))
 
 
 @router.post("/extraer-recibo", response_model=ExtraerReciboResponse)
