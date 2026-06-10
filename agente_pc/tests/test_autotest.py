@@ -130,6 +130,11 @@ def test_main_test_connection_llama_al_autotest(monkeypatch):
         llamado["n"] += 1
         return 0
 
+    # `main` chequea que exista `agente_pc/.env` ANTES de enrutar
+    # `--test-connection` (devuelve 4 si falta). En CI —y en cualquier máquina
+    # sin .env— ese chequeo dispararía y el test mediría el precondition, no el
+    # enrutado. Lo damos por satisfecho para aislar la ruta del autotest.
+    monkeypatch.setattr(daemon, "chequear_env_file", lambda: None)
     monkeypatch.setattr(daemon.autotest, "ejecutar", fake_ejecutar)
     rc = daemon.main(["--test-connection"])
     assert rc == 0
