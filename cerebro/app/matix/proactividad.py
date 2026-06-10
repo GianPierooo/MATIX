@@ -15,6 +15,17 @@ GATILLOS (anticipatorios):
                 duplicamos).
 - hueco       — si justo ahora hay un rato no planificado, sugerencia opcional.
 
+DETECTORES DE RIESGO (Capa 8 · detección anticipada por cálculo, sin LLM):
+- sobrecarga       — más trabajo agendado que ventana útil (el planificador
+                     recortó por prioridad): ofrece mover algo del día.
+- estancado        — proyecto estancado en la banda temprana [3, 5) días (más
+                     allá del flag "en riesgo"): ofrece reescopear; el aviso
+                     sostenido a los 5+ lo da el motor de evolución (no se pisan).
+- eval_estudio     — evaluación próxima (1..7 días) sin estudio agendado para su
+                     curso: ofrece agendar un bloque de estudio.
+- skill_descuidada — skill activa sin práctica ≥ 7 días: toque LIGERO, sin presión.
+Cada uno surfacea por el push con una acción de un toque (payload deep-link).
+
 DECISIÓN: puntúa cada candidato (valor = urgencia × oportunidad × relevancia),
 opera sobre TODOS los proyectos y skills activos, y rutea el JUICIO al modelo
 fuerte cuando hay empate alto (best-effort; si no, gana el puntaje).
@@ -227,6 +238,96 @@ def texto_deadline(titulo: str, horas: float) -> tuple[str, str]:
     )
 
 
+# ── Detectores de RIESGO anticipado (Capa 8) — PUROS, sin BD ni LLM ──────────
+# Detección por cálculo sobre datos que ya existen; el trigger nunca toca el
+# modelo. La acción tocable la sirve la app (deep-link estable en `payload`).
+
+# Estancamiento TEMPRANO: desde el flag "en riesgo" (3 días) hasta el umbral del
+# aviso sostenido del motor de evolución (5 días, evolucion.DIAS_ESTANCAMIENTO).
+# Proactividad agarra la zona temprana con un re-scope; evolución sigue con el
+# aviso a los 5+ — bandas complementarias, NO se pisan (no duplicamos).
+DIAS_RIESGO_ESTANCADO = 3
+DIAS_ESTANCADO_SOSTENIDO = 5
+
+
+def estancado_temprano(dias_sin_actividad: int) -> bool:
+    """¿Estancamiento en la zona temprana [3, 5) días? Más allá lo agarra el
+    aviso sostenido del motor de evolución. PURO."""
+    return DIAS_RIESGO_ESTANCADO <= dias_sin_actividad < DIAS_ESTANCADO_SOSTENIDO
+
+
+def dia_sobrecargado(items_fuera_trabajo: int, *, umbral: int = 1) -> bool:
+    """El día está sobrecargado: el planificador tuvo que dejar FUERA (recortar
+    por prioridad) ≥ `umbral` ítems de TRABAJO — más demanda que ventana útil.
+    Las skills que no entran NO cuentan (son opcionales). PURO."""
+    return items_fuera_trabajo >= umbral
+
+
+# Evaluación próxima sin estudio agendado. <1 día ya lo agarra el motor de
+# nudges/deadline; > una semana es demasiado pronto para molestar.
+DIAS_EVAL_MIN = 1
+DIAS_EVAL_MAX = 7
+
+
+def evaluacion_en_riesgo(
+    dias_hasta: float, tiene_estudio: bool,
+    *, min_dias: int = DIAS_EVAL_MIN, max_dias: int = DIAS_EVAL_MAX,
+) -> bool:
+    """¿Una evaluación entra en la zona de heads-up [min, max] días SIN estudio
+    agendado para su curso? PURO."""
+    if tiene_estudio:
+        return False
+    return min_dias <= dias_hasta <= max_dias
+
+
+# Skill activa sin práctica: toque LIGERO, mucho más tolerante que el trabajo
+# (un hobby puede dormir sin culpa). Solo tras un descuido prolongado.
+DIAS_SKILL_DESCUIDADA = 7
+
+
+def skill_descuidada(dias_sin_practica: int, *, umbral: int = DIAS_SKILL_DESCUIDADA) -> bool:
+    """¿Una skill activa sin práctica hace ≥ `umbral` días? PURO."""
+    return dias_sin_practica >= umbral
+
+
+def texto_estancado_riesgo(nombre: str, dias: int) -> tuple[str, str]:
+    """Re-scope honesto ante el estancamiento temprano (anti-abandono). PURO."""
+    return (
+        "¿Reescopeamos esto?",
+        f"{nombre} lleva {dias} días sin avance. Achicamos el siguiente paso a un "
+        "trozo de 10-15 min, o lo parqueamos sin culpa. Tócame para acomodarlo.",
+    )
+
+
+def texto_dia_sobrecargado(n_fuera: int) -> tuple[str, str]:
+    """Aviso de día sobrecargado con su arreglo (mover algo). PURO."""
+    cosa = "cosa" if n_fuera == 1 else "cosas"
+    return (
+        "Tu día viene cargado",
+        f"Hoy hay más trabajo que ventana: {n_fuera} {cosa} no entran. Mejor "
+        "mover algo a otro día que correr al final. Tócame para acomodarlo.",
+    )
+
+
+def texto_evaluacion_sin_estudio(titulo: str, dias: int) -> tuple[str, str]:
+    """Evaluación próxima sin estudio agendado, con su arreglo. PURO."""
+    cuando = "mañana" if dias <= 1 else f"en {int(dias)} días"
+    return (
+        f"Se viene: {titulo}",
+        f"Tu evaluación es {cuando} y no veo estudio agendado. ¿Le metemos un "
+        "bloque ahora para no correr? Tócame.",
+    )
+
+
+def texto_skill_descuidada(nombre: str, dias: int) -> tuple[str, str]:
+    """Skill descuidada — toque LIGERO, sin presión. PURO."""
+    return (
+        "¿Le metemos un rato?",
+        f"Hace {dias} días sin {nombre}. Sin presión: un ratito hoy la mantiene "
+        "viva. Tócame si te animas.",
+    )
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # Orquestación (impura): lee tablas, decide y manda UN aviso. Best-effort.
 # ════════════════════════════════════════════════════════════════════════════
@@ -300,7 +401,12 @@ async def _candidatos(
     activos. Cada candidato: {tipo, clave, titulo, cuerpo, payload, urgencia,
     oportunidad, relevancia}. Best-effort por gatillo (uno que falle no tumba al
     resto)."""
-    from . import creacion_proyecto, horario, planificador_diario, siembra_tareas
+    from . import (
+        creacion_proyecto,
+        evolucion_proyecto,
+        horario,
+        siembra_tareas,
+    )
 
     out: list[dict[str, Any]] = []
     fecha = local.date()
@@ -423,6 +529,21 @@ async def _candidatos(
         ahora_min = local.hour * 60 + local.minute
         dormir_min = horario.hhmm_a_min(plan.get("duerme") or "23:00") or (23 * 60)
 
+        # ── Día sobrecargado: el planificador recortó TRABAJO por prioridad ────
+        # (más demanda que ventana útil). Las skills que no entran no cuentan.
+        fuera_trabajo = [
+            f for f in (plan.get("fuera") or [])
+            if (f.get("tipo") or "") in ("trabajo", "tarea")
+        ]
+        if dia_sobrecargado(len(fuera_trabajo)):
+            tt, cuerpo = texto_dia_sobrecargado(len(fuera_trabajo))
+            out.append({
+                "tipo": "sobrecarga",
+                "clave": clave_dedup("sobrecarga", fecha.isoformat()),
+                "titulo": tt, "cuerpo": cuerpo, "payload": "rollover",
+                "urgencia": 3, "oportunidad": 3, "relevancia": 3,
+            })
+
         if par.get("incluir_pre_libre", True):
             lead = int(cfg.get("lead_libre_min", 30))
             hueco = proximo_hueco_libre(bloques, ahora_min, lead_min=lead)
@@ -449,6 +570,96 @@ async def _candidatos(
                 })
     except Exception:  # noqa: BLE001
         logger.exception("proactividad: gatillo pre_libre/hueco falló")
+
+    # ── Estancamiento TEMPRANO (3..5 días): re-scope honesto antes de que muera ─
+    # Banda temprana; el aviso sostenido (5+) lo da evolucion.revisar_estancamiento.
+    try:
+        proyectos = creacion_proyecto.solo_proyectos(
+            await db.list("proyectos", filters={"estado": "activo"})
+        )
+        for p in proyectos:
+            info = evolucion_proyecto.estancado(p.get("ultima_actividad_en"), ahora=ahora)
+            if not estancado_temprano(info["dias"]):
+                continue
+            tt, cuerpo = texto_estancado_riesgo(p.get("nombre", "tu proyecto"), info["dias"])
+            out.append({
+                "tipo": "estancado",
+                "clave": clave_dedup("estancado", str(p["id"])),
+                "titulo": tt, "cuerpo": cuerpo, "payload": f"proyecto:{p['id']}",
+                "urgencia": 2, "oportunidad": 2, "relevancia": 3,
+            })
+    except Exception:  # noqa: BLE001
+        logger.exception("proactividad: gatillo estancado falló")
+
+    # ── Evaluación próxima SIN estudio agendado (1..7 días) ───────────────────
+    try:
+        evals = await db.list("evaluaciones", order="fecha.asc")
+        if evals:
+            cursos_con_tareas: set[str] = set()
+            tareas_curso = await db.list(
+                "tareas",
+                raw_filters={"completada": "is.false", "eliminado_en": "is.null",
+                             "curso_id": "not.is.null"},
+                limit=500,
+            )
+            for t in tareas_curso:
+                if t.get("curso_id"):
+                    cursos_con_tareas.add(str(t["curso_id"]))
+            for ev in evals:
+                f_dt = _parse_dt(ev.get("fecha"))
+                if f_dt is None:
+                    continue
+                # La fecha de la evaluación se compara como DATE en Lima.
+                dias = (f_dt.astimezone(LIMA).date() - fecha).days
+                tiene_estudio = str(ev.get("curso_id")) in cursos_con_tareas
+                if not evaluacion_en_riesgo(dias, tiene_estudio):
+                    continue
+                tt, cuerpo = texto_evaluacion_sin_estudio(
+                    (ev.get("titulo") or "tu evaluación").strip(), dias)
+                out.append({
+                    "tipo": "eval_estudio",
+                    "clave": clave_dedup("eval_estudio", str(ev["id"])),
+                    "titulo": tt, "cuerpo": cuerpo, "payload": "hoy",
+                    "urgencia": 3, "oportunidad": 2, "relevancia": 3,
+                })
+    except Exception:  # noqa: BLE001
+        logger.exception("proactividad: gatillo evaluacion falló")
+
+    # ── Skill activa sin práctica en X días (toque LIGERO) ────────────────────
+    try:
+        skills = creacion_proyecto.solo_skills(
+            await db.list("proyectos", filters={"estado": "activo"})
+        )
+        for sk in skills:
+            # Última práctica: la tarea completada más reciente de la skill; si no
+            # hay, cae a la última actividad del proyecto.
+            ult = _parse_dt(sk.get("ultima_actividad_en"))
+            try:
+                hechas = await db.list(
+                    "tareas",
+                    raw_filters={"proyecto_id": f"eq.{sk['id']}", "completada": "is.true"},
+                    order="completada_en.desc", limit=1,
+                )
+                if hechas:
+                    cand = _parse_dt(hechas[0].get("completada_en"))
+                    if cand and (ult is None or cand > ult):
+                        ult = cand
+            except Exception:  # noqa: BLE001
+                pass
+            if ult is None:
+                continue
+            dias = (ahora - ult).days
+            if not skill_descuidada(dias):
+                continue
+            tt, cuerpo = texto_skill_descuidada(sk.get("nombre", "tu skill"), dias)
+            out.append({
+                "tipo": "skill_descuidada",
+                "clave": clave_dedup("skill_descuidada", str(sk["id"])),
+                "titulo": tt, "cuerpo": cuerpo, "payload": f"proyecto:{sk['id']}",
+                "urgencia": 1, "oportunidad": 2, "relevancia": 1,
+            })
+    except Exception:  # noqa: BLE001
+        logger.exception("proactividad: gatillo skill falló")
 
     return out
 

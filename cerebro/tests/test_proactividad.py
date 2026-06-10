@@ -100,7 +100,56 @@ def test_textos_en_espanol_sin_asteriscos():
         (p.texto_reposicion_lote, ("OneXotic", "Cerrar landing")),
         (p.texto_reposicion_fase, ("Matix 1.0",)),
         (p.texto_deadline, ("Entrega final", 40)),
+        (p.texto_estancado_riesgo, ("OneXotic", 4)),
+        (p.texto_dia_sobrecargado, (2,)),
+        (p.texto_evaluacion_sin_estudio, ("Parcial 1", 3)),
+        (p.texto_skill_descuidada, ("Inglés", 9)),
     ]:
         titulo, cuerpo = fn(*args)
         assert titulo and cuerpo
         assert "*" not in titulo and "*" not in cuerpo
+
+
+# ── Detectores de RIESGO (Capa 8): disparan en su condición y NO fuera ───────
+
+
+def test_estancado_temprano_solo_en_banda_3_a_5():
+    assert p.estancado_temprano(3) is True
+    assert p.estancado_temprano(4) is True
+    # < 3 todavía no es riesgo; 5+ lo agarra el aviso sostenido de evolución.
+    assert p.estancado_temprano(2) is False
+    assert p.estancado_temprano(5) is False
+    assert p.estancado_temprano(10) is False
+
+
+def test_dia_sobrecargado_cuando_se_recorta_trabajo():
+    assert p.dia_sobrecargado(0) is False  # nada quedó fuera → cabe
+    assert p.dia_sobrecargado(1) is True   # algo de trabajo no entró
+    assert p.dia_sobrecargado(3) is True
+
+
+def test_evaluacion_en_riesgo_zona_1_a_7_sin_estudio():
+    # En zona y sin estudio → dispara.
+    assert p.evaluacion_en_riesgo(3, False) is True
+    assert p.evaluacion_en_riesgo(1, False) is True
+    assert p.evaluacion_en_riesgo(7, False) is True
+    # Con estudio agendado → nunca molesta.
+    assert p.evaluacion_en_riesgo(3, True) is False
+    # < 1 día lo maneja nudges; > 7 días es muy pronto.
+    assert p.evaluacion_en_riesgo(0, False) is False
+    assert p.evaluacion_en_riesgo(8, False) is False
+
+
+def test_skill_descuidada_tolerante():
+    assert p.skill_descuidada(7) is True
+    assert p.skill_descuidada(20) is True
+    # Tolerante: un hobby puede dormir unos días sin culpa.
+    assert p.skill_descuidada(6) is False
+    assert p.skill_descuidada(0) is False
+
+
+def test_scores_ordenan_riesgo_sobre_skill():
+    # El día sobrecargado (hoy, accionable) pesa más que una skill descuidada.
+    sobrecarga = {"urgencia": 3, "oportunidad": 3, "relevancia": 3}
+    skill = {"urgencia": 1, "oportunidad": 2, "relevancia": 1}
+    assert p.puntuar(sobrecarga) > p.puntuar(skill)
