@@ -165,6 +165,16 @@ nuevas: despertar, agendar, saltar/completar bloque, proponer/aplicar rollover).
 El contrato de /rollover/decidir se preservó (sin_hueco/no_existe siguen siendo
 200, no error).
 
+Auditoría de la capa de comandos (post-Fase 5): HECHA. Revisión exhaustiva
+multi-agente (9 dimensiones + verificación adversarial por hallazgo): 22
+hallazgos, 9 confirmados reales, 6 arreglados + limpieza (los 13 restantes,
+falsos positivos). Correcciones: mapeo HTTP de tipos de error que faltaban
+(no_soportado/sin_accion_siguiente/inconsistencia → 422); /horario/replanificar
+volvió a respetar el `ahora` del body; la tool de rollover traduce sus flags a
+error tipado para el LLM (el endpoint REST mantiene el dict crudo 200); marcar
+acción siguiente propaga el error si completar_tarea falla; guard de ancla
+inválida en los splits recurrentes de eventos; imports muertos limpiados.
+
 Siguiente: Apuntes, Finanzas y Ajustes (marginales) si se quisieran; gate de
 confirmación de acciones consecuentes (anotado desde Fase 1) — el cimiento de
 riesgo por comando ya está puesto en las 5 fases.
