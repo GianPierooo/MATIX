@@ -337,7 +337,11 @@ async def cmd_marcar_accion_siguiente_hecha(db: Postgrest, params: dict[str, Any
         return error("inconsistencia",
                      "La acción siguiente apuntaba a una tarea que ya no existe. Limpié la referencia.")
     if not tarea.get("completada"):
-        await _registro.ejecutar(db, "completar_tarea", {"tarea_id": tarea_sig_id}, origen="accion_siguiente")
+        res = await _registro.ejecutar(db, "completar_tarea", {"tarea_id": tarea_sig_id}, origen="accion_siguiente")
+        if not res.get("ok"):
+            # No se pudo completar (p. ej. la tarea se borró entre medias): NO
+            # limpiamos el puntero ni reportamos éxito falso — propagamos el error.
+            return res
     await db.update(TABLA, proyecto_id, {
         "tarea_siguiente_id": None, "ultima_actividad_en": _ahora_iso()})
     return ok({

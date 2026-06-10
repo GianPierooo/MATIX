@@ -216,3 +216,43 @@ def test_bucle_diario_corre_sin_modelo(monkeypatch):
         FakeDB({"tareas": [{"id": _T, "titulo": "Y", "completada": False}]}),
         "completar_bloque", {"tarea_id": _T}))
     # Si llegamos acá, ningún camino llamó al modelo.
+
+
+# ── Post-revisión: replanificar respeta `ahora`; rollover shape para el LLM ──
+
+
+def test_replanificar_respeta_ahora_del_param(monkeypatch):
+    """El endpoint /horario/replanificar expone `ahora`; el comando lo debe
+    pasar a plan_de_hoy_data (antes lo ignoraba y usaba la hora del servidor)."""
+    from app.matix import horario as horario_mod
+    capturado = {}
+
+    async def fake_plan(db, *, ahora=None, desde_ahora=False):
+        capturado["ahora"] = ahora
+        capturado["desde_ahora"] = desde_ahora
+        return {"bloques": []}
+
+    monkeypatch.setattr(horario_mod, "plan_de_hoy_data", fake_plan)
+    asyncio.run(registro.ejecutar(
+        FakeDB(), "replanificar_dia", {"ahora": "2026-06-09T15:30:00+00:00"}))
+    assert capturado["ahora"] is not None
+    assert capturado["ahora"].isoformat().startswith("2026-06-09T15:30")
+    assert capturado["desde_ahora"] is True
+
+
+def test_replanificar_ahora_invalido_es_validacion():
+    r = asyncio.run(registro.ejecutar(FakeDB(), "replanificar_dia", {"ahora": "no-es-fecha"}))
+    assert r["ok"] is False and r["tipo"] == "validacion"
+
+
+def test_aplicar_rollover_tool_traduce_flags_para_el_llm():
+    """La tool NO debe devolver el dict anidado del comando: traduce sin_hueco/
+    no_existe a un error tipado plano y el éxito a _ok plano."""
+    # no_existe (tarea ausente, decision aceptar) → error tipado limpio.
+    db = FakeDB({"tareas": []})
+    r = asyncio.run(tools.ejecutar_tool(db, "aplicar_rollover", {"tarea_id": _T, "decision": "aceptar"}))
+    assert r["ok"] is False and r["tipo"] == "no_existe"
+    # Éxito (soltar) → _ok plano, sin doble anidación incomprensible.
+    db2 = FakeDB({"tareas": [{"id": _T, "titulo": "X", "completada": False}]})
+    r2 = asyncio.run(tools.ejecutar_tool(db2, "aplicar_rollover", {"tarea_id": _T, "decision": "soltar"}))
+    assert r2["ok"] is True and r2["datos"].get("decision") == "soltada"

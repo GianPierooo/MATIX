@@ -23,6 +23,12 @@ STATUS = {
     "prioridad_ocupada": status.HTTP_409_CONFLICT,
     "conflicto": status.HTTP_409_CONFLICT,
     "tarea_no_existe": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    # Estados no procesables (la petición se entiende pero no aplica a esta
+    # entidad/estado): editar/borrar una ocurrencia de un evento de Google;
+    # marcar/operar una acción siguiente que no existe o quedó inconsistente.
+    "no_soportado": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "sin_accion_siguiente": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "inconsistencia": status.HTTP_422_UNPROCESSABLE_CONTENT,
 }
 
 

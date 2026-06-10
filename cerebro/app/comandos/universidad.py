@@ -25,7 +25,7 @@ la regla de seguridad "Matix pide confirmación antes de borrar".
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 from uuid import UUID
 

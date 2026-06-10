@@ -62,10 +62,7 @@ from ..comandos import registro as _registro
 from ..db import Postgrest
 from ..schemas.apuntes import ApunteCreate, ApunteUpdate
 from ..schemas.cierres_dia import CierreDiaCreate
-from ..schemas.eventos import EventoCreate, EventoUpdate
 from ..schemas.movimientos import MovimientoCreate, MovimientoUpdate
-from ..schemas.proyectos import ProyectoCreate, ProyectoUpdate
-from ..schemas.tareas import TareaCreate, TareaUpdate
 from . import (
     arbol_proyecto,
     automatizaciones,
@@ -3847,7 +3844,7 @@ async def _eliminar_evento(db: Postgrest, args: dict) -> dict[str, Any]:
             "id": fila.get("id"),
             "titulo": fila.get("titulo"),
             "reversible": True,
-            "alcance": fila.get("alcance", "toda_serie"),
+            "alcance": fila.get("_alcance", "toda_serie"),
         }
     )
 
@@ -5769,7 +5766,23 @@ async def _aplicar_rollover(db: Postgrest, args: dict) -> dict[str, Any]:
     res = await _registro.ejecutar(
         db, "aplicar_rollover",
         {"tarea_id": args.get("tarea_id"), "decision": args.get("decision")}, origen="ia")
-    return res
+    if not res.get("ok"):
+        return res  # error de validación del comando (decisión/ id inválidos)
+    # El comando devuelve el dict CRUDO del rollover (para preservar el contrato
+    # 200 del endpoint REST). Para el LLM lo traducimos a una forma plana: éxito
+    # legible, o un error tipado claro si no se pudo aplicar.
+    d = res["datos"]
+    if not d.get("ok"):
+        if d.get("no_existe"):
+            return _error("no_existe", "Esa tarea ya no está en el hub.")
+        if d.get("sin_hueco"):
+            return _error(
+                "sin_hueco",
+                "No encontré un hueco libre para reprogramarla; quizá toca soltar "
+                "algo o re-escopar. No la moví a ciegas.",
+            )
+        return _error("interno", "No se pudo aplicar el rollover.")
+    return _ok(d)
 
 
 async def _configurar_horario(db: Postgrest, args: dict) -> dict[str, Any]:

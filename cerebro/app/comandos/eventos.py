@@ -210,16 +210,19 @@ async def cmd_editar(db: Postgrest, params: dict[str, Any]) -> dict[str, Any]:
     if actual.get("origen") == "google":
         return error("no_soportado", "Por ahora solo puedo editar TODA la serie de un evento de Google.")
     ancla = _fecha_ancla(actual)
+    if ancla is None:
+        # Un recurrente sin `inicia_en` válida no debería existir (el schema lo
+        # exige); si pasa, no inventamos una ocurrencia en fecha incorrecta.
+        return error("validacion", "Ese evento recurrente no tiene una fecha de inicio válida; no puedo separar una ocurrencia.")
 
     if alcance == "solo_esta":
         await _agregar_excepcion(db, actual, fecha)
-        dias = (fecha - ancla).days if ancla else 0
-        nuevo = _combinar_instancia(actual, edits, dias)
+        nuevo = _combinar_instancia(actual, edits, (fecha - ancla).days)
         fila = await db.insert(TABLA, nuevo)
         return ok({**fila, "_alcance": "solo_esta"})
 
     # esta_y_futuras
-    if ancla is not None and fecha <= ancla:
+    if fecha <= ancla:
         # Editar desde el ancla = toda la serie restante; no hace falta partir.
         fila = await db.update(TABLA, evento_id, edits)
         return ok(fila) if fila else error("no_existe", "Ese evento ya no está en el hub.")
@@ -228,8 +231,7 @@ async def cmd_editar(db: Postgrest, params: dict[str, Any]) -> dict[str, Any]:
         "recurrencia_hasta": (fecha - timedelta(days=1)).isoformat(),
         "recurrencia_conteo": None,
     })
-    dias = (fecha - ancla).days if ancla else 0
-    nueva = _combinar_serie(actual, edits, dias)
+    nueva = _combinar_serie(actual, edits, (fecha - ancla).days)
     fila = await db.insert(TABLA, nueva)
     return ok({**fila, "_alcance": "esta_y_futuras"})
 
@@ -254,20 +256,22 @@ async def cmd_eliminar(db: Postgrest, params: dict[str, Any]) -> dict[str, Any]:
         fila = await db.update(TABLA, evento_id, {"eliminado_en": _ahora_iso()})
         if fila is None:
             return error("no_existe", "Ese evento ya no está en el hub.")
-        return ok({**fila, "alcance": "toda_serie"})
+        return ok({**fila, "_alcance": "toda_serie"})
 
     if fecha is None:
         return error("validacion", "Para borrar una sola ocurrencia dime la fecha (`ocurrencia_fecha` YYYY-MM-DD).")
     if actual.get("origen") == "google":
         return error("no_soportado", "Por ahora solo puedo borrar TODA la serie de un evento de Google.")
     ancla = _fecha_ancla(actual)
+    if ancla is None:
+        return error("validacion", "Ese evento recurrente no tiene una fecha de inicio válida; no puedo separar una ocurrencia.")
 
     if alcance == "solo_esta":
         fila = await _agregar_excepcion(db, actual, fecha)
-        return ok({**(fila or actual), "alcance": "solo_esta", "fecha": fecha.isoformat()})
+        return ok({**(fila or actual), "_alcance": "solo_esta", "fecha": fecha.isoformat()})
 
     # esta_y_futuras
-    if ancla is not None and fecha <= ancla:
+    if fecha <= ancla:
         fila = await db.update(TABLA, evento_id, {"eliminado_en": _ahora_iso()})
     else:
         fila = await db.update(TABLA, evento_id, {
@@ -275,7 +279,7 @@ async def cmd_eliminar(db: Postgrest, params: dict[str, Any]) -> dict[str, Any]:
             "recurrencia_hasta": (fecha - timedelta(days=1)).isoformat(),
             "recurrencia_conteo": None,
         })
-    return ok({**(fila or actual), "alcance": "esta_y_futuras"})
+    return ok({**(fila or actual), "_alcance": "esta_y_futuras"})
 
 
 async def cmd_restaurar(db: Postgrest, params: dict[str, Any]) -> dict[str, Any]:

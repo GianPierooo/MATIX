@@ -261,3 +261,27 @@ def test_recurrencia_clases_y_eventos_un_solo_motor():
         por_clase = (recurrencia.sesion_ocurre_en(0, fecha)  # lunes
                      or recurrencia.sesion_ocurre_en(2, fecha))  # miércoles
         assert por_evento == por_clase, fecha
+
+
+# ── Post-revisión: alcance sobre Google, ancla inválida, mapeo HTTP ──────────
+
+
+def test_editar_ocurrencia_de_evento_google_es_no_soportado():
+    db = FakeDB({"eventos": [{**_serie_semanal(), "origen": "google", "external_id": "g1"}]})
+    r = asyncio.run(registro.ejecutar(db, "editar_evento", {
+        "evento_id": _EV, "titulo": "X", "alcance": "solo_esta", "ocurrencia_fecha": "2026-06-03"}))
+    assert r["ok"] is False and r["tipo"] == "no_soportado"
+
+
+def test_editar_recurrente_sin_inicia_valida_es_validacion():
+    # Un recurrente sin inicia_en válida: el guard evita crear una ocurrencia
+    # en fecha incorrecta (antes quedaba inicia_en=NULL silenciosamente).
+    db = FakeDB({"eventos": [{**_serie_semanal(), "inicia_en": None}]})
+    r = asyncio.run(registro.ejecutar(db, "editar_evento", {
+        "evento_id": _EV, "titulo": "X", "alcance": "solo_esta", "ocurrencia_fecha": "2026-06-03"}))
+    assert r["ok"] is False and r["tipo"] == "validacion"
+
+
+def test_http_mapea_no_soportado_a_422():
+    from app.comandos.http import STATUS
+    assert STATUS.get("no_soportado") == 422  # no cae al 400 por defecto

@@ -44,7 +44,8 @@ async def replanificar(
 ) -> dict:
     """Replanifica el RESTO del día desde la hora actual (corre/suelta por
     prioridad lo pendiente, respeta lo fijo)."""
-    return _datos_o_http(await registro.ejecutar(db, "replanificar_dia", {}, origen="ui"))
+    params = {"ahora": body.ahora.isoformat()} if body and body.ahora else {}
+    return _datos_o_http(await registro.ejecutar(db, "replanificar_dia", params, origen="ui"))
 
 
 @router.post("/despertar")

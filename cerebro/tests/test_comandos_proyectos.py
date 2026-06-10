@@ -269,3 +269,19 @@ def test_consultar_proyectos_filtra_por_estado():
     r = asyncio.run(registro.ejecutar(db, "consultar_proyectos", {"estado": "activo"}))
     assert r["ok"] and r["datos"]["total"] == 1
     assert r["datos"]["proyectos"][0]["nombre"] == "A"
+
+
+# ── Post-revisión: marcar acción siguiente propaga el error de completar ─────
+
+
+def test_marcar_accion_siguiente_propaga_error_de_completar():
+    """Si completar_tarea falla (p. ej. id no-UUID), NO se limpia el puntero ni
+    se reporta éxito falso: el error se propaga."""
+    db = FakeDB({
+        "proyectos": [{"id": _P, "nombre": "Tesis", "estado": "activo", "tarea_siguiente_id": "bad-no-uuid"}],
+        "tareas": [{"id": "bad-no-uuid", "titulo": "X", "completada": False, "proyecto_id": _P}],
+    })
+    r = asyncio.run(registro.ejecutar(db, "marcar_accion_siguiente_hecha", {"proyecto_id": _P}))
+    assert r["ok"] is False  # propagó el error de completar_tarea (id inválido)
+    # El puntero NO se limpió (no fingimos éxito).
+    assert _proys(db)[0]["tarea_siguiente_id"] == "bad-no-uuid"

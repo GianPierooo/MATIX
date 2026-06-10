@@ -136,10 +136,19 @@ async def cmd_plan_de_hoy(db: Postgrest, params: dict[str, Any]) -> dict[str, An
 
 
 async def cmd_replanificar_dia(db: Postgrest, params: dict[str, Any]) -> dict[str, Any]:
-    """Replanifica el RESTO del día desde la hora actual. Solo lectura."""
+    """Replanifica el RESTO del día desde la hora actual. Solo lectura. Acepta un
+    `ahora` ISO opcional (el endpoint /horario/replanificar lo expone para
+    pruebas / replan a una hora dada); sin él, usa la hora del servidor."""
     from ..matix import horario
 
-    data = await horario.plan_de_hoy_data(db, ahora=_ahora(), desde_ahora=True)
+    ahora = _ahora()
+    raw = params.get("ahora")
+    if raw:
+        try:
+            ahora = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw))
+        except (ValueError, TypeError):
+            return error("validacion", "`ahora` debe ser un timestamp ISO 8601.")
+    data = await horario.plan_de_hoy_data(db, ahora=ahora, desde_ahora=True)
     return ok(data)
 
 
