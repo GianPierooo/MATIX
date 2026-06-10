@@ -91,6 +91,7 @@ async def _sesion(
     ctx: Contexto,
     stop: asyncio.Event,
     log: Callable[[str], None],
+    conecto: list[bool] | None = None,
 ) -> None:
     log(f"abriendo WSS hacia {config.cerebro_ws_url}")
     ssl_ctx = _contexto_ssl(config)
@@ -105,6 +106,10 @@ async def _sesion(
         open_timeout=20,
     ) as ws:
         log("handshake OK: cerebro aceptó el token (auth confirmada).")
+        # Marca que esta sesión SÍ llegó a conectar: `correr` lo usa para
+        # resetear el backoff y reconectar RÁPIDO tras una caída sana.
+        if conecto is not None:
+            conecto[0] = True
         await ws.send(json.dumps({"tipo": "hola", "agente": "matix-pc"}))
         log("'hola' enviado; esperando acciones del cerebro.")
 
@@ -157,17 +162,27 @@ async def correr(
 ) -> None:
     backoff = BACKOFF_MIN
     while not stop.is_set():
+        conecto = [False]
+        motivo: str | None = None
         try:
-            await _sesion(config, registro, ctx, stop, log)
-            backoff = BACKOFF_MIN  # cierre limpio → resetea el backoff
+            await _sesion(config, registro, ctx, stop, log, conecto)
         except SeguridadConexion as e:
             # Falla de seguridad (no es wss, host equivocado): reintentar a
             # ciegas no ayuda, pero tampoco morimos en silencio.
             log(f"conexión rechazada por seguridad: {e}")
         except (WebSocketException, OSError, asyncio.TimeoutError) as e:
-            log(f"conexión caída ({type(e).__name__}); reintento en ~{backoff:.0f}s")
+            motivo = type(e).__name__
+        # Si la sesión LLEGÓ A CONECTAR, reseteamos el backoff: una caída tras
+        # una conexión sana (p. ej. el proxy de Railway corta WS de larga
+        # duración) se reintenta RÁPIDO (~1s), no arrastra los ~60s del backoff
+        # previo. Antes el reset solo ocurría en cierre limpio, así que cada
+        # caída real dejaba la PC "desconectada" ~1 min hasta el reintento.
+        if conecto[0]:
+            backoff = BACKOFF_MIN
         if stop.is_set():
             break
         espera = min(backoff, BACKOFF_MAX) * (0.8 + 0.4 * random.random())
+        if motivo:
+            log(f"conexión caída ({motivo}); reintento en ~{espera:.0f}s")
         await _esperar_o_stop(espera, stop)
         backoff = min(backoff * 2, BACKOFF_MAX)
