@@ -78,6 +78,38 @@ Verás algo como:
 Si la conexión se cae, el agente reintenta solo con backoff (1s, 2s, 4s… hasta
 60s). Apenas vuelve, Matix vuelve a ver tu PC como "conectada".
 
+## Arranque automático (al iniciar sesión)
+
+El agente solo conecta mientras corre. Para que arranque solo cada vez que
+inicias sesión en Windows (sin abrir una terminal a mano):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\instalar_autostart.ps1
+```
+
+Esto crea un acceso directo en tu **carpeta de Inicio** que lanza el agente con
+`pythonw.exe` (sin ventana), con tus permisos normales (nunca admin). Lo arranca
+de una vez, así que no necesitas reiniciar.
+
+Para quitarlo:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\desinstalar_autostart.ps1
+```
+
+Notas:
+
+- Se usa la **carpeta de Inicio** y no una Tarea Programada a propósito: bajo
+  Task Scheduler el `pythonw` del venv (de uv) se cuelga al arrancar por handles
+  de stdio inválidos en esa sesión. La carpeta de Inicio lanza en tu sesión
+  normal, donde conecta sin problemas.
+- Verás **dos** procesos `pythonw` en el Administrador de tareas: es normal — el
+  `pythonw` del venv es un "trampolín" de uv que re-ejecuta el intérprete base.
+  Hay **un solo agente**: un guard de instancia única impide que corra un segundo
+  si lo abres a mano (sale con código 6 en vez de pelear por el canal).
+- Diagnóstico: el arranque crudo queda en `agente_autostart.log` y el log del
+  daemon (conectado/desconectado, acciones) en `agente_runtime.log`.
+
 ## Kill switch (detenerlo al instante)
 
 - **Ctrl+C** en la terminal donde corre. El agente cierra la conexión limpio y

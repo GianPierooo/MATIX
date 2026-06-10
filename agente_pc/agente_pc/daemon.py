@@ -19,6 +19,7 @@ import logging
 import os
 import signal
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from . import autotest
@@ -42,6 +43,32 @@ def _configurar_logging() -> logging.Logger:
     )
     log.addHandler(h)
     return log
+
+
+def _agregar_log_archivo(log: logging.Logger) -> None:
+    """Añade un log en archivo ROTATIVO (`agente_pc/agente_runtime.log`) para que
+    el daemon sea diagnosticable aunque corra SIN consola — el caso del autostart
+    con `pythonw.exe`, que descarta `stderr`. Sin esto, "¿está conectada mi PC?"
+    no tendría dónde mirarse cuando el agente arranca solo al iniciar sesión.
+
+    Idempotente (no duplica el handler) y best-effort: si el archivo no se puede
+    abrir (permisos), el daemon sigue igual contra `stderr`. Se llama SOLO en la
+    ruta real del daemon, no en `--help`/`--test-connection`, para no ensuciar el
+    árbol durante los tests."""
+    if any(isinstance(h, RotatingFileHandler) for h in log.handlers):
+        return
+    ruta = Path(__file__).resolve().parents[1] / "agente_runtime.log"
+    try:
+        fh = RotatingFileHandler(
+            ruta, maxBytes=1_000_000, backupCount=3, encoding="utf-8",
+        )
+    except OSError:
+        return
+    fh.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+                          datefmt="%Y-%m-%d %H:%M:%S")
+    )
+    log.addHandler(fh)
 
 
 def chequear_venv() -> str | None:
@@ -153,6 +180,41 @@ def _es_elevado() -> bool:
             return bool(ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined]
         return os.geteuid() == 0  # type: ignore[attr-defined]
     except Exception:
+        return False
+
+
+# Mantiene vivo el handle del mutex durante toda la vida del proceso: si lo
+# recogiera el GC, Windows liberaria el mutex y el guard dejaria de proteger.
+_MUTEX_INSTANCIA = None
+
+
+def _ya_hay_otra_instancia() -> bool:
+    """¿Ya hay OTRO agente de Matix corriendo en esta sesion de Windows?
+
+    Evita duplicados: el autostart (carpeta de Inicio) lanza uno al iniciar
+    sesion; si ademas el usuario lo corre a mano, tendriamos DOS agentes con el
+    mismo token compitiendo por el canal. Usamos un mutex con nombre de ambito
+    de sesion (`Local\\`): si ya existe, hay otra instancia viva. El mutex se
+    libera SOLO cuando ese proceso muere (sin archivos de lock que queden
+    obsoletos tras un crash).
+
+    Solo aplica en Windows (el autostart es de Windows). En otros SO devuelve
+    False sin tocar nada — asi los tests y el CI (Linux) no se ven afectados.
+    """
+    if os.name != "nt":
+        return False
+    try:
+        ERROR_ALREADY_EXISTS = 183
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.CreateMutexW(None, False, "Local\\MatixAgentePC")
+        if not handle:
+            return False  # no pudimos crear el mutex: no bloqueamos el arranque
+        if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+            return True
+        global _MUTEX_INSTANCIA
+        _MUTEX_INSTANCIA = handle  # lo conservamos vivo
+        return False
+    except Exception:  # noqa: BLE001 — ante cualquier duda, NO bloquear el arranque
         return False
 
 
@@ -308,6 +370,21 @@ def main(argv: list[str] | None = None) -> int:
             "que toque archivos hasta que edites AGENTE_PC_ALLOWLIST en "
             "agente_pc/.env (separadas por ';' o saltos de línea)."
         )
+
+    # 7) Log en archivo: solo aquí, en la ruta real del daemon (no en los
+    # diagnósticos que salen antes), para que el autostart sin consola deje
+    # rastro de "conectado / desconectado".
+    _agregar_log_archivo(log)
+
+    # 8) Instancia única: si ya hay otro agente vivo en esta sesión (p. ej. el
+    # del autostart) NO arrancamos un segundo que pelee por el canal.
+    if _ya_hay_otra_instancia():
+        log.error(
+            "ya hay otro agente de Matix corriendo en esta sesión. No arranco un "
+            "segundo (pelearían por el canal). Cierra el anterior si quieres este, "
+            "o quita el autostart con scripts/desinstalar_autostart.ps1."
+        )
+        return 6
 
     try:
         return asyncio.run(_run(config, log))

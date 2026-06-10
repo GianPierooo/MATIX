@@ -532,6 +532,22 @@ exige esa marca y revalida cada ruta en su borde. Lado cerebro: canal singleton
 cuelga). App: indicador "PC: conectada/desconectada" en Ajustes → Conexión +
 chips de las tools en el chat. Guía completa en `docs/Capa6_Agente_PC.md`.
 
+**Arranque automático (autostart).** El agente solo conecta mientras corre; si
+no está vivo, Matix ve "PC desconectada" (síntoma de "lo de pc no funciona").
+Se deja permanente con un acceso directo en la **carpeta de Inicio** del usuario
+(`scripts/instalar_autostart.ps1`; se quita con `desinstalar_autostart.ps1`):
+arranca al iniciar sesión, con `pythonw.exe` (sin ventana), sin admin, sin
+elevación. Se eligió la carpeta de Inicio y NO una Tarea Programada porque bajo
+Task Scheduler el `pythonw` del venv de uv (trampolín que re-ejecuta el
+intérprete base) se cuelga en el arranque por handles de stdio inválidos en esa
+sesión; la carpeta de Inicio lanza en la sesión interactiva real, donde conecta
+sin problemas. Operabilidad: lanzador `scripts/arrancar.py` (resuelve la raíz por
+`__file__`, independiente del CWD, y redirige stdout/stderr a
+`agente_autostart.log` porque `pythonw` los deja en None) + log de runtime
+rotativo `agente_runtime.log` + guard de **instancia única** (mutex de sesión
+`Local\MatixAgentePC`: un segundo agente lanzado a mano sale con código 6 en vez
+de pelear por el canal).
+
 ### Cerebro — endpoints REST (~126 rutas, prefijo /api/v1)
 (Nota 2026-06-04: se retiró el router /tracks, legacy; ver «Consolidación» abajo.)
 

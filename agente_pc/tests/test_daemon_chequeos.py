@@ -74,3 +74,45 @@ def test_token_largo_y_limpio_no_avisa() -> None:
     # Token URLsafe de 48 bytes ~= 64 chars, sin espacios.
     tok = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIjKlMnOpQrStUvWxYzABCD"
     assert daemon.diagnosticar_token(_cfg(token=tok)) is None
+
+
+# ── log en archivo (observabilidad del autostart sin consola) ───────────────
+
+
+def test_agregar_log_archivo_idempotente_y_escribe(monkeypatch, tmp_path: Path) -> None:
+    """`_agregar_log_archivo` deja UN solo RotatingFileHandler (idempotente) y
+    crea el archivo en `agente_pc/agente_runtime.log`. Apuntamos `__file__` a una
+    raíz simulada para no tocar el árbol real."""
+    import logging
+    from logging.handlers import RotatingFileHandler
+
+    pkg = tmp_path / "agente_pc"
+    pkg.mkdir()
+    # parents[1] de pkg/daemon.py == tmp_path → el log cae en tmp_path.
+    monkeypatch.setattr(daemon, "__file__", str(pkg / "daemon.py"))
+
+    log = logging.getLogger("matix.agente.test_filelog")
+    log.handlers.clear()
+    daemon._agregar_log_archivo(log)
+    daemon._agregar_log_archivo(log)  # segunda vez: NO duplica
+
+    fhs = [h for h in log.handlers if isinstance(h, RotatingFileHandler)]
+    try:
+        assert len(fhs) == 1
+        assert (tmp_path / "agente_runtime.log").exists()
+    finally:
+        # Cierra el handler: en Windows un archivo abierto bloquea el tmp_path.
+        for h in fhs:
+            h.close()
+            log.removeHandler(h)
+
+
+# ── instancia única (guard anti-duplicados del autostart) ───────────────────
+
+
+def test_instancia_unica_en_no_windows_no_bloquea(monkeypatch) -> None:
+    """Fuera de Windows el guard NO aplica (el autostart es de Windows): debe
+    devolver False sin tocar ctypes — así el daemon y el CI en Linux nunca se
+    bloquean por este chequeo."""
+    monkeypatch.setattr(daemon.os, "name", "posix")
+    assert daemon._ya_hay_otra_instancia() is False
