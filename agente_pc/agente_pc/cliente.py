@@ -28,6 +28,9 @@ BACKOFF_MIN = 1.0
 BACKOFF_MAX = 60.0
 PING_INTERVAL = 20.0
 PING_TIMEOUT = 20.0
+# Latido de datos (no de protocolo) para proxies que cortan WS "ociosos" pese al
+# ping/pong. Debe ser menor que el corte del proxy; 25s va holgado.
+LATIDO_INTERVAL = 25.0
 # Un listado de nombres nunca llega a esto; corta payloads anómalos.
 MAX_MENSAJE = 256 * 1024  # 256 KiB
 
@@ -119,7 +122,20 @@ async def _sesion(
             log("kill switch: cerrando WS limpio (code=1001).")
             await ws.close(code=1001, reason="apagado")
 
+        # Latido de DATOS: el ping/pong de protocolo (cada 20s) no siempre evita
+        # que un proxy (Railway) corte un WS de larga duración. Un mensaje de
+        # datos periódico cuenta como actividad y mantiene viva la conexión. El
+        # cerebro ignora todo lo que no sea 'resultado', así que es inocuo.
+        async def _latido() -> None:
+            try:
+                while True:
+                    await asyncio.sleep(LATIDO_INTERVAL)
+                    await ws.send(json.dumps({"tipo": "latido"}))
+            except (asyncio.CancelledError, WebSocketException, OSError):
+                return
+
         tarea_stop = asyncio.create_task(_vigilar_stop())
+        tarea_latido = asyncio.create_task(_latido())
         try:
             async for crudo in ws:
                 try:
@@ -144,6 +160,7 @@ async def _sesion(
                     break
         finally:
             tarea_stop.cancel()
+            tarea_latido.cancel()
 
 
 async def _esperar_o_stop(segundos: float, stop: asyncio.Event) -> None:
