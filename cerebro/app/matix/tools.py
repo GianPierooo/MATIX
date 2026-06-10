@@ -487,6 +487,36 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "definir_accion_siguiente",
+            "description": (
+                "DEFINE o CAMBIA cuál es la acción siguiente de un proyecto. "
+                "Úsala cuando el usuario diga «la siguiente acción de [proyecto] "
+                "es [X]» o «cambia la próxima acción de [proyecto]». Pasa el "
+                "`proyecto_id` y el `tarea_id` de la tarea que será la acción "
+                "siguiente (la tarea ya debe existir; si no, créala primero con "
+                "crear_tarea). Para QUITARLA sin reemplazo, pasa `tarea_id` null. "
+                "La tarea no puede pertenecer a otro proyecto."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proyecto_id": _UUID,
+                    "tarea_id": {
+                        **_UUID,
+                        "description": (
+                            "Tarea que pasa a ser la acción siguiente. null para "
+                            "dejar el proyecto sin acción siguiente."
+                        ),
+                    },
+                },
+                "required": ["proyecto_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "registrar_cierre",
             "description": (
                 "Registra el cierre del día (ritual nocturno). "
@@ -3555,83 +3585,32 @@ async def _reabrir_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
     return _ok({"id": d.get("id"), "titulo": d.get("titulo")})
 
 
-async def _marcar_accion_siguiente_hecha(
-    db: Postgrest, args: dict
-) -> dict[str, Any]:
-    raw_id = args.get("proyecto_id")
-    if not raw_id:
-        return _error("validacion", "Falta el `proyecto_id`.")
-    try:
-        proyecto_id = str(UUID(str(raw_id)))
-    except (ValueError, TypeError):
-        return _error(
-            "validacion",
-            f"El id «{raw_id}» no es un UUID válido.",
-        )
+# ── Proyectos: ENVOLTORIOS sobre los comandos (comandos/proyectos.py) ─────────
+# La lógica (tope de 3, prioridad, coherencia de la acción siguiente, estado,
+# avance) vive UNA sola vez en el comando; la app usa los endpoints, que llaman
+# al MISMO comando.
 
-    proyecto = await db.get("proyectos", proyecto_id)
-    if proyecto is None:
-        return _error(
-            "no_existe",
-            "Ese proyecto ya no está en el hub.",
-        )
 
-    tarea_sig_id = proyecto.get("tarea_siguiente_id")
-    if not tarea_sig_id:
-        return _error(
-            "sin_accion_siguiente",
-            (
-                f"El proyecto «{proyecto['nombre']}» no tiene una "
-                "acción siguiente definida ahora mismo."
-            ),
-            sugerencia=(
-                "Dile al usuario que defina la próxima acción "
-                "siguiente desde la app (Detalle del proyecto)."
-            ),
-        )
+def _shape_proyecto_estado(d: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "id": d.get("id"), "nombre": d.get("nombre"), "estado": d.get("estado"),
+    }
+    for k in ("estado_anterior", "ya_estaba_asi", "aviso"):
+        if d.get(k) is not None:
+            out[k] = d[k]
+    return out
 
-    tarea = await db.get("tareas", tarea_sig_id)
-    if tarea is None:
-        # Inconsistencia: el proyecto apunta a una tarea que no
-        # existe. Limpiamos el puntero igual.
-        await db.update(
-            "proyectos",
-            proyecto_id,
-            {
-                "tarea_siguiente_id": None,
-                "ultima_actividad_en": datetime.now(timezone.utc).isoformat(),
-            },
-        )
-        return _error(
-            "inconsistencia",
-            (
-                "La acción siguiente apuntaba a una tarea que ya no "
-                "existe. Limpié la referencia. Dile al usuario "
-                "que defina una nueva."
-            ),
-        )
 
-    ahora = datetime.now(timezone.utc).isoformat()
-    if not tarea.get("completada"):
-        # Completar la tarea por el COMANDO canónico: gana repetición + sync de
-        # árbol/set, igual que cualquier otra forma de completar (D5).
-        await _registro.ejecutar(
-            db, "completar_tarea", {"tarea_id": tarea_sig_id}, origen="accion_siguiente"
-        )
-
-    await db.update(
-        "proyectos",
-        proyecto_id,
-        {"tarea_siguiente_id": None, "ultima_actividad_en": ahora},
+async def _marcar_accion_siguiente_hecha(db: Postgrest, args: dict) -> dict[str, Any]:
+    # Envoltorio del comando: completa la acción siguiente por la ruta canónica
+    # (repetición + sync de árbol/set vía completar_tarea) — D5.
+    return await _registro.ejecutar(
+        db, "marcar_accion_siguiente_hecha", args, origen="ia"
     )
 
-    return _ok(
-        {
-            "proyecto_id": proyecto_id,
-            "proyecto_nombre": proyecto["nombre"],
-            "tarea_completada": tarea["titulo"],
-        }
-    )
+
+async def _definir_accion_siguiente(db: Postgrest, args: dict) -> dict[str, Any]:
+    return await _registro.ejecutar(db, "definir_accion_siguiente", args, origen="ia")
 
 
 async def _registrar_cierre(db: Postgrest, args: dict) -> dict[str, Any]:
@@ -3804,214 +3783,73 @@ async def _eliminar_apunte(db: Postgrest, args: dict) -> dict[str, Any]:
 
 
 # ── Proyectos: crear / editar / aparcar / terminar / reactivar ──────
-
-_TOPE_PROYECTOS_ACTIVOS = creacion_proyecto.TOPE_PROYECTOS_ACTIVOS
-_TOPE_SKILLS_ACTIVAS = creacion_proyecto.TOPE_SKILLS_ACTIVAS
-_MSG_TOPE = (
-    f"Ya hay {_TOPE_PROYECTOS_ACTIVOS} proyectos activos. Aparca o "
-    "termina uno primero."
-)
-
-
-async def _contar_proyectos_activos(
-    db: Postgrest, *, excluir_id: str | None = None
-) -> int:
-    """Proyectos de TRABAJO activos (es_skill=false): los que cuentan para el
-    tope duro de 3. Las skills no consumen slot."""
-    activos = await db.list("proyectos", filters={"estado": "activo"})
-    activos = creacion_proyecto.solo_proyectos(activos)
-    if excluir_id:
-        activos = [p for p in activos if p["id"] != excluir_id]
-    return len(activos)
-
-
-async def _contar_skills_activas(
-    db: Postgrest, *, excluir_id: str | None = None
-) -> int:
-    """Skills/hábitos activas (es_skill=true): para el tope BLANDO de 2."""
-    activos = await db.list("proyectos", filters={"estado": "activo"})
-    skills = creacion_proyecto.solo_skills(activos)
-    if excluir_id:
-        skills = [p for p in skills if p["id"] != excluir_id]
-    return len(skills)
+# El tope de 3, el tope blando de skills y el conteo de activos viven ahora en
+# el comando (comandos/proyectos.py); estas tools solo dan forma para el LLM.
 
 
 async def _crear_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
-    try:
-        body = ProyectoCreate(**args)
-    except ValidationError as e:
-        return _err_validacion(e)
-    payload = body.model_dump(mode="json", exclude_none=True)
-
-    es_skill = bool(payload.get("es_skill"))
-    aviso_skill: str | None = None
-    if payload.get("estado", "activo") == "activo":
-        if es_skill:
-            # Tope BLANDO de skills: no bloquea, solo avisa para que el usuario
-            # decida (un hobby no se gestiona con candado).
-            activas = await _contar_skills_activas(db)
-            cap = creacion_proyecto.evaluar_capacidad_skill(activas)
-            if cap["excede"]:
-                aviso_skill = cap["motivo"]
-        elif await _contar_proyectos_activos(db) >= _TOPE_PROYECTOS_ACTIVOS:
-            return _error(
-                "tope_proyectos",
-                _MSG_TOPE,
-                sugerencia=(
-                    "Sugiere al usuario que aparque o termine alguno, "
-                    "y vuelve a llamarme. O crea el nuevo como "
-                    "`aparcado` para guardarlo sin activarlo."
-                ),
-            )
-    payload["ultima_actividad_en"] = datetime.now(timezone.utc).isoformat()
-    fila = await db.insert("proyectos", payload)
-    return _ok(
-        {
-            "id": fila["id"],
-            "nombre": fila["nombre"],
-            "estado": fila["estado"],
-            "es_skill": fila.get("es_skill", False),
-            **({"aviso": aviso_skill} if aviso_skill else {}),
-            "nota": (
-                "Proyecto creado. AHORA lanza el INTAKE ANALÍTICO con "
-                "intake_proyecto (detecta el tipo y te da preguntas afiladas por "
-                "parámetro): analiza, señala huecos/incoherencias, guarda cada "
-                "respuesta con guardar_parametro_proyecto, captura el porqué y los "
-                "criterios de éxito. NO planees hasta que el gate diga listo "
-                "(meta clara, medible, con plazo + requeridos). Recién ahí arma el "
-                "PLAN EN CAPAS (generar_arbol_proyecto) y marca como hecho lo que "
-                "ya esté hecho. Una pregunta a la vez; se puede pausar."
-            ),
-        }
+    res = await _registro.ejecutar(db, "crear_proyecto", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    fila = res["datos"]
+    out: dict[str, Any] = {
+        "id": fila["id"], "nombre": fila["nombre"], "estado": fila["estado"],
+        "es_skill": fila.get("es_skill", False),
+    }
+    if fila.get("aviso"):
+        out["aviso"] = fila["aviso"]
+    out["nota"] = (
+        "Proyecto creado. AHORA lanza el INTAKE ANALÍTICO con intake_proyecto "
+        "(detecta el tipo y te da preguntas afiladas por parámetro): analiza, "
+        "señala huecos/incoherencias, guarda cada respuesta con "
+        "guardar_parametro_proyecto, captura el porqué y los criterios de éxito. "
+        "NO planees hasta que el gate diga listo (meta clara, medible, con plazo "
+        "+ requeridos). Recién ahí arma el PLAN EN CAPAS (generar_arbol_proyecto) "
+        "y marca como hecho lo que ya esté hecho. Una pregunta a la vez; se "
+        "puede pausar."
     )
+    return _ok(out)
 
 
 async def _eliminar_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
     """Borra un proyecto y todo lo suyo (árbol, perfil, set) — permanente.
-    Sirve para DESHACER una importación recién creada. Confirmación obligatoria
-    (está en _REQUIERE_CONFIRMACION)."""
-    proyecto_id, err = _validar_uuid(args.get("proyecto_id"), "proyecto_id")
-    if err:
-        return err
-    actual = await db.get("proyectos", proyecto_id)
-    if actual is None:
-        return _error("no_existe", "Ese proyecto ya no está.")
-    await db.delete("proyectos", proyecto_id)
-    return _ok({"id": proyecto_id, "nombre": actual.get("nombre"), "borrado": True})
+    Confirmación obligatoria (está en _REQUIERE_CONFIRMACION)."""
+    res = await _registro.ejecutar(db, "eliminar_proyecto", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    fila = res["datos"]
+    return _ok({"id": fila.get("id"), "nombre": fila.get("nombre"), "borrado": True})
 
 
 async def _editar_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
-    proyecto_id, err = _validar_uuid(args.get("proyecto_id"), "proyecto_id")
-    if err:
-        return err
-    campos = {k: v for k, v in args.items() if k != "proyecto_id"}
-    if not campos:
-        return _error("validacion", "No me pasaste qué campo cambiar.")
-    # Bloqueamos el cambio de `estado` por esta vía — para eso hay
-    # tools dedicadas que enforce-an el tope de 3.
-    if "estado" in campos:
+    # El cambio de estado va por aparcar/terminar/reactivar (enforce-an el tope);
+    # esta tool no lo expone.
+    if "estado" in args:
         return _error(
             "validacion",
-            "Para cambiar el estado del proyecto usa "
-            "`aparcar_proyecto`, `terminar_proyecto` o "
-            "`reactivar_proyecto`.",
+            "Para cambiar el estado del proyecto usa `aparcar_proyecto`, "
+            "`terminar_proyecto` o `reactivar_proyecto`.",
         )
-    try:
-        body = ProyectoUpdate(**campos)
-    except ValidationError as e:
-        return _err_validacion(e)
-    payload = body.model_dump(mode="json", exclude_unset=True)
-    payload["ultima_actividad_en"] = datetime.now(timezone.utc).isoformat()
-    fila = await db.update("proyectos", proyecto_id, payload)
-    if fila is None:
-        return _error("no_existe", "Ese proyecto ya no está en el hub.")
-    return _ok(
-        {
-            "id": proyecto_id,
-            "nombre": fila["nombre"],
-            "estado": fila["estado"],
-        }
-    )
-
-
-async def _cambiar_estado_proyecto(
-    db: Postgrest,
-    args: dict,
-    *,
-    nuevo_estado: str,
-) -> dict[str, Any]:
-    """Lógica compartida entre aparcar / terminar / reactivar."""
-    proyecto_id, err = _validar_uuid(args.get("proyecto_id"), "proyecto_id")
-    if err:
-        return err
-
-    actual = await db.get("proyectos", proyecto_id)
-    if actual is None:
-        return _error("no_existe", "Ese proyecto ya no está en el hub.")
-    estado_actual = actual["estado"]
-    if estado_actual == nuevo_estado:
-        return _ok(
-            {
-                "id": proyecto_id,
-                "nombre": actual["nombre"],
-                "estado": nuevo_estado,
-                "ya_estaba_asi": True,
-            }
-        )
-
-    ahora = datetime.now(timezone.utc).isoformat()
-    payload: dict[str, Any] = {
-        "estado": nuevo_estado,
-        "ultima_actividad_en": ahora,
-    }
-    aviso_skill: str | None = None
-    if nuevo_estado == "activo":
-        if actual.get("es_skill"):
-            # Tope BLANDO de skills: no bloquea, solo avisa.
-            activas = await _contar_skills_activas(db, excluir_id=proyecto_id)
-            cap = creacion_proyecto.evaluar_capacidad_skill(activas)
-            if cap["excede"]:
-                aviso_skill = cap["motivo"]
-        else:
-            # Reactivar un proyecto de trabajo: aplica el tope duro de 3.
-            activos = await _contar_proyectos_activos(db, excluir_id=proyecto_id)
-            if activos >= _TOPE_PROYECTOS_ACTIVOS:
-                return _error(
-                    "tope_proyectos",
-                    _MSG_TOPE,
-                    sugerencia=(
-                        "Sugiere al usuario que aparque o termine otro "
-                        "antes de reactivar este."
-                    ),
-                )
-        payload["inactivo_desde"] = None
-    else:
-        payload["inactivo_desde"] = ahora
-
-    fila = await db.update("proyectos", proyecto_id, payload)
-    if fila is None:
-        return _error("interno", "No se pudo cambiar el estado.")
-    return _ok(
-        {
-            "id": proyecto_id,
-            "nombre": fila["nombre"],
-            "estado": fila["estado"],
-            "estado_anterior": estado_actual,
-            **({"aviso": aviso_skill} if aviso_skill else {}),
-        }
-    )
+    res = await _registro.ejecutar(db, "editar_proyecto", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    fila = res["datos"]
+    return _ok({"id": fila.get("id"), "nombre": fila.get("nombre"), "estado": fila.get("estado")})
 
 
 async def _aparcar_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
-    return await _cambiar_estado_proyecto(db, args, nuevo_estado="aparcado")
+    res = await _registro.ejecutar(db, "aparcar_proyecto", args, origen="ia")
+    return res if not res.get("ok") else _ok(_shape_proyecto_estado(res["datos"]))
 
 
 async def _terminar_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
-    return await _cambiar_estado_proyecto(db, args, nuevo_estado="terminado")
+    res = await _registro.ejecutar(db, "terminar_proyecto", args, origen="ia")
+    return res if not res.get("ok") else _ok(_shape_proyecto_estado(res["datos"]))
 
 
 async def _reactivar_proyecto(db: Postgrest, args: dict) -> dict[str, Any]:
-    return await _cambiar_estado_proyecto(db, args, nuevo_estado="activo")
+    res = await _registro.ejecutar(db, "reactivar_proyecto", args, origen="ia")
+    return res if not res.get("ok") else _ok(_shape_proyecto_estado(res["datos"]))
 
 
 # ── buscar_apuntes — RAG, solo lectura (Capa 3 Paso 1) ──────────────
@@ -4424,34 +4262,8 @@ async def _consultar_eventos(db: Postgrest, args: dict) -> dict[str, Any]:
 
 
 async def _consultar_proyectos(db: Postgrest, args: dict) -> dict[str, Any]:
-    estado = args.get("estado") or "activo"
-    if estado not in ("activo", "aparcado", "terminado", "todos"):
-        estado = "activo"
-    en_riesgo = bool(args.get("en_riesgo"))
-    proyectos = await db.list("proyectos")
-    ahora = datetime.now(timezone.utc)
-    filtrados = filtrar_proyectos(
-        proyectos, estado=estado, en_riesgo=en_riesgo, ahora=ahora
-    )
-    filtrados.sort(key=lambda p: p.get("prioridad") or 99)
-    return _ok(
-        {
-            "total": len(filtrados),
-            "en_riesgo_solicitado": en_riesgo,
-            "proyectos": [
-                {
-                    "id": p["id"],
-                    "nombre": p.get("nombre"),
-                    "estado": p.get("estado"),
-                    "prioridad": p.get("prioridad"),
-                    "linea_meta": p.get("linea_meta"),
-                    "dias_inactivo": p.get("dias_inactivo"),
-                    "en_riesgo": p.get("en_riesgo"),
-                }
-                for p in filtrados
-            ],
-        }
-    )
+    # Envoltorio del comando `consultar_proyectos`.
+    return await _registro.ejecutar(db, "consultar_proyectos", args, origen="ia")
 
 
 # ── Apuntes: listado plano sin RAG ──────────────────────────────────
@@ -6485,6 +6297,7 @@ _HANDLERS = {
     "eliminar_proyecto": _eliminar_proyecto,
     # Acción siguiente + cierre
     "marcar_accion_siguiente_hecha": _marcar_accion_siguiente_hecha,
+    "definir_accion_siguiente": _definir_accion_siguiente,
     "registrar_cierre": _registrar_cierre,
     # Finanzas (movimientos)
     "crear_movimiento": _crear_movimiento,
@@ -6627,6 +6440,7 @@ TABLAS_AFECTADAS = {
     "reactivar_proyecto": ["proyectos"],
     "eliminar_proyecto": ["proyectos"],
     "marcar_accion_siguiente_hecha": ["tareas", "proyectos"],
+    "definir_accion_siguiente": ["proyectos", "tareas"],
     "registrar_cierre": ["cierres_dia"],
     # Finanzas
     "crear_movimiento": ["movimientos"],

@@ -17,6 +17,12 @@ STATUS = {
     "prohibida": status.HTTP_403_FORBIDDEN,
     "interno": status.HTTP_500_INTERNAL_SERVER_ERROR,
     "desconocido": status.HTTP_400_BAD_REQUEST,
+    # Proyectos: conflictos de regla (tope de 3, prioridad ocupada, acción
+    # siguiente colgada de otro proyecto) y referencia inexistente.
+    "tope_proyectos": status.HTTP_409_CONFLICT,
+    "prioridad_ocupada": status.HTTP_409_CONFLICT,
+    "conflicto": status.HTTP_409_CONFLICT,
+    "tarea_no_existe": status.HTTP_422_UNPROCESSABLE_CONTENT,
 }
 
 

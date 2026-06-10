@@ -851,7 +851,14 @@ async def completar_bloque(
     del día. Al recalcular el plan, ese bloque ya no aparece."""
     hecho = []
     if nodo_id:
-        await db.update("arbol_nodos", nodo_id, {"estado": "hecho"})
+        # Cerrar el nodo por el COMANDO canónico (D5): mismo punto que la UI y la
+        # IA — marca el nodo hecho y refresca la actividad del proyecto, así el %
+        # y el motor de evolución quedan consistentes sin importar el camino.
+        from ..comandos import registro
+
+        await registro.ejecutar(
+            db, "completar_avance_proyecto", {"nodo_id": nodo_id}, origen="bloque"
+        )
         hecho.append("nodo")
     if tarea_id:
         # Completar por el COMANDO canónico (D5): mismo estado que completar por

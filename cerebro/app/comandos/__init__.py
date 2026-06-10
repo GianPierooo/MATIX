@@ -11,6 +11,7 @@ Uso desde un envoltorio (router o tool):
 from __future__ import annotations
 
 from . import eventos as _eventos
+from . import proyectos as _proyectos
 from . import tareas as _tareas
 from . import universidad as _universidad
 from .registro import Comando, RegistroComandos, Riesgo, error, ok, registro
@@ -19,5 +20,6 @@ from .registro import Comando, RegistroComandos, Riesgo, error, ok, registro
 _tareas.registrar(registro)
 _universidad.registrar(registro)
 _eventos.registrar(registro)
+_proyectos.registrar(registro)
 
 __all__ = ["registro", "RegistroComandos", "Comando", "Riesgo", "ok", "error"]

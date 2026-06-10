@@ -25,7 +25,7 @@ CORE: frozenset[str] = frozenset({
     "editar_tarea", "editar_evento", "editar_apunte",
     "completar_tarea", "reabrir_tarea",
     "eliminar_tarea", "eliminar_evento", "eliminar_apunte",
-    "marcar_accion_siguiente_hecha", "registrar_cierre",
+    "marcar_accion_siguiente_hecha", "definir_accion_siguiente", "registrar_cierre",
     # Proyectos básicos (crear/estado; lo avanzado va en su grupo)
     "crear_proyecto", "editar_proyecto", "aparcar_proyecto",
     "terminar_proyecto", "reactivar_proyecto", "eliminar_proyecto",
