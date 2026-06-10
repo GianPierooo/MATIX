@@ -147,8 +147,27 @@ actividad del proyecto, así el % y el motor de evolución quedan consistentes.
 El motor de evolución sigue intacto: el % se deriva de los estados de los nodos
 y la suite de árbol/intake sigue delegando a sus módulos (no se reescribió).
 
-Siguiente: Fase 5+ — Planificador, Apuntes, Finanzas y Ajustes al mismo patrón;
-gate de confirmación de acciones consecuentes (anotado desde Fase 1).
+Avance — Fase 5 (Planificador / Tu día): HECHO. El subsistema más
+interconectado (set del día, plan en ventanas, rollover, despertar, bloques)
+migrado al registro (`comandos/planificador.py`): 12 comandos, todos
+ENVOLTORIOS DELGADOS sobre las funciones deterministas que ya existían en
+`matix.horario`/`planificador_diario`/`rollover`. UI/robot e IA invocan el mismo
+handler. Determinismo preservado (no negociable): los handlers no importan ni
+llaman al LLM (módulos `matix` importados perezosamente); la IA solo elige qué
+comando llamar, el trabajo (huecos, colocación, rundown del despertar, rollover)
+lo hace el motor determinista — hay un test-bomba que revienta si algún camino
+del bucle tocara el modelo. D3 consolidado: «agregar al día» tiene una sola ruta
+canónica vía `agendar_bloque` (UI POST /horario/agendar e IA entran por el mismo
+comando; sigue creando Tarea con bloque, nunca Evento pelado). D5/Fase 4
+reconciliado: `completar_bloque` enruta a `completar_tarea` y
+`completar_avance_proyecto`. La IA ahora maneja el bucle completo (6 tools
+nuevas: despertar, agendar, saltar/completar bloque, proponer/aplicar rollover).
+El contrato de /rollover/decidir se preservó (sin_hueco/no_existe siguen siendo
+200, no error).
+
+Siguiente: Apuntes, Finanzas y Ajustes (marginales) si se quisieran; gate de
+confirmación de acciones consecuentes (anotado desde Fase 1) — el cimiento de
+riesgo por comando ya está puesto en las 5 fases.
 
 Parqueado para 2.0 (no entra en 1.0):
 
