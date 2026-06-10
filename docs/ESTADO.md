@@ -131,8 +131,24 @@ Consolidó D4: formulario manual, OCR de sílabo e IA crean por `crear_evento` �
 una sola ruta con acceso a recurrencia; el router conserva la orquestación de
 Google Calendar sobre el comando.
 
-Siguiente: Fase 4+ — Proyectos, Planificador y el resto de secciones al mismo
-patrón; gate de confirmación de acciones consecuentes (anotado desde Fase 1).
+Avance — Fase 4 (Proyectos): HECHO. Proyectos migrado al registro
+(`comandos/proyectos.py`): crear/editar/aparcar/terminar/reactivar/eliminar/
+consultar como comandos con handler único; el endpoint de la app y la tool de
+la IA envuelven el MISMO handler. Consolidó la lógica que estaba duplicada
+entre el router y las tools (tope de 3 activos, prioridad única, coherencia de
+la acción siguiente, `inactivo_desde`, tope blando de skills) en una sola
+fuente. Acción siguiente (G9): nuevo `definir_accion_siguiente` para DEFINIR o
+CAMBIAR la acción siguiente desde la IA (antes solo se marcaba hecha o se
+cambiaba por el PATCH del router); `marcar_accion_siguiente_hecha` migrado.
+Resto de D5: nuevo `completar_avance_proyecto` cierra un nodo del árbol por
+cualquier camino (UI, IA, o el bloque agendado de Tu día) — el camino del
+bloque pasaba por un update directo y ahora enruta al comando, que refresca la
+actividad del proyecto, así el % y el motor de evolución quedan consistentes.
+El motor de evolución sigue intacto: el % se deriva de los estados de los nodos
+y la suite de árbol/intake sigue delegando a sus módulos (no se reescribió).
+
+Siguiente: Fase 5+ — Planificador, Apuntes, Finanzas y Ajustes al mismo patrón;
+gate de confirmación de acciones consecuentes (anotado desde Fase 1).
 
 Parqueado para 2.0 (no entra en 1.0):
 
