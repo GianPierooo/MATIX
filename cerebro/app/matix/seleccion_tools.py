@@ -79,15 +79,18 @@ _GRUPOS: list[tuple[frozenset[str], re.Pattern[str]]] = [
         r"\b(curso|materia|clase|profesor|universidad|\buni\b|facultad|ciclo|"
         r"semestre|examen|parcial|\bfinal(es)?\b|entrega|evaluacion|nota|"
         r"calificacion|silabo|syllabus|aula)\w*")),
-    # Planificador diario / horario
+    # Planificador diario / horario + bucle diario (bloques, despertar, rollover)
     (frozenset({
         "proponer_set_dia", "ver_set_dia", "aceptar_set_dia", "saltar_item_set",
         "configurar_planificacion", "plan_de_hoy", "replanificar_dia",
         "configurar_horario",
+        "agendar_bloque", "saltar_bloque", "completar_bloque", "marcar_despertar",
+        "proponer_rollover", "aplicar_rollover",
     }), re.compile(
         r"\b(set del dia|set de hoy|mi set|plan(ific)?|horario|replanific|"
-        r"agenda|hueco|ventana|despert|dormir|ancla|rutina|pico|reorganiz|"
-        r"acomod|que tengo hoy|que hago hoy|mi dia)\w*")),
+        r"agenda|hueco|ventana|despert|levant|dormir|ancla|rutina|pico|reorganiz|"
+        r"acomod|que tengo hoy|que hago hoy|mi dia|bloque|reprogram|pospon|"
+        r"otro dia|suelt|no cumpl|no alcan|pendiente|vencid|retomar)\w*")),
     # Automatizaciones
     (frozenset({
         "crear_automatizacion", "listar_automatizaciones",

@@ -8,13 +8,12 @@ La app lo surfacea tocable por el robot-compañero; nada se mueve en silencio.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from ..comandos import registro
+from ..comandos.http import datos_o_http as _datos_o_http
 from ..db import Postgrest, get_db
-from ..matix import rollover
 from ..security import require_api_key
 
 router = APIRouter(
@@ -26,7 +25,7 @@ router = APIRouter(
 
 class DecisionRollover(BaseModel):
     tarea_id: str
-    # 'aceptar' | 'otro_dia' | 'soltar'
+    # 'aceptar' | 'otro_dia' | 'soltar' | 'posponer'
     decision: str
 
 
@@ -34,9 +33,7 @@ class DecisionRollover(BaseModel):
 async def obtener_rollover(db: Postgrest = Depends(get_db)) -> dict:
     """Propuestas de reprogramación para lo no cumplido + flag de sobrecarga.
     Determinístico (se recalcula al vuelo); no muta nada."""
-    return await rollover.proponer_rollover(
-        db, ahora=datetime.now(timezone.utc), hasta_fin_de_hoy=True
-    )
+    return _datos_o_http(await registro.ejecutar(db, "proponer_rollover", {}, origen="ui"))
 
 
 @router.post("/decidir")
@@ -44,6 +41,6 @@ async def decidir_rollover(
     body: DecisionRollover, db: Postgrest = Depends(get_db)
 ) -> dict:
     """Aplica la decisión del usuario sobre una tarea no cumplida."""
-    return await rollover.aplicar_rollover(
-        db, tarea_id=body.tarea_id, decision=body.decision
-    )
+    return _datos_o_http(await registro.ejecutar(
+        db, "aplicar_rollover",
+        {"tarea_id": body.tarea_id, "decision": body.decision}, origen="ui"))

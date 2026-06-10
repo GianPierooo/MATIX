@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 
+from ..comandos import registro
+from ..comandos.http import datos_o_http as _datos_o_http
 from ..db import Postgrest, get_db
 from ..matix import horario, notis_programadas
 from ..schemas.horario import (
@@ -33,7 +35,7 @@ router = APIRouter(
 async def plan_de_hoy(db: Postgrest = Depends(get_db)) -> dict:
     """Plan del día colocado en las ventanas libres reales. Determinístico: se
     recalcula al vuelo desde el estado actual (set, tareas, fijos, anclas)."""
-    return await horario.plan_de_hoy_data(db)
+    return _datos_o_http(await registro.ejecutar(db, "plan_de_hoy", {}, origen="ui"))
 
 
 @router.post("/replanificar", response_model=PlanDelDiaRead)
@@ -42,8 +44,7 @@ async def replanificar(
 ) -> dict:
     """Replanifica el RESTO del día desde la hora actual (corre/suelta por
     prioridad lo pendiente, respeta lo fijo)."""
-    ahora = (body.ahora if body else None) or datetime.now(timezone.utc)
-    return await horario.plan_de_hoy_data(db, ahora=ahora, desde_ahora=True)
+    return _datos_o_http(await registro.ejecutar(db, "replanificar_dia", {}, origen="ui"))
 
 
 @router.post("/despertar")
@@ -52,7 +53,7 @@ async def despertar(db: Postgrest = Depends(get_db)) -> dict:
     (sin tocar la rutina estándar), materializa el set del día y devuelve el
     plan recalculado desde esta hora. 100% DETERMINISTA (sin LLM): las cosas de
     hoy aparecen al instante. Devuelve `{despierta_hoy, plan}`."""
-    return await horario.marcar_despertar(db, ahora=datetime.now(timezone.utc))
+    return _datos_o_http(await registro.ejecutar(db, "marcar_despertar", {}, origen="ui"))
 
 
 @router.post("/bloque/completar")
@@ -60,11 +61,11 @@ async def completar_bloque(
     body: CompletarBloqueRequest, db: Postgrest = Depends(get_db)
 ) -> dict:
     """Marca un bloque planificado como hecho (cierra nodo y/o tarea)."""
-    return await horario.completar_bloque(
-        db,
-        tarea_id=str(body.tarea_id) if body.tarea_id else None,
-        nodo_id=str(body.nodo_id) if body.nodo_id else None,
-    )
+    params = {
+        "tarea_id": str(body.tarea_id) if body.tarea_id else None,
+        "nodo_id": str(body.nodo_id) if body.nodo_id else None,
+    }
+    return _datos_o_http(await registro.ejecutar(db, "completar_bloque", params, origen="ui"))
 
 
 @router.post("/bloque/saltar")
@@ -72,7 +73,8 @@ async def saltar_bloque(
     body: SaltarBloqueRequest, db: Postgrest = Depends(get_db)
 ) -> dict:
     """Salta un bloque del set (no hoy, sin culpa)."""
-    return await horario.saltar_bloque(db, set_item_id=str(body.set_item_id))
+    return _datos_o_http(await registro.ejecutar(
+        db, "saltar_bloque", {"set_item_id": str(body.set_item_id)}, origen="ui"))
 
 
 @router.get("/notis-programadas")
@@ -114,4 +116,5 @@ async def agendar(
         if body and body.bloques is not None
         else None
     )
-    return await horario.agendar_plan(db, bloques=bloques)
+    return _datos_o_http(await registro.ejecutar(
+        db, "agendar_bloque", {"bloques": bloques}, origen="ui"))

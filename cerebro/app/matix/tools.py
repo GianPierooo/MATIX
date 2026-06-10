@@ -77,7 +77,6 @@ from . import (
     evolucion_proyecto,
     extraccion_documentos,
     finanzas,
-    horario,
     importar_plan,
     intake_analitico,
     llm,
@@ -85,7 +84,6 @@ from . import (
     memoria_conversacional,
     modos,
     perfil_proyecto,
-    planificador_diario,
 )
 from .biblioteca import buscar_material as _buscar_material_rag
 from .indexador import buscar_apuntes as _buscar_apuntes_rag
@@ -2661,6 +2659,124 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     },
                 },
                 "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # ── Bucle diario: bloques + despertar + rollover (Fase 5) ────────
+    {
+        "type": "function",
+        "function": {
+            "name": "marcar_despertar",
+            "description": (
+                "«Me acabo de levantar» / «ya desperté»: registra el ancla de "
+                "despertar de HOY y devuelve el plan del día recalculado desde "
+                "esta hora (rundown). 100% determinista, instantáneo. Muéstralo "
+                "con `plan_texto`."
+            ),
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agendar_bloque",
+            "description": (
+                "Agenda el plan de hoy: engancha cada bloque tentativo a su tarea "
+                "(la crea o la actualiza) con su horario, para que aparezca en "
+                "Tareas y en Tu día. NUNCA crea eventos pelados. Úsala cuando el "
+                "usuario diga «agenda mi plan», «métele estos bloques al día». "
+                "Sin `bloques`, agenda el plan calculado al vuelo."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bloques": {
+                        "type": "array",
+                        "description": (
+                            "Opcional: bloques con sus ediciones. Cada uno con "
+                            "titulo, inicio/fin (HH:MM) y opcional tarea_id/nodo_id/"
+                            "set_item_id/proyecto_id. Omítelo para agendar el plan tal cual."
+                        ),
+                        "items": {"type": "object"},
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "saltar_bloque",
+            "description": (
+                "Salta un bloque del set del plan del día (no hoy, sin culpa). "
+                "Pásale el `set_item_id` del bloque (lo ves en el plan/set)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"set_item_id": {"type": "string"}},
+                "required": ["set_item_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "completar_bloque",
+            "description": (
+                "Marca un bloque agendado como HECHO. «ya hice ese bloque», «cerré "
+                "ese rato de trabajo». Pásale `tarea_id` y/o `nodo_id` del bloque. "
+                "Deja el mismo estado que completar la tarea por checkbox "
+                "(repetición + sync + % de proyecto)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"tarea_id": _UUID, "nodo_id": _UUID},
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "proponer_rollover",
+            "description": (
+                "Lista lo NO cumplido (tareas vencidas sin hacer) y cuándo "
+                "retomarlo en el siguiente hueco libre real, con un flag honesto "
+                "de sobrecarga. SOLO LECTURA: no mueve nada. Úsala para «¿qué me "
+                "quedó pendiente?», «¿qué no alcancé?»."
+            ),
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "aplicar_rollover",
+            "description": (
+                "Aplica la decisión del usuario sobre una tarea no cumplida. "
+                "«reprograma esto a mañana» → `posponer`; «retómalo en el "
+                "siguiente hueco» → `aceptar`; «déjalo, suéltalo» → `soltar`. "
+                "Mueve el BLOQUE (plazo interno), no la entrega real. La "
+                "colocación la calcula el motor de huecos (determinista). Si no "
+                "hay hueco, te lo digo honesto (no lo muevo a ciegas)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tarea_id": {"type": "string", "description": "Id de la tarea no cumplida."},
+                    "decision": {
+                        "type": "string",
+                        "enum": ["aceptar", "otro_dia", "soltar", "posponer"],
+                        "description": (
+                            "aceptar = siguiente hueco (hoy o adelante); otro_dia/"
+                            "posponer = saltar hoy; soltar = a la papelera."
+                        ),
+                    },
+                },
+                "required": ["tarea_id", "decision"],
                 "additionalProperties": False,
             },
         },
@@ -5479,9 +5595,17 @@ async def _set_con_proyecto(db: Postgrest, items: list[dict]) -> list[dict]:
     return [{**i, "proyecto": nombres.get(i.get("proyecto_id"), "")} for i in items]
 
 
+# ── Planificador / Tu día: ENVOLTORIOS sobre los comandos (comandos/planificador.py)
+# La lógica DETERMINISTA (set, plan, rollover, despertar) vive en los módulos
+# matix; el comando la envuelve; aquí solo se le da forma para el LLM. Cero LLM
+# en estos caminos.
+
+
 async def _proponer_set_dia(db: Postgrest, args: dict) -> dict[str, Any]:
-    items = await planificador_diario.construir_set(db)
-    items = await _set_con_proyecto(db, items)
+    res = await _registro.ejecutar(db, "proponer_set_dia", {}, origen="ia")
+    if not res.get("ok"):
+        return res
+    items = await _set_con_proyecto(db, res["datos"]["items"])
     return _ok({
         "set": _formatear_set(items),
         "items": items,
@@ -5494,9 +5618,10 @@ async def _proponer_set_dia(db: Postgrest, args: dict) -> dict[str, Any]:
 
 
 async def _ver_set_dia(db: Postgrest, args: dict) -> dict[str, Any]:
-    from datetime import datetime, timezone
-    hoy = datetime.now(timezone.utc).astimezone(planificador_diario.LIMA).date().isoformat()
-    items = await db.list("set_diario_items", filters={"fecha": hoy}, order="orden.asc")
+    res = await _registro.ejecutar(db, "ver_set_dia", {}, origen="ia")
+    if not res.get("ok"):
+        return res
+    items = res["datos"]["items"]
     if not items:
         return _ok({"set": "Hoy no hay set armado. Puedo proponerlo (proponer_set_dia).", "items": []})
     items = await _set_con_proyecto(db, items)
@@ -5538,8 +5663,11 @@ def _formatear_plan(data: dict) -> str:
 
 
 async def _plan_de_hoy(db: Postgrest, args: dict) -> dict[str, Any]:
-    desde_ahora = bool(args.get("desde_ahora"))
-    data = await horario.plan_de_hoy_data(db, desde_ahora=desde_ahora)
+    res = await _registro.ejecutar(
+        db, "plan_de_hoy", {"desde_ahora": bool(args.get("desde_ahora"))}, origen="ia")
+    if not res.get("ok"):
+        return res
+    data = res["datos"]
     return _ok({
         **data,
         "plan_texto": _formatear_plan(data),
@@ -5557,7 +5685,10 @@ async def _plan_de_hoy(db: Postgrest, args: dict) -> dict[str, Any]:
 
 
 async def _replanificar_dia(db: Postgrest, args: dict) -> dict[str, Any]:
-    data = await horario.plan_de_hoy_data(db, desde_ahora=True)
+    res = await _registro.ejecutar(db, "replanificar_dia", {}, origen="ia")
+    if not res.get("ok"):
+        return res
+    data = res["datos"]
     return _ok({
         **data,
         "plan_texto": _formatear_plan(data),
@@ -5568,6 +5699,77 @@ async def _replanificar_dia(db: Postgrest, args: dict) -> dict[str, Any]:
             "culpa. Muéstralo con `plan_texto`."
         ),
     })
+
+
+# ── Nuevas tools del bucle diario: bloques + despertar + rollover ────────────
+
+
+async def _agendar_bloque(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "agendar_bloque", {"bloques": args.get("bloques")}, origen="ia")
+    if not res.get("ok"):
+        return res
+    d = res["datos"]
+    return _ok({
+        **d,
+        "nota": "Agendé el plan de hoy (engancha cada bloque a su tarea; nunca crea eventos).",
+    })
+
+
+async def _marcar_despertar_tool(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "marcar_despertar", {}, origen="ia")
+    if not res.get("ok"):
+        return res
+    d = res["datos"]
+    plan = d.get("plan") or {}
+    return _ok({
+        "despierta_hoy": d.get("despierta_hoy"),
+        **plan,
+        "plan_texto": _formatear_plan(plan),
+        "nota": (
+            "Registré que te acabas de levantar (ancla solo-hoy) y armé el plan "
+            "desde esta hora. Es determinista, listo al instante. Muéstralo con "
+            "`plan_texto`."
+        ),
+    })
+
+
+async def _saltar_bloque(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(
+        db, "saltar_bloque", {"set_item_id": args.get("set_item_id")}, origen="ia")
+    if not res.get("ok"):
+        return res
+    return _ok(res["datos"])
+
+
+async def _completar_bloque(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(
+        db, "completar_bloque",
+        {"tarea_id": args.get("tarea_id"), "nodo_id": args.get("nodo_id")}, origen="ia")
+    if not res.get("ok"):
+        return res
+    return _ok(res["datos"])
+
+
+async def _proponer_rollover(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "proponer_rollover", {}, origen="ia")
+    if not res.get("ok"):
+        return res
+    return _ok({
+        **res["datos"],
+        "nota": (
+            "Esto es lo NO cumplido y cuándo te propongo retomarlo (hueco libre "
+            "real). Si `sobrecarga` viene marcada, no apiles: dilo honesto y "
+            "sugiere soltar o re-escopar. Nada se mueve hasta que el usuario "
+            "decida (aplicar_rollover)."
+        ),
+    })
+
+
+async def _aplicar_rollover(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(
+        db, "aplicar_rollover",
+        {"tarea_id": args.get("tarea_id"), "decision": args.get("decision")}, origen="ia")
+    return res
 
 
 async def _configurar_horario(db: Postgrest, args: dict) -> dict[str, Any]:
@@ -5597,13 +5799,15 @@ async def _configurar_horario(db: Postgrest, args: dict) -> dict[str, Any]:
 
 
 async def _aceptar_set_dia(db: Postgrest, args: dict) -> dict[str, Any]:
-    ids = args.get("item_ids")
-    item_ids = [str(x) for x in ids] if isinstance(ids, list) and ids else None
-    promovidos = await planificador_diario.aceptar_items(db, item_ids=item_ids)
-    if not promovidos:
+    res = await _registro.ejecutar(
+        db, "aceptar_set_dia", {"item_ids": args.get("item_ids")}, origen="ia")
+    if not res.get("ok"):
+        return res
+    n = res["datos"]["aceptadas"]
+    if not n:
         return _ok({"aceptadas": 0, "nota": "No había items por aceptar (¿ya estaban aceptados?)."})
     return _ok({
-        "aceptadas": len(promovidos),
+        "aceptadas": n,
         "nota": (
             "Promoví esas subtareas a tu lista de Tareas para hoy. A partir de "
             "ahora te insisto sobre ESE set hasta cerrarlo. Confírmalo corto."
@@ -5612,13 +5816,11 @@ async def _aceptar_set_dia(db: Postgrest, args: dict) -> dict[str, Any]:
 
 
 async def _saltar_item_set(db: Postgrest, args: dict) -> dict[str, Any]:
-    item_id = (args.get("item_id") or "").strip()
-    if not item_id:
-        return _error("validacion", "Pásame el `item_id` a saltar (lo ves en el set).")
-    fila = await db.update("set_diario_items", item_id, {"estado": "saltado"})
-    if fila is None:
-        return _error("no_encontrado", "No encontré ese item del set.")
-    return _ok({"item_id": item_id, "saltada": True})
+    res = await _registro.ejecutar(
+        db, "saltar_item_set", {"item_id": args.get("item_id")}, origen="ia")
+    if not res.get("ok"):
+        return res
+    return _ok(res["datos"])
 
 
 async def _configurar_planificacion(db: Postgrest, args: dict) -> dict[str, Any]:
@@ -6369,6 +6571,13 @@ _HANDLERS = {
     "plan_de_hoy": _plan_de_hoy,
     "replanificar_dia": _replanificar_dia,
     "configurar_horario": _configurar_horario,
+    # Bucle diario: bloques + despertar + rollover (Fase 5)
+    "agendar_bloque": _agendar_bloque,
+    "saltar_bloque": _saltar_bloque,
+    "completar_bloque": _completar_bloque,
+    "marcar_despertar": _marcar_despertar_tool,
+    "proponer_rollover": _proponer_rollover,
+    "aplicar_rollover": _aplicar_rollover,
     # Automatizaciones (proactividad)
     "crear_automatizacion": _crear_automatizacion,
     "listar_automatizaciones": _listar_automatizaciones,
@@ -6507,6 +6716,13 @@ TABLAS_AFECTADAS = {
     "plan_de_hoy": [],
     "replanificar_dia": [],
     "configurar_horario": [],
+    # Bucle diario (Fase 5): los que crean/mueven tareas refrescan la lista
+    "agendar_bloque": ["tareas"],
+    "saltar_bloque": [],
+    "completar_bloque": ["tareas"],
+    "marcar_despertar": [],
+    "proponer_rollover": [],  # solo lectura
+    "aplicar_rollover": ["tareas"],
     # Automatizaciones (tabla propia; la app no tiene pantalla en v1)
     "crear_automatizacion": [],
     "listar_automatizaciones": [],
