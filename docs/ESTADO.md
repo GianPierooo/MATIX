@@ -91,6 +91,20 @@ deterministas, y migraciones siempre aplicadas vía helper.
 
 El norte de la 2.0 vive en [`docs/Matix_2.0_Norte_Capa_de_Comandos.md`](Matix_2.0_Norte_Capa_de_Comandos.md).
 
+Capa 7 (digitalización por cámara) — sobre la capa de comandos: HECHO. Generaliza
+el OCR de sílabo a cualquier documento/pizarra y crea por los comandos canónicos.
+`llm.extraer_documento_json` clasifica (tareas/sílabo/horario/eventos/apunte) y
+estructura en UNA sola llamada al modelo barato (gpt-4o-mini, modo JSON), por
+texto (OCR on-device — la imagen se queda en el teléfono) o por imagen (pipeline
+de visión barato con failover); solo digitaliza lo escrito, no inventa.
+`POST /matix/digitalizar-captura` propone (no persiste). La creación de lo
+CONFIRMADO va por `digitalizacion.crear_desde_captura` → cada ítem por su comando
+canónico (crear_tarea / crear_curso + crear_sesion_clase + crear_evaluacion con
+el curso_id enlazado / crear_evento; apunte por insert+índice, gap de comando de
+apuntes), expuesta en `POST /matix/crear-desde-captura` (solo tras confirmar).
+Extracción y creación son endpoints separados = gate de confirmación. Lo nativo
+(captura + OCR on-device + pantallas de revisión de la app) no corre en tests.
+
 Capa 8 (proactividad) — detección anticipada de riesgo + intervención dosificada:
 HECHO. El motor `cerebro/app/matix/proactividad.py` (ya existente, con toda la
 dosificación: niveles con tope diario, baja-el-tono-si-se-ignora, dedup por tema
