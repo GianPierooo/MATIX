@@ -108,18 +108,31 @@ class MatixClient {
   /// Devuelve `true` si la PC está conectada al cerebro ahora mismo. No lanza:
   /// ante cualquier fallo (timeout, cerebro caído, 4xx) devuelve `false`
   /// (desconectada). Es solo un indicador; nunca debe romper la UI.
+  ///
+  /// Reintenta UNA vez ante un "no": el WS del agente puede tener un parpadeo
+  /// de ~1s (reconexión tras un corte del proxy de Railway). Sin el reintento,
+  /// "Recomprobar PC" mostraría desconectada por esa ventana mínima. Dos
+  /// intentos con ~1.5s de separación absorben el blip; si de verdad está
+  /// caída, el segundo intento también da `false` y mostramos desconectada.
   Future<bool> pcConectada() async {
-    try {
-      final r = await _conTimeout(
-        _inner.get(_uri('/api/v1/agente/estado'), headers: _headers),
-        timeout: _timeoutHealth,
-      );
-      if (r.statusCode != 200) return false;
-      final j = json.decode(r.body) as Map<String, dynamic>;
-      return j['conectado'] == true;
-    } catch (_) {
-      return false;
+    for (var intento = 0; intento < 2; intento++) {
+      try {
+        final r = await _conTimeout(
+          _inner.get(_uri('/api/v1/agente/estado'), headers: _headers),
+          timeout: _timeoutHealth,
+        );
+        if (r.statusCode == 200) {
+          final j = json.decode(r.body) as Map<String, dynamic>;
+          if (j['conectado'] == true) return true;
+        }
+      } catch (_) {
+        // Cae al reintento (o a false si ya fue el último).
+      }
+      if (intento == 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 1500));
+      }
     }
+    return false;
   }
 
   Future<List<dynamic>> getList(String path) async {
