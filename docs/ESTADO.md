@@ -91,6 +91,20 @@ deterministas, y migraciones siempre aplicadas vía helper.
 
 El norte de la 2.0 vive en [`docs/Matix_2.0_Norte_Capa_de_Comandos.md`](Matix_2.0_Norte_Capa_de_Comandos.md).
 
+Capa 8 (proactividad) — detección anticipada de riesgo + intervención dosificada:
+HECHO. El motor `cerebro/app/matix/proactividad.py` (ya existente, con toda la
+dosificación: niveles con tope diario, baja-el-tono-si-se-ignora, dedup por tema
+en `proactividad_enviados`, silencio/ventana vía `permitido_ahora`, un aviso a la
+vez) se EXTENDIÓ con los detectores de riesgo, deterministas y sin LLM en el
+trigger: día sobrecargado (el planificador recortó trabajo), proyecto estancado
+en la banda temprana [3,5) días (el aviso sostenido a 5+ lo sigue dando el motor
+de evolución, no se pisan), evaluación próxima (1..7 días) sin estudio agendado,
+y skill activa sin práctica ≥7 días (toque ligero). Cada uno surfacea por el push
+existente con acción de un toque (deep-link rollover / proyecto / hoy). Corre en
+el tick del scheduler que ya existía. Lo nativo (FCM + scheduling local de la
+app) no corre en tests; la lógica determinista (detectores, dosificación,
+selección) sí está cubierta con FakeDB.
+
 Avance — Fase 1 (cimiento de la capa de comandos): HECHO. Existe un registro
 tipado de comandos (`cerebro/app/comandos/`): cada comando declara nombre,
 params, riesgo (segura/consecuente/prohibida) y UN handler único, con logging
