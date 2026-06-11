@@ -126,6 +126,22 @@ class ChatMatixNotifier extends Notifier<EstadoChatMatix> {
     state = const EstadoChatMatix();
   }
 
+  /// Inserta una nota de Matix (rol assistant) en el chat SIN llamar al
+  /// cerebro. La usan las acciones de dispositivo (p. ej. PC) para que el
+  /// RESULTADO REAL — abrí / no pude / lo bloqueé — quede en la conversación y
+  /// no solo en un toast efímero. Honestidad: el chat refleja lo que de verdad
+  /// pasó, después de que pasó.
+  void agregarNotaMatix(String texto) {
+    final t = texto.trim();
+    if (t.isEmpty) return;
+    state = state.copyWith(
+      mensajes: [
+        ...state.mensajes,
+        Mensaje(rol: RolMensaje.matix, contenido: t, enviadoEn: DateTime.now()),
+      ],
+    );
+  }
+
   /// Envía `texto` al cerebro, agrega el mensaje del usuario al
   /// historial *antes* del POST (para que se vea en la lista mientras
   /// Matix piensa), y al terminar agrega la respuesta o registra el

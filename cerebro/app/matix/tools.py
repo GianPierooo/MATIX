@@ -3278,14 +3278,14 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "name": "pc_abrir_app",
             "description": (
                 "PROPONE abrir una app del escritorio del usuario (ej. su editor, "
-                "el navegador). SOLO para abrir y nada más: si el usuario quiere "
-                "además hacer algo DENTRO de la app («…y pon una canción»), usa "
-                "pc_controlar_pantalla con el objetivo completo. SOLO apps que el "
-                "usuario tiene en su allowlist de apps; cualquier otra (y SIEMPRE "
-                "shells/terminales, instaladores, herramientas de sistema) se "
-                "rechaza. NO la abres tú: la app le pide confirmar y recién "
-                "entonces se abre. Di que la dejaste LISTA para confirmar, no que "
-                "ya la abriste."
+                "el navegador, Spotify). SOLO para abrir y nada más: si el usuario "
+                "quiere además hacer algo DENTRO de la app («…y pon una canción»), "
+                "usa pc_controlar_pantalla con el objetivo completo. Puede abrir "
+                "CUALQUIER app instalada que el usuario nombre (el agente la "
+                "resuelve solo); únicamente se rechazan shells/terminales, "
+                "instaladores y herramientas de sistema (denylist dura). NO la "
+                "abres tú: la app le pide confirmar y recién entonces se abre. Di "
+                "que la dejaste LISTA para confirmar, no que ya la abriste."
             ),
             "parameters": {
                 "type": "object",

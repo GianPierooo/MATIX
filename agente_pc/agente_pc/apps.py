@@ -62,11 +62,110 @@ def _resolver_uno(spec: str) -> str | None:
     return os.path.realpath(encontrado) if encontrado else None
 
 
+def _stem(nombre: str) -> str:
+    return (nombre or "").strip().lower()
+
+
+def _buscar_app_paths(nombre: str) -> str | None:
+    """App Paths del registro de Windows (HKCU + HKLM, 64 y 32 bits). Muchas
+    apps (Chrome, Edge, etc.) registran ahí su exe. Devuelve la ruta o None."""
+    if os.name != "nt":
+        return None
+    try:
+        import winreg  # type: ignore
+    except Exception:  # noqa: BLE001
+        return None
+    clave_rel = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"
+    candidatos = [nombre, f"{nombre}.exe"]
+    raices = [
+        (winreg.HKEY_CURRENT_USER, 0),
+        (winreg.HKEY_LOCAL_MACHINE, 0),
+        (winreg.HKEY_LOCAL_MACHINE, winreg.KEY_WOW64_32KEY),
+    ]
+    for raiz, flag in raices:
+        for cand in candidatos:
+            try:
+                with winreg.OpenKey(
+                    raiz, f"{clave_rel}\\{cand}", 0, winreg.KEY_READ | flag
+                ) as k:
+                    valor, _ = winreg.QueryValueEx(k, None)  # default value
+                    ruta = os.path.realpath(os.path.expandvars(str(valor).strip('"')))
+                    if os.path.isfile(ruta):
+                        return ruta
+            except OSError:
+                continue
+    return None
+
+
+# Directorios donde viven apps de usuario. NO incluye C:\Windows (denylist).
+def _dirs_busqueda_apps() -> list[str]:
+    if os.name != "nt":
+        return []
+    env = os.environ
+    candidatos = [
+        env.get("LOCALAPPDATA"),
+        env.get("APPDATA"),
+        env.get("ProgramFiles"),
+        env.get("ProgramFiles(x86)"),
+        env.get("ProgramW6432"),
+    ]
+    vistos, out = set(), []
+    for c in candidatos:
+        if c and os.path.isdir(c) and c.lower() not in vistos:
+            vistos.add(c.lower())
+            out.append(c)
+    return out
+
+
+def _buscar_en_dirs(nombre: str, *, max_dirs: int = 8000, max_prof: int = 4) -> str | None:
+    """Busca `{nombre}.exe` (match exacto de stem) en los directorios de apps
+    del usuario, ACOTADO en profundidad y nº de carpetas (no recorre el disco).
+    Primero AppData (donde viven Spotify/Discord) → rápido en el caso común."""
+    objetivo = f"{_stem(nombre)}.exe"
+    visitados = 0
+    for raiz in _dirs_busqueda_apps():
+        base_prof = raiz.rstrip("\\/").count(os.sep)
+        for dirpath, dirnames, filenames in os.walk(raiz):
+            visitados += 1
+            if visitados > max_dirs:
+                return None
+            # Poda por profundidad.
+            if dirpath.count(os.sep) - base_prof >= max_prof:
+                dirnames[:] = []
+                continue
+            for f in filenames:
+                if f.lower() == objetivo:
+                    ruta = os.path.join(dirpath, f)
+                    if os.path.isfile(ruta):
+                        return os.path.realpath(ruta)
+    return None
+
+
+def resolver_app_dinamica(nombre: str) -> str | None:
+    """Resuelve un nombre de app a un exe REAL del sistema, SIN allowlist (modo
+    permisivo). Orden: PATH → App Paths del registro → búsqueda acotada en los
+    directorios de apps del usuario. La denylist se aplica APARTE (en el
+    handler), así que aunque esto resuelva un shell, no se abre. Solo Windows
+    hace registro/búsqueda; en otros SO usa PATH y nada más."""
+    s = (nombre or "").strip().strip('"')
+    if not s:
+        return None
+    via_path = shutil.which(s) or shutil.which(f"{s}.exe")
+    if via_path:
+        return os.path.realpath(via_path)
+    exe = _buscar_app_paths(s)
+    if exe:
+        return exe
+    return _buscar_en_dirs(s)
+
+
 def resolver_apps(specs: dict[str, str]) -> tuple[dict[str, str], list[str]]:
     """Resuelve cada `nombre→spec` a un exe verificado. Devuelve
     `(apps_ok, avisos)`. Falla cerrado: una entrada que no resuelve, no existe,
     o cae en la denylist se OMITE (con un aviso explicativo), NO se incluye en
-    el dict resultante. Así el agente solo conoce apps reales y permitidas."""
+    el dict resultante. Estos son OVERRIDES explícitos del usuario
+    (AGENTE_PC_APPS_ALLOWLIST); ya no son la única vía: lo no listado se resuelve
+    dinámico al abrir."""
     resueltas: dict[str, str] = {}
     avisos: list[str] = []
     for nombre, spec in specs.items():
@@ -154,18 +253,27 @@ def _abrir_app(args: dict[str, Any], ctx: Contexto) -> dict[str, Any]:
             "raros). Solo abro apps de tu allowlist por su nombre.",
         )
     clave = nombre.lower()
+    # 1) Override explícito del usuario (AGENTE_PC_APPS_ALLOWLIST), si lo fijó.
     exe = (ctx.apps or {}).get(clave)
+    # 2) Modo PERMISIVO: cualquier app que el usuario nombre se resuelve sola.
+    if not exe:
+        resolver = ctx.resolver_app or resolver_app_dinamica
+        exe = resolver(nombre)
     if not exe:
         return _err(
-            "no_permitida",
-            f"«{nombre}» no está en tu allowlist de apps; no la abro.",
-            permitidas=sorted(ctx.apps or {}),
+            "no_encontrada",
+            f"no encontré una app llamada «{nombre}» en tu PC. Dime el nombre "
+            "exacto del programa (o su ruta) y la abro.",
         )
-    # Defensa en profundidad: re-chequear la denylist al lanzar (por si la
-    # allowlist trae algo que no debió pasar la resolución).
+    # 3) Rail innegociable: la denylist GANA. Aunque el usuario lo pida, NO se
+    # abren shells/terminales, instaladores ni herramientas de sistema.
     motivo = app_denylisted(exe)
     if motivo:
-        return _err("denylist", f"«{nombre}» está bloqueada por seguridad ({motivo}).")
+        return _err(
+            "denylist",
+            f"«{nombre}» no la abro por seguridad ({motivo}): son shells, "
+            "instaladores o herramientas de sistema, fuera de los rieles.",
+        )
     lanzar = ctx.lanzador or lanzar_proceso
     res = lanzar(exe, [])
     if not res.get("ok"):
@@ -183,9 +291,8 @@ def _cerrar_app(args: dict[str, Any], ctx: Contexto) -> dict[str, Any]:
     if not _NOMBRE_OK.match(nombre):
         return _err("nombre_invalido", "ese nombre de app no es válido.")
     clave = nombre.lower()
-    # Solo cerramos apps que ESTÉN en la allowlist (puedes cerrar lo que abrirías).
-    if clave not in (ctx.apps or {}):
-        return _err("no_permitida", f"«{nombre}» no está en tu allowlist; no la cierro.")
+    # Sin gate de allowlist: solo cerramos lo que el AGENTE abrió en esta sesión
+    # (rastreado por PID). Nunca toca procesos ajenos, así que es seguro de por sí.
     pids = list((ctx.procesos or {}).get(clave) or [])
     if not pids:
         return {

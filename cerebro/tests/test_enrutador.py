@@ -166,3 +166,25 @@ def test_intake_y_plan_van_al_fuerte():
         d = _elegir(m)
         assert d.modelo == FUERTE, m
         assert d.motivo == "intake_plan", m
+
+
+# ── Control de PC / pantalla → modelo fuerte (Capa 6 · C3) ───────────────────
+
+
+def test_pc_control_va_al_fuerte():
+    casos = [
+        "en mi pc abre Spotify y pon una cancion de Michael Jackson",
+        "controla mi pantalla y descarga el archivo",
+        "en mi compu busca el pdf y abrelo",
+        "hazlo tu en la laptop",
+        "abre el chrome de mi pc",
+    ]
+    for m in casos:
+        d = _elegir(m)
+        assert d.modelo == FUERTE, f"PC debió ir al fuerte: {m!r} → {d.motivo}"
+        assert d.motivo in ("pc_control", "accion_dispositivo"), d.motivo
+
+
+def test_pc_no_secuestra_frases_sin_pc():
+    # "completa la tarea" no menciona PC: sigue barato.
+    assert _elegir("completa la tarea de hoy").modelo == BARATO

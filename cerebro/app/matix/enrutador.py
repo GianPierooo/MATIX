@@ -62,6 +62,16 @@ _ACCION_DISPOSITIVO = re.compile(
     r"|marca (a|al|el numero)\b"
 )
 
+# Control de la PC (Capa 6): operar la compu del usuario —y sobre todo el
+# control AUTÓNOMO de pantalla multi-paso (6.3)— es de las tareas MÁS duras
+# (planear pasos, leer capturas, decidir clicks). Siempre al modelo FUERTE: el
+# mini es inconsistente disparando `pc_*` y peor aún conduciendo el bucle.
+_PC = re.compile(
+    r"\b(pc|compu|computadora|laptop|pantalla)\b"
+    r"|\bcontrol(a|ar|ame|alo)?\b"
+    r"|haz(lo)? (tu|por mi)"
+)
+
 # Intake analítico + generación del plan: tareas DURAS (análisis a fondo,
 # detección de huecos, plan en capas). Van al modelo FUERTE/razonador, no al
 # mini. El chat casual sigue en rápido.
@@ -175,6 +185,12 @@ def elegir(
         return Decision(fuerte, "modo_pesado")
 
     texto = _norm(mensaje)
+
+    # Operar la PC / control de pantalla: tarea dura → modelo FUERTE. (Antes de
+    # accion_dispositivo: «en mi pc pon una canción» debe ir al fuerte aunque no
+    # diga «abre».)
+    if _PC.search(texto):
+        return Decision(fuerte, "pc_control")
 
     # Intake / plan / revisión / comentario de progreso de un proyecto: al
     # modelo FUERTE (actualizar el plan/árbol coherente es tarea dura).

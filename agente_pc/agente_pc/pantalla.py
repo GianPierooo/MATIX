@@ -29,9 +29,14 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 from typing import Any
 
 from .registro import AccionDef, Contexto, NivelRiesgo, Param
+
+# Mismo logger que el daemon: el traceback de un fallo de captura termina en
+# agente_runtime.log, no se pierde en silencio.
+log = logging.getLogger("matix.agente")
 
 # Teclas sueltas PERMITIDAS (sin combos con modificadores: nada de ctrl+alt+del
 # ni atajos de sistema desde aquí). Edición de texto y navegación básica.
@@ -106,7 +111,23 @@ def capturar_pantalla() -> dict[str, Any]:
             "alto": alto,
         }
     except Exception as e:  # noqa: BLE001
-        return _err("error_captura", f"no pude capturar la pantalla ({type(e).__name__})")
+        # Traceback REAL al log (agente_runtime.log): sin esto, un fallo de
+        # captura quedaba como un críptico "(PyAutoGUIException)".
+        log.exception("pantalla_capturar: screenshot() falló")
+        msg = str(e).lower()
+        # Caso típico en Windows: pyscreeze no pudo importar Pillow → pyautogui
+        # tira PyAutoGUIException. Pista accionable en vez de error opaco.
+        if "pyscreeze" in msg or "pillow" in msg or "screenshot" in msg:
+            return _err(
+                "sin_pillow",
+                "no pude capturar la pantalla: la captura usa Pillow (vía "
+                "pyscreeze) y no está disponible. Instálalo en la PC: "
+                "cd agente_pc && uv sync --extra control, y reinicia el agente.",
+            )
+        return _err(
+            "error_captura",
+            f"no pude capturar la pantalla — {type(e).__name__}: {e}",
+        )
 
 
 def ejecutar_accion_real(accion: dict[str, Any]) -> dict[str, Any]:

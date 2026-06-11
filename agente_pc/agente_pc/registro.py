@@ -55,9 +55,15 @@ class Contexto:
     allowlist: list = field(default_factory=list)
     # Tope de lectura de texto en bytes (leer_archivo). Default 256 KB.
     max_lectura_bytes: int = 256 * 1024
-    # Fase 6.2 — apps lanzables (nombre→exe resuelto y verificado por
-    # `apps.resolver_apps`). Solo estas se pueden abrir.
+    # Fase 6.2 — apps. `apps` es un mapa OPCIONAL de overrides explícitos
+    # (nombre→exe), de AGENTE_PC_APPS_ALLOWLIST si el usuario fijó rutas. Ya NO
+    # es un gate: en modo permisivo, cualquier app que el usuario nombre se
+    # resuelve dinámicamente (`resolver_app`). La denylist dura (shells/sistema/
+    # instaladores) sigue siendo el rail innegociable.
     apps: dict = field(default_factory=dict)
+    # Resolver dinámico de nombre→exe (inyectable para tests). None → el real de
+    # `apps.resolver_app_dinamica`. El handler resuelve el default (evita ciclo).
+    resolver_app: Any = None
     # Procesos lanzados en ESTA sesión (nombre→[pid]). Lo llena abrir_app y lo
     # consume cerrar_app (solo cierra lo que abrió, jamás procesos ajenos).
     procesos: dict = field(default_factory=dict)

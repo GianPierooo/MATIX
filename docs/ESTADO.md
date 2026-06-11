@@ -556,6 +556,31 @@ rotativo `agente_runtime.log` + guard de **instancia única** (mutex de sesión
 `Local\MatixAgentePC`: un segundo agente lanzado a mano sale con código 6 en vez
 de pelear por el canal).
 
+**Apps en modo PERMISIVO (C2).** `abrir_app` ya NO exige una allowlist: cualquier
+app instalada que el usuario nombre se resuelve sola (PATH → App Paths del
+registro → búsqueda acotada en `LOCALAPPDATA`/`APPDATA`/`Program Files`). El
+único rail que queda es la **denylist DURA** (shells/terminales, instaladores,
+herramientas de sistema, todo `C:\Windows`) — innegociable. `AGENTE_PC_APPS_ALLOWLIST`
+sobrevive solo como overrides opcionales de ruta. `cerrar_app` cierra solo lo que
+el agente abrió en la sesión (por PID). Honestidad: el resultado real de cada
+acción de PC (abrió / no encontró / bloqueó por denylist) se inyecta en el CHAT
+(`agregarNotaMatix`), no solo en un toast.
+
+**Captura de pantalla (C1).** El control 6.3 captura con `pyautogui`→`pyscreeze`→
+`Pillow`. Pillow NO era dependencia dura de pyscreeze, así que faltaba y
+`screenshot()` reventaba con un críptico «(PyAutoGUIException)». Se fija `Pillow`
+explícito en el extra `control` del pyproject y `capturar_pantalla` ahora loguea
+el traceback REAL en `agente_runtime.log` + da una pista accionable.
+
+**Ruteo de modelos por dificultad + failover de crédito (C3).** El modo
+Automático ya escala mini↔fuerte por mensaje (enrutador); ahora **operar la PC /
+controlar pantalla rutea al FUERTE** (tarea dura). Y el failover entre
+proveedores detecta el crédito agotado de **Anthropic (400 «credit balance too
+low»)**, no solo el de OpenAI (429): antes ese 400 mataba el turno; ahora cruza a
+un GPT fuerte (`claude-sonnet-4-6`→`gpt-5.5`). El par barato/fuerte es
+configurable (`/modelos/par`); sirve como camino OpenAI-only cuando Anthropic no
+está disponible.
+
 ### Cerebro — endpoints REST (~126 rutas, prefijo /api/v1)
 (Nota 2026-06-04: se retiró el router /tracks, legacy; ver «Consolidación» abajo.)
 

@@ -32,6 +32,20 @@ class _ErrLegitimo(Exception):
     status_code = 400
 
 
+class _ErrCreditoAnthropic(Exception):
+    """Crédito agotado de Anthropic: viene como 400 (no 429), con el mensaje
+    «your credit balance is too low». Este es el que tumbaba el chat."""
+
+    status_code = 400
+
+    def __str__(self) -> str:
+        return (
+            "Error code: 400 - {'type': 'error', 'error': {'type': "
+            "'invalid_request_error', 'message': 'Your credit balance is too low "
+            "to access the Anthropic API. Please go to Plans & Billing...'}}"
+        )
+
+
 # ── Clasificador ─────────────────────────────────────────────────────────────
 
 
@@ -39,6 +53,17 @@ def test_clasificador_auth_y_credito():
     assert llm._es_auth_o_credito(_ErrAuth()) is True
     assert llm._es_auth_o_credito(_ErrQuota()) is True
     assert llm._es_auth_o_credito(_ErrLegitimo()) is False
+
+
+def test_credito_anthropic_400_amerita_failover():
+    """Regresión: el crédito agotado de Anthropic llega como 400 (no 429). Antes
+    NO disparaba failover y el turno moría con «Error del cerebro»; ahora sí
+    cruza al otro proveedor (a un GPT fuerte)."""
+    e = _ErrCreditoAnthropic()
+    assert llm._es_auth_o_credito(e) is True
+    assert llm._amerita_failover(e) is True
+    # Y el modelo de failover de un Claude fuerte es un GPT fuerte (no mini).
+    assert modelos_llm.modelo_fallback("claude-sonnet-4-6") == "gpt-5.5"
 
 
 def test_amerita_failover():

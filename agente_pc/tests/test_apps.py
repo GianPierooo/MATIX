@@ -40,10 +40,11 @@ class _TerminadorFake:
         return True
 
 
-def _ctx(apps_map: dict[str, str], lanzador=None, terminador=None) -> Contexto:
+def _ctx(apps_map: dict[str, str], lanzador=None, terminador=None, resolver=None) -> Contexto:
     return Contexto(
         allowlist=[],
         apps=apps_map,
+        resolver_app=resolver,
         lanzador=lanzador,
         terminador=terminador,
     )
@@ -76,20 +77,38 @@ def test_abrir_app_case_insensitive():
     assert len(lz.llamadas) == 1
 
 
-def test_abrir_app_fuera_de_allowlist_rechazada_sin_lanzar():
+def test_abrir_app_permisiva_resuelve_dinamico_aunque_no_este_configurada():
+    # Modo permisivo: una app que NO está en los overrides se resuelve sola.
     lz = _LanzadorFake()
-    ctx = _ctx({"code": _CODE}, lanzador=lz)
+    inkscape = r"C:\Program Files\Inkscape\bin\inkscape.exe"
+    ctx = _ctx({"code": _CODE}, lanzador=lz, resolver=lambda n: inkscape)
     r = apps._abrir_app({"nombre": "inkscape"}, ctx)
-    assert not r["ok"] and r["tipo"] == "no_permitida"
-    assert lz.llamadas == []  # NO se lanzó nada
+    assert r["ok"] and r["app"] == "inkscape"
+    assert lz.llamadas == [(inkscape, [])]
 
 
-def test_abrir_app_denylist_gana_aunque_este_en_allowlist():
-    # Una allowlist mal configurada que incluye cmd: la denylist del handler
-    # (defensa en profundidad) la rechaza igual.
+def test_abrir_app_no_encontrada_si_el_resolver_no_la_ubica():
+    lz = _LanzadorFake()
+    ctx = _ctx({}, lanzador=lz, resolver=lambda n: None)
+    r = apps._abrir_app({"nombre": "appfantasma"}, ctx)
+    assert not r["ok"] and r["tipo"] == "no_encontrada"
+    assert lz.llamadas == []  # no se lanzó nada
+
+
+def test_abrir_app_denylist_gana_en_override():
+    # Aunque el usuario fije cmd como override, la denylist DURA la rechaza.
     lz = _LanzadorFake()
     ctx = _ctx({"shell": _CMD}, lanzador=lz)
     r = apps._abrir_app({"nombre": "shell"}, ctx)
+    assert not r["ok"] and r["tipo"] == "denylist"
+    assert lz.llamadas == []
+
+
+def test_abrir_app_denylist_gana_aunque_el_resolver_devuelva_un_shell():
+    # El rail innegociable: aunque el resolver dinámico ubique un shell, NO se abre.
+    lz = _LanzadorFake()
+    ctx = _ctx({}, lanzador=lz, resolver=lambda n: _CMD)
+    r = apps._abrir_app({"nombre": "loquesea"}, ctx)
     assert not r["ok"] and r["tipo"] == "denylist"
     assert lz.llamadas == []
 
@@ -132,9 +151,11 @@ def test_cerrar_app_termina_los_pids_de_la_sesion():
     assert ctx.procesos["code"] == []  # limpiado
 
 
-def test_cerrar_app_fuera_de_allowlist_rechazada():
+def test_cerrar_app_no_abierta_no_hace_nada():
+    # Sin gate de allowlist: cerrar algo que el agente NUNCA abrió no es error,
+    # simplemente no hay nada que cerrar (jamás toca procesos ajenos).
     r = apps._cerrar_app({"nombre": "inkscape"}, _ctx({"code": _CODE}))
-    assert not r["ok"] and r["tipo"] == "no_permitida"
+    assert r["ok"] and r["tipo"] == "nada_que_cerrar"
 
 
 def test_cerrar_app_sin_nada_abierto():

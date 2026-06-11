@@ -15,11 +15,14 @@ dependencies = [
 
 # Fase 6.3 — control de pantalla. Opcional: solo se necesita si activas
 # AGENTE_PC_CONTROL_PANTALLA=1. Instálalo con `uv sync --extra control`.
-# pyautogui mueve mouse/teclado y captura la pantalla (trae Pillow). Lazy-import
-# en pantalla.py: sin esto, los demás módulos y los tests funcionan igual.
+# pyautogui mueve mouse/teclado; la CAPTURA la hace pyscreeze→Pillow. Pillow va
+# EXPLÍCITO: pyscreeze no lo declara como dependencia dura, así que sin esta
+# línea `screenshot()` reventaba con «unable to import pyscreeze (Pillow)».
+# Lazy-import en pantalla.py: sin esto, los demás módulos y los tests funcionan.
 [project.optional-dependencies]
 control = [
     "pyautogui>=0.9.54",
+    "Pillow>=10.0",
 ]
 
 [dependency-groups]

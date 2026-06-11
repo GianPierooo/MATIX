@@ -85,15 +85,24 @@ def _es_auth_o_credito(e: Exception) -> bool:
     code = getattr(e, "status_code", None)
     if code in (401, 403):
         return True
-    # 429 puede ser rate-limit (transitorio) o insufficient_quota (sin saldo).
-    texto = f"{getattr(e, 'code', '')} {e}".lower()
-    pistas = ("insufficient_quota", "billing", "credit", "quota", "exceeded your", "payment")
-    if code == 429 and any(p in texto for p in pistas):
-        return True
     nombre = type(e).__name__
     if nombre in ("AuthenticationError", "PermissionDeniedError"):
         return True
-    return any(p in texto for p in ("insufficient_quota", "exceeded your current quota"))
+    # Crédito/cuota agotada: cada proveedor lo manda con un CÓDIGO distinto.
+    # OpenAI → 429 'insufficient_quota'. Anthropic → 400 'your credit balance is
+    # too low to access the Anthropic API'. Antes solo mirábamos el 429, así que
+    # el crédito agotado de Anthropic (400) NO disparaba failover y el turno
+    # moría con «Error del cerebro». Ahora detectamos las PISTAS de saldo en el
+    # mensaje sin importar el código: una key sin saldo amerita saltar al OTRO
+    # proveedor. (El texto sale del error del PROVEEDOR, no del usuario, así que
+    # «credit» no da falsos positivos.)
+    texto = f"{getattr(e, 'code', '')} {e}".lower()
+    pistas = (
+        "insufficient_quota", "billing", "credit balance", "credit",
+        "quota", "exceeded your", "payment", "too low to access",
+        "balance is too low",
+    )
+    return any(p in texto for p in pistas)
 
 
 def _amerita_failover(e: Exception) -> bool:

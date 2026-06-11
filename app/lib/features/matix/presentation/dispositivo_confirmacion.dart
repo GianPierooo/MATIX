@@ -197,17 +197,23 @@ Future<void> _manejarPcAccion(
   final args = (accion.datos['args'] as Map?)?.cast<String, dynamic>() ?? const {};
 
   if (context.mounted) _aviso(context, 'Haciéndolo en tu PC…');
+  // Honestidad: el RESULTADO REAL va al CHAT (no solo a un toast efímero). Así
+  // el usuario ve en la conversación si de verdad se abrió, o si se rechazó/
+  // falló y POR QUÉ (la denylist, "no encontré la app", etc.).
+  final chat = ref.read(chatMatixProvider.notifier);
   try {
     final r = await ref.read(matixClientProvider).post('/api/v1/agente/ejecutar', {
       'accion': accionInterna,
       'args': args,
     });
     final res = (r['resultado'] as Map?)?.cast<String, dynamic>() ?? const {};
-    if (context.mounted) _aviso(context, _mensajePcResultado(accionInterna, res));
+    chat.agregarNotaMatix(_mensajePcResultado(accionInterna, res));
   } on MatixApiException catch (e) {
-    if (context.mounted) _aviso(context, 'No pude hablar con el cerebro (${e.statusCode}).');
+    chat.agregarNotaMatix(
+      'No pude hablar con el cerebro para hacerlo en tu PC (HTTP ${e.statusCode}).',
+    );
   } catch (_) {
-    if (context.mounted) _aviso(context, 'No pude completar la acción en tu PC.');
+    chat.agregarNotaMatix('No pude completar la acción en tu PC.');
   }
 }
 
