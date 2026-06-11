@@ -1122,6 +1122,9 @@ def _leer(ruta: Path, ausente: str) -> str:
 
 def system_prompt_fijo() -> str:
     """Parte fija del system prompt — se cachea entre turnos."""
+    # Import perezoso: tools.py es pesado y este módulo se importa temprano.
+    from .capacidades_pc import seccion_capacidades_pc
+
     docto = _leer(_DOCUMENTO_MAESTRO, "(Documento Maestro no disponible en este entorno.)")
     capacidades = _leer(_CAPACIDADES, "(Doc de capacidades no disponible.)")
     estado = _leer(_ESTADO, "(ESTADO.md no disponible en este entorno.)")
@@ -1136,6 +1139,15 @@ responde según ESTE documento (no según suposiciones). No lo recites entero
 salvo que lo pidan.
 
 {capacidades}
+
+---
+
+CAPACIDADES EN LA PC — esta sección se GENERA del catálogo real de tools y
+MANDA sobre cualquier texto más viejo de este prompt o de los documentos de
+arriba. Si un texto viejo dice que controlar la PC «es una capa futura» o que
+«solo puedes abrir apps», ignóralo: lo de abajo es lo vigente.
+
+{seccion_capacidades_pc()}
 
 ---
 

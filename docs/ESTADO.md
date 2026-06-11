@@ -526,7 +526,15 @@ Gate de las consecuentes (triple capa): el modelo solo PROPONE (las tools
 devuelven un bloque `accion_dispositivo` tipo `pc_accion`); la app reusa el sheet
 de confirmación del agéntico del teléfono; al confirmar, `POST /api/v1/agente/
 ejecutar` (whitelist server-side) cruza el canal con `confirmado=true`; el agente
-exige esa marca y revalida cada ruta en su borde. Lado cerebro: canal singleton
+exige esa marca y revalida cada ruta en su borde. Nota (fix del caso «abre
+Spotify»): el Literal de `AccionDispositivo.tipo` ya incluye `pc_accion` (antes
+la propuesta de PC no validaba contra `ChatResponse` y el chat moría en 500
+mudo); hay handler dedicado de `ResponseValidationError` (motivo claro, nunca
+silencio) y test de paridad emisor↔schema. El system prompt lleva una sección
+«CAPACIDADES EN LA PC» GENERADA del catálogo de tools (`capacidades_pc.py`,
+fuente única con test de cobertura): ruteo multi-paso → `pc_controlar_pantalla`
+(6.3) y límites reales — el doc de autoconocimiento ya no declara la PC como
+«capa futura». Lado cerebro: canal singleton
 (`app/agente/canal.py`) + WS `/agente/ws` + GET `/agente/estado` + POST
 `/agente/ejecutar`. Si la PC no está conectada, todo responde limpio (no se
 cuelga). App: indicador "PC: conectada/desconectada" en Ajustes → Conexión +

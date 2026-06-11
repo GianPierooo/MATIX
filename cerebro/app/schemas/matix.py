@@ -428,10 +428,19 @@ class AccionDispositivo(BaseModel):
                     manda el texto como dato en un turno nuevo (Tier C.0).
     - `whatsapp`  → contacto, mensaje — la app abre el chat, verifica el contacto,
                     escribe y, tras confirmar, envía (Tier C.1, acción blindada).
+    - `pc_accion` → accion + args — acción CONSECUENTE en la PC del usuario
+                    (Capa 6: mover/renombrar archivos, abrir/cerrar apps, tareas
+                    tipadas, acción irreversible de pantalla). La app la confirma
+                    con su sheet y la ejecuta vía POST /agente/ejecutar.
+                    CUIDADO: si una tool emite un `tipo` que no está en este
+                    Literal, la respuesta del chat NO valida y el endpoint
+                    devuelve un 500 mudo (fue el bug del caso «abre Spotify»).
+                    Hay un test de paridad que recorre los tipos emitidos.
     """
 
     tipo: Literal[
-        "mensaje", "llamada", "evento", "abrir", "galeria", "pantalla", "whatsapp"
+        "mensaje", "llamada", "evento", "abrir", "galeria", "pantalla",
+        "whatsapp", "pc_accion",
     ]
     datos: dict = Field(default_factory=dict)
     # Texto corto para la hoja de confirmación de la app («Abrir WhatsApp para

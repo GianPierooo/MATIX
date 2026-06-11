@@ -19,6 +19,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
+from fastapi.exceptions import ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -157,6 +158,30 @@ if settings.cors_origins_list:
 # - Sanear el detalle de cualquier excepción no esperada — nunca
 #   filtrar paths del FS, nombres de módulos internos, etc.
 # - Loguear server-side para poder diagnosticar después.
+
+
+@app.exception_handler(ResponseValidationError)
+async def _respuesta_invalida(request: Request, exc: ResponseValidationError):
+    """La RESPUESTA que armó un endpoint no valida contra su response_model.
+
+    Es un bug nuestro (p. ej. una tool emitió un `accion_dispositivo.tipo` que
+    el schema no conocía — el caso «abre Spotify» que salía como 500 mudo).
+    Lo distinguimos del 500 genérico: el log lleva el detalle de validación y
+    el cliente recibe un motivo claro en vez de silencio."""
+    logger.exception(
+        "respuesta inválida (response_model) en %s %s: %s",
+        request.method, request.url.path, exc.errors()[:3],
+    )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": (
+                "El cerebro produjo una respuesta con formato inválido (bug "
+                "interno, ya registrado en los logs). Reintenta; si persiste, "
+                "es un desajuste de versión entre el cerebro y la app."
+            )
+        },
+    )
 
 
 @app.exception_handler(Exception)
