@@ -14,10 +14,15 @@ Niveles de riesgo:
 from __future__ import annotations
 
 import inspect
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+# Mismo logger que el daemon: el traceback de un handler que falla queda en
+# agente_runtime.log, no se pierde.
+log = logging.getLogger("matix.agente")
 
 
 class NivelRiesgo(str, Enum):
@@ -145,4 +150,8 @@ class Registro:
                 return _err("interno", "el handler no devolvió un dict")
             return resultado
         except Exception as e:  # noqa: BLE001 — nunca propagar al transporte
-            return _err("interno", f"falló «{nombre}»: {type(e).__name__}")
+            # Traceback REAL al log (agente_runtime.log): NINGUNA acción puede
+            # tumbar el proceso ni quedar como un error opaco. El cerebro recibe
+            # un error estructurado y el agente sigue vivo.
+            log.exception("handler «%s» lanzó excepción", nombre)
+            return _err("interno", f"falló «{nombre}»: {type(e).__name__}: {e}")

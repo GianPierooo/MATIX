@@ -523,6 +523,21 @@ positivos en un escritorio con texto → 0/8 tras la recalibración; un login
 sintético sigue dando prohibida). `interpretar_pantalla` ahora loguea el veredicto
 del piloto (prohibida/motivo/acción) para diagnosticar futuros aborts.
 
+**Robustez del canal + nunca silencio (D).** Diagnóstico: el agente NO crasheaba
+(PID estable en los logs); el WS se caía A MITAD del bucle de control (corte del
+proxy de Railway) y el cerebro veía `_ws=None` durante el ~1s de reconexión y
+abortaba al instante; además el bucle podía exceder el timeout del chat (45s) →
+silencio. Fixes: (1) `canal.enviar_accion` ahora da una **gracia de reconexión**
+(12s) si el WS cayó hace poco — un blip a mitad del control ya no aborta la tarea;
+si la PC nunca conectó o lleva rato caída, responde "desconectada" al instante.
+(2) `bucle_control` tiene **presupuesto de tiempo** (70s): si se agota, para con
+"tope" y mensaje claro, nunca silencio. (3) El timeout del chat de la app subió a
+**90s** para que el control entre. (4) `registro.ejecutar` del agente loguea el
+**traceback real** de cualquier handler que falle (ninguna acción tumba el
+proceso). **Acceso amplio (D3):** `AGENTE_PC_ALLOWLIST=~` (todo el perfil del
+usuario) — la denylist dura (.env/.ssh/credenciales/AppData/sistema) sigue
+ganando, verificado.
+
 Rails: allowlist (default Documentos/Escritorio/Descargas, editable); denylist
 dura que GANA (.ssh, .env, llaves, .git, AppData/perfiles de navegador, sistema);
 path traversal y symlinks bloqueados por canonicalización (realpath antes de

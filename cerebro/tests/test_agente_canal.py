@@ -98,3 +98,32 @@ async def test_tool_pc_listar_carpeta_desconectada():
     res = await tools.ejecutar_tool(None, "pc_listar_carpeta", {"ruta": "Documentos"})
     assert res["ok"] is False
     assert res["tipo"] == "pc_desconectada"
+
+
+async def test_gracia_espera_reconexion_reciente():
+    """Si el WS cayó hace poco (blip) y reconecta, `_ws_vivo` espera y agarra la
+    nueva conexión en vez de fallar al instante."""
+    c = CanalAgente()
+    ws1 = FakeWS()
+    await c.registrar(ws1)
+    await c.desregistrar(ws1)  # cayó recién
+    ws2 = FakeWS()
+
+    async def reconecta():
+        await asyncio.sleep(0.05)
+        await c.registrar(ws2)
+
+    t = asyncio.create_task(reconecta())
+    vivo = await c._ws_vivo(gracia=2.0)
+    await t
+    assert vivo is ws2  # esperó el blip y tomó la reconexión
+
+
+async def test_sin_conexion_previa_responde_al_instante():
+    """Si nunca hubo agente, NO esperamos la gracia: desconectada al instante."""
+    import time as _t
+    c = CanalAgente()
+    t0 = _t.monotonic()
+    vivo = await c._ws_vivo(gracia=5.0)
+    assert vivo is None
+    assert _t.monotonic() - t0 < 0.5  # no colgó esperando

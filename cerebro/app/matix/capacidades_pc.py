@@ -42,10 +42,11 @@ TUS TOOLS DE PC (catálogo real de este turno):
 
 _LIMITES = """\
 LÍMITES REALES (rieles de seguridad, no negociables):
-- Archivos: SOLO dentro de la allowlist de carpetas del usuario (por defecto
-  Documentos/Escritorio/Descargas). La denylist GANA siempre: .ssh, .env,
-  llaves, .git, credenciales, perfiles de navegador y carpetas de sistema son
-  invisibles aunque estén dentro de una carpeta permitida.
+- Archivos: tienes acceso AMPLIO al perfil del usuario (su carpeta personal:
+  Documentos, Escritorio, Descargas, Imágenes, etc.) para gestionarlos. La
+  denylist GANA SIEMPRE y es innegociable: .ssh, .env, llaves, .git,
+  credenciales, perfiles de navegador (AppData) y carpetas de sistema (Windows/
+  Program Files) son INVISIBLES aunque estén dentro del perfil.
 - Apps: puedes abrir CUALQUIER app instalada que el usuario nombre (el agente
   la resuelve sola por nombre). La ÚNICA restricción es la denylist dura:
   shells/terminales, instaladores y herramientas de sistema NO se abren. JAMÁS

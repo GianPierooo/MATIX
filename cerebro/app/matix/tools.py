@@ -6385,8 +6385,10 @@ async def _pc_ejecutar_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
     )
 
 
-# Timeout amplio por paso del bucle de control: capturar (canal) + visión.
-_CONTROL_TIMEOUT_PASO = 25.0
+# Timeout por paso del agente (capturar / una acción). Generoso para la ida y
+# vuelta por el WS + el screenshot, pero NO tanto que un paso lento se coma el
+# presupuesto del turno. Incluye la gracia de reconexión del canal.
+_CONTROL_TIMEOUT_PASO = 12.0
 
 
 async def _pc_controlar_pantalla(db: Postgrest, args: dict) -> dict[str, Any]:

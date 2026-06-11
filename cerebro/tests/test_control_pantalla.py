@@ -196,3 +196,26 @@ def _norm_simple(t: str) -> str:
         c for c in unicodedata.normalize("NFD", t.lower())
         if unicodedata.category(c) != "Mn"
     )
+
+
+# ── Presupuesto de tiempo → tope limpio (nunca silencio) ─────────────────────
+
+
+def test_presupuesto_de_tiempo_para_limpio():
+    """Si el bucle agota su presupuesto de tiempo, para con estado 'tope' y un
+    motivo claro — nunca se cuelga ni revienta el timeout del chat."""
+    reloj_vals = iter([0.0, 0.0, 100.0, 100.0])  # inicio, paso1 ok, paso2 supera
+
+    def reloj():
+        return next(reloj_vals)
+
+    nunca_termina = _interpret_secuencia([
+        {"prohibida": False, "terminado": False, "irreversible": False,
+         "accion": {"tipo": "scroll", "cantidad": 1}, "descripcion": "scrolleo"},
+    ])
+    r = _correr(
+        capturar=_cap_ok(), interpretar=nunca_termina, ejecutar=_ejecutor(),
+        presupuesto_s=10.0, reloj=reloj,
+    )
+    assert r["estado"] == "tope"
+    assert "tiempo" in r.get("motivo", "")

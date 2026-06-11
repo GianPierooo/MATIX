@@ -20,12 +20,19 @@ LLM y sin tocar el mouse. `tools.py` cablea el canal + la visión reales.
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 # Tope de pasos del bucle: cota dura anti-runaway. Cada paso = 1 captura + 1
 # visión + (a lo más) 1 acción. Generoso para una tarea simple, finito siempre.
 MAX_PASOS = 12
+
+# Presupuesto de TIEMPO total (s) del bucle. Cota blanda para que el control
+# SIEMPRE devuelva un resultado dentro del timeout de la petición del chat —
+# nunca silencio. Si se agota, paramos con "tope" y un mensaje claro ("avancé N,
+# ¿sigo?"). `tools.py` lo cablea por debajo del timeout HTTP del chat.
+PRESUPUESTO_S = 70.0
 
 Capturar = Callable[[], Awaitable[dict[str, Any]]]
 Interpretar = Callable[..., Awaitable[dict[str, Any]]]
@@ -45,6 +52,8 @@ async def bucle_control(
     ejecutar: Ejecutar,
     auditar: Auditar | None = None,
     max_pasos: int = MAX_PASOS,
+    presupuesto_s: float | None = PRESUPUESTO_S,
+    reloj: Callable[[], float] = time.monotonic,
     log: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Corre el bucle de control. Devuelve un dict con `estado`:
@@ -57,8 +66,17 @@ async def bucle_control(
     _log = log or (lambda _m: None)
     _audit = auditar or (lambda _a, _ok, _d: None)
     historial: list[str] = []
+    inicio = reloj()
 
     for paso in range(1, max_pasos + 1):
+        # Cota de TIEMPO: si se agotó el presupuesto, paramos limpio con un
+        # mensaje (no silencio) en vez de seguir y reventar el timeout del chat.
+        if presupuesto_s is not None and reloj() - inicio >= presupuesto_s:
+            _log(f"control: presupuesto de {presupuesto_s:.0f}s agotado → paro")
+            return _resultado(
+                "tope", pasos=paso - 1, historial=list(historial),
+                motivo="se acabó el tiempo del turno",
+            )
         _log(f"control: paso {paso}/{max_pasos} — capturando pantalla")
         cap = await capturar()
         if not cap.get("ok"):

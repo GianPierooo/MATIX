@@ -65,10 +65,12 @@ class MatixClient {
 
   /// Timeout largo para `/api/v1/matix/chat` y otros endpoints de
   /// IA. El chat puede encadenar embed (RAG) + búsqueda + tools +
-  /// LLM, fácilmente pasando los 10s del CRUD. 45s cubre con margen
-  /// el peor caso típico de Capa 3 (modo tutor: buscar → leer
-  /// apunte → resumir + generar preguntas).
-  static const _timeoutChat = Duration(seconds: 45);
+  /// LLM. El caso MÁS largo es el control AUTÓNOMO de pantalla (Capa 6.3):
+  /// un bucle de hasta ~70s (capturar→visión→actuar, varios pasos) + la
+  /// narración. 90s cubre eso con margen; el chat normal responde en
+  /// segundos, así que este techo solo aplica a esos turnos largos. Sin él,
+  /// el control de PC moría a los 45s y el chat se quedaba sin respuesta.
+  static const _timeoutChat = Duration(seconds: 90);
 
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
