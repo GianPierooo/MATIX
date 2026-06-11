@@ -60,6 +60,14 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
   String? _pingResultado;
   bool _pingando = false;
 
+  // PC (agente local): estado LOCAL explícito (mismo patrón que el ping) para
+  // que "Recomprobar PC" SIEMPRE dé feedback. Antes dependía de
+  // `ref.invalidate` + un `.when` que en refresh NO muestra loading → el botón
+  // parecía muerto cuando el estado no cambiaba.
+  bool _comprobandoPc = false;
+  bool? _pcConectada; // null = aún sin datos, o no se pudo contactar al cerebro
+  String? _pcMotivo;
+
   int? _notifsPendientes;
   bool _consultandoNotifs = false;
 
@@ -71,6 +79,7 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
   void initState() {
     super.initState();
     _cargarZonaNotifs();
+    _recomprobarPc(); // chequeo inicial al entrar (antes lo hacía el provider)
   }
 
   Future<void> _cargarZonaNotifs() async {
@@ -95,6 +104,28 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
       _pingResultado = 'Error: $e';
     } finally {
       if (mounted) setState(() => _pingando = false);
+    }
+  }
+
+  /// Recomprueba si la PC (agente local) está conectada. SIEMPRE da feedback:
+  /// pone "Comprobando…" mientras consulta y al terminar muestra conectada,
+  /// desconectada o el motivo real del fallo. Mismo patrón que `_ping` (estado
+  /// local + setState) — nunca silencio.
+  Future<void> _recomprobarPc() async {
+    setState(() {
+      _comprobandoPc = true;
+      _pcMotivo = null;
+    });
+    try {
+      final r = await ref.read(matixClientProvider).estadoPc();
+      if (!mounted) return;
+      _pcConectada = r.error == null ? r.conectada : null;
+      _pcMotivo = r.error ??
+          (r.conectada
+              ? 'Conectada ahora mismo.'
+              : 'No está conectada. Asegúrate de que el agente corre en tu PC.');
+    } finally {
+      if (mounted) setState(() => _comprobandoPc = false);
     }
   }
 
@@ -283,34 +314,35 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
           ),
 
           const _Seccion('PC (agente local)'),
-          Consumer(
-            builder: (context, ref, _) {
-              final estado = ref.watch(pcConectadaProvider);
-              return estado.when(
-                data: (conectada) => _Fila(
-                  label: 'PC',
-                  value: conectada ? 'conectada' : 'desconectada',
-                  valueColor:
-                      conectada ? MatixColors.green : MatixColors.red,
-                ),
-                loading: () => const _Fila(
-                  label: 'PC',
-                  value: 'comprobando…',
-                  valueColor: MatixColors.muted,
-                ),
-                error: (_, _) => const _Fila(
-                  label: 'PC',
-                  value: 'desconectada',
-                  valueColor: MatixColors.red,
-                ),
-              );
-            },
+          _Fila(
+            label: 'PC',
+            value: _comprobandoPc
+                ? 'comprobando…'
+                : _pcConectada == null
+                    ? 'sin datos'
+                    : _pcConectada!
+                        ? 'conectada'
+                        : 'desconectada',
+            valueColor: _comprobandoPc
+                ? MatixColors.muted
+                : _pcConectada == true
+                    ? MatixColors.green
+                    : _pcConectada == false
+                        ? MatixColors.red
+                        : MatixColors.muted,
           ),
           _Accion(
-            label: 'Recomprobar PC',
+            label: _comprobandoPc ? 'Comprobando…' : 'Recomprobar PC',
             icon: Icons.computer,
-            onTap: () => ref.invalidate(pcConectadaProvider),
-            subtitle: 'El agente debe estar corriendo en tu compu.',
+            onTap: _comprobandoPc ? null : _recomprobarPc,
+            subtitle: _pcMotivo ?? 'El agente debe estar corriendo en tu compu.',
+            subtitleColor: _comprobandoPc
+                ? null
+                : _pcConectada == true
+                    ? MatixColors.green
+                    : _pcMotivo != null
+                        ? MatixColors.red
+                        : null,
           ),
 
           const _Seccion('Hub'),

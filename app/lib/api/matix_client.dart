@@ -103,37 +103,55 @@ class MatixClient {
     return json.decode(r.body) as Map<String, dynamic>;
   }
 
-  /// Estado de conexión del agente de la PC (Capa 6 · 6.0a).
+  /// Estado de conexión del agente de la PC (Capa 6), con MOTIVO.
   ///
-  /// Devuelve `true` si la PC está conectada al cerebro ahora mismo. No lanza:
-  /// ante cualquier fallo (timeout, cerebro caído, 4xx) devuelve `false`
-  /// (desconectada). Es solo un indicador; nunca debe romper la UI.
+  /// Distingue tres casos para que la UI nunca quede muda:
+  /// - `(conectada: true,  error: null)`  → la PC está conectada al cerebro.
+  /// - `(conectada: false, error: null)`  → llegamos al cerebro y dice que NO
+  ///   hay agente conectado (arranca el agente en la PC).
+  /// - `(conectada: false, error: <txt>)` → no pudimos contactar/entender al
+  ///   cerebro (sin red, timeout, 401, 5xx…): el problema NO es el agente.
   ///
-  /// Reintenta UNA vez ante un "no": el WS del agente puede tener un parpadeo
-  /// de ~1s (reconexión tras un corte del proxy de Railway). Sin el reintento,
-  /// "Recomprobar PC" mostraría desconectada por esa ventana mínima. Dos
-  /// intentos con ~1.5s de separación absorben el blip; si de verdad está
-  /// caída, el segundo intento también da `false` y mostramos desconectada.
-  Future<bool> pcConectada() async {
+  /// Reintenta UNA vez ante un "no" (no ante un error de auth): el WS del agente
+  /// puede tener un parpadeo de ~1s al reconectar tras un corte del proxy de
+  /// Railway. Dos intentos con ~1.5s de separación absorben ese blip.
+  Future<({bool conectada, String? error})> estadoPc() async {
+    ({bool conectada, String? error}) ultimo =
+        (conectada: false, error: 'No pude comprobar el estado.');
     for (var intento = 0; intento < 2; intento++) {
       try {
         final r = await _conTimeout(
           _inner.get(_uri('/api/v1/agente/estado'), headers: _headers),
           timeout: _timeoutHealth,
         );
-        if (r.statusCode == 200) {
-          final j = json.decode(r.body) as Map<String, dynamic>;
-          if (j['conectado'] == true) return true;
+        if (r.statusCode == 401 || r.statusCode == 403) {
+          // Auth rota: reintentar no ayuda. Cortamos con el motivo claro.
+          return (
+            conectada: false,
+            error: 'La app no está autorizada por el cerebro (HTTP '
+                '${r.statusCode}). Revisa la API key.',
+          );
         }
-      } catch (_) {
-        // Cae al reintento (o a false si ya fue el último).
+        if (r.statusCode != 200) {
+          ultimo = (conectada: false, error: 'El cerebro respondió HTTP ${r.statusCode}.');
+        } else {
+          final j = json.decode(r.body) as Map<String, dynamic>;
+          if (j['conectado'] == true) return (conectada: true, error: null);
+          ultimo = (conectada: false, error: null); // llegó; agente no conectado
+        }
+      } catch (e) {
+        ultimo = (conectada: false, error: 'No pude contactar a Matix: $e');
       }
       if (intento == 0) {
         await Future<void>.delayed(const Duration(milliseconds: 1500));
       }
     }
-    return false;
+    return ultimo;
   }
+
+  /// Atajo booleano para el indicador (true = conectada). Delega en `estadoPc`:
+  /// una sola fuente de verdad, sin duplicar la lógica de reintento.
+  Future<bool> pcConectada() async => (await estadoPc()).conectada;
 
   Future<List<dynamic>> getList(String path) async {
     final r = await _conTimeout(_inner.get(_uri(path), headers: _headers));
