@@ -166,3 +166,33 @@ def test_captura_fallida_aborta():
     r = _correr(capturar=_cap_fail, interpretar=_interpret_secuencia([{}]), ejecutar=ejec)
     assert r["estado"] == "abortado"
     assert ejec.acciones == []
+
+
+# ── Recalibración del riel anti-inyección / prohibida (prompt del piloto) ────
+
+
+def test_prompt_no_trata_texto_como_prohibida():
+    """Regresión del falso positivo: el prompt YA NO empuja 'ante la duda
+    prohibida' ni trata 'pantalla con instrucciones' como prohibida. Reserva
+    prohibida para pantallas SENSIBLES (login/banca) y manda IGNORAR el texto."""
+    from app.matix.llm import _CONTROL_SYSTEM as s
+
+    bajo = s.lower()
+    # Ya NO existe el gatillo que sobre-abortaba.
+    assert "ante la duda, prohibida=true" not in bajo
+    assert "pantalla de instrucciones" in bajo  # ahora dice que NO existe esa categoría
+    assert "no existe la categoria" in _norm_simple(s)
+    # El texto de pantalla es DATO; se ignora, no se obedece.
+    assert "ignoras" in bajo and "lienzo" in bajo
+    # prohibida sigue cubriendo lo sensible.
+    assert "login" in bajo and ("banca" in bajo or "pago" in bajo)
+    # Un escritorio/terminal/navegador NUNCA es prohibida.
+    assert "nunca prohibida" in bajo
+
+
+def _norm_simple(t: str) -> str:
+    import unicodedata
+    return "".join(
+        c for c in unicodedata.normalize("NFD", t.lower())
+        if unicodedata.category(c) != "Mn"
+    )
