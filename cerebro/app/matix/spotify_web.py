@@ -175,8 +175,15 @@ async def reproducir_en_pc(
             if r.status_code != 200:
                 return {"ok": False, "tipo": "error_api", "mensaje": f"devices devolvió {r.status_code}"}
             dispositivos = r.json().get("devices") or []
+            # LA PC correcta: si hay varios Computer (laptop + PC), gana el que
+            # coincide con SPOTIFY_DEVICE_NAME (el hostname de la PC del agente).
+            nombre_pref = (await secretos.obtener("SPOTIFY_DEVICE_NAME") or "").strip().lower()
+            preferidos = [
+                d for d in dispositivos
+                if nombre_pref and (d.get("name") or "").strip().lower() == nombre_pref
+            ]
             compus = [d for d in dispositivos if d.get("type") == "Computer"]
-            elegido = (compus or dispositivos or [None])[0]
+            elegido = (preferidos or compus or dispositivos or [None])[0]
             if not elegido:
                 return {
                     "ok": False, "tipo": "sin_dispositivo",

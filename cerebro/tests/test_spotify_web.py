@@ -169,6 +169,31 @@ async def test_reproducir_elige_computer_y_da_play(monkeypatch):
     assert "spotify:track:abc" in visto["cuerpo"] and "uris" in visto["cuerpo"]
 
 
+async def test_reproducir_prefiere_el_device_por_nombre(monkeypatch):
+    # Con laptop Y pc como "Computer", gana el que coincide con
+    # SPOTIFY_DEVICE_NAME (case-insensitive) — nunca la laptop por accidente.
+    _con_creds(monkeypatch, refresh=True)
+    monkeypatch.setenv("SPOTIFY_DEVICE_NAME", "gp")
+    visto = {}
+
+    def manejar(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/api/token":
+            return _TOKEN_OK
+        if req.url.path == "/v1/me/player/devices":
+            return httpx.Response(200, json={"devices": [
+                {"id": "lap", "type": "Computer", "name": "LAPTOP-X"},
+                {"id": "pc1", "type": "Computer", "name": "GP"},
+            ]})
+        if req.url.path == "/v1/me/player/play":
+            visto["device"] = req.url.params.get("device_id")
+            return httpx.Response(204)
+        return httpx.Response(404)
+
+    cli = httpx.AsyncClient(transport=httpx.MockTransport(manejar))
+    r = await spotify_web.reproducir_en_pc("spotify:track:abc", cliente=cli)
+    assert r["ok"] and visto["device"] == "pc1"
+
+
 async def test_reproducir_sin_dispositivos(monkeypatch):
     _con_creds(monkeypatch, refresh=True)
     cli = _cliente({
