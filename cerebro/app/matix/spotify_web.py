@@ -252,12 +252,22 @@ async def _elegir_dispositivo(dispositivos: list[dict]) -> dict | None:
     """LA PC correcta: si hay varios Computer (laptop + PC), gana el que
     coincide con SPOTIFY_DEVICE_NAME (hostname de la PC del agente)."""
     nombre_pref = (await secretos.obtener("SPOTIFY_DEVICE_NAME") or "").strip().lower()
-    preferidos = [
-        d for d in dispositivos
-        if nombre_pref and (d.get("name") or "").strip().lower() == nombre_pref
-    ]
+    # Reemplazo LIMPIO al cambiar de canción: entre las entradas de ESTA PC,
+    # gana la ACTIVA (la que ya está sonando) — así el play la reemplaza en la
+    # misma sesión en vez de abrir una segunda (Spotify a veces registra una
+    # entrada duplicada al reconectar → si apuntáramos a la otra, sonarían DOS
+    # a la vez). Orden: nuestra-PC-activa → nuestra-PC → Computer-activo →
+    # Computer → activo → lo que haya. NO secuestramos la laptop si estuviera
+    # activa: nuestra PC (por nombre) gana sobre un activo ajeno.
+    def _es_nuestra(d: dict) -> bool:
+        return bool(nombre_pref) and (d.get("name") or "").strip().lower() == nombre_pref
+
+    nuestras_activas = [d for d in dispositivos if _es_nuestra(d) and d.get("is_active")]
+    nuestras = [d for d in dispositivos if _es_nuestra(d)]
+    compus_activos = [d for d in dispositivos if d.get("type") == "Computer" and d.get("is_active")]
     compus = [d for d in dispositivos if d.get("type") == "Computer"]
-    return (preferidos or compus or dispositivos or [None])[0]
+    activos = [d for d in dispositivos if d.get("is_active")]
+    return (nuestras_activas or nuestras or compus_activos or compus or activos or dispositivos or [None])[0]
 
 
 async def dispositivo_objetivo(cliente: httpx.AsyncClient | None = None) -> dict[str, Any] | None:
@@ -275,6 +285,90 @@ async def dispositivo_objetivo(cliente: httpx.AsyncClient | None = None) -> dict
         return await _elegir_dispositivo(r.json().get("devices") or [])
     except httpx.HTTPError:
         return None
+
+
+def _track_de_estado(payload: dict) -> dict[str, Any] | None:
+    """Extrae {nombre, artista, uri} del item de un `GET /me/player`."""
+    item = (payload or {}).get("item") or {}
+    if not item.get("uri"):
+        return None
+    return {
+        "uri": item.get("uri"),
+        "nombre": item.get("name"),
+        "artista": ", ".join(a.get("name", "") for a in item.get("artists") or []),
+    }
+
+
+async def estado_reproduccion(cliente: httpx.AsyncClient | None = None) -> dict[str, Any]:
+    """Estado REAL del player (`GET /me/player`): qué track suena y si está
+    reproduciendo. La fuente autoritativa (mejor que el título de ventana).
+    Devuelve {ok, is_playing, track|None, device}. ok=False si no hay OAuth o
+    no hay sesión activa."""
+    token = await _token("user", cliente)
+    if not token:
+        return {"ok": False, "tipo": "sin_oauth"}
+    try:
+        async with _cliente(cliente) as (cli, _propio):
+            r = await cli.get(f"{_API}/me/player",
+                              headers={"Authorization": f"Bearer {token}"})
+        if r.status_code == 204:
+            return {"ok": True, "is_playing": False, "track": None, "device": None}
+        if r.status_code != 200:
+            return {"ok": False, "tipo": "error_api", "mensaje": f"player devolvió {r.status_code}"}
+        cuerpo = r.json()
+        return {
+            "ok": True,
+            "is_playing": bool(cuerpo.get("is_playing")),
+            "track": _track_de_estado(cuerpo),
+            "device": (cuerpo.get("device") or {}).get("name"),
+        }
+    except httpx.HTTPError as e:
+        return {"ok": False, "tipo": "error_red", "mensaje": type(e).__name__}
+
+
+# Acciones de control del player (sin reproducir un track nuevo): método + ruta.
+_CONTROL = {
+    "pausa": ("PUT", "me/player/pause"),
+    "reanuda": ("PUT", "me/player/play"),
+    "siguiente": ("POST", "me/player/next"),
+    "anterior": ("POST", "me/player/previous"),
+}
+
+
+async def control_player(accion: str, cliente: httpx.AsyncClient | None = None) -> dict[str, Any]:
+    """Controla el player SIN cambiar de track: pausa/reanuda/siguiente/anterior.
+    Apunta al device de ESTA PC. Devuelve {ok, ...} y, salvo pausa, el track que
+    quedó sonando (leído del estado real)."""
+    accion = (accion or "").strip().lower()
+    if accion not in _CONTROL:
+        return {"ok": False, "tipo": "validacion",
+                "mensaje": f"acción no reconocida: {accion} (usa pausa/reanuda/siguiente/anterior)"}
+    token = await _token("user", cliente)
+    if not token:
+        return {"ok": False, "tipo": "sin_oauth", "mensaje": await _mensaje_sin_oauth()}
+    auth = {"Authorization": f"Bearer {token}"}
+    metodo, ruta = _CONTROL[accion]
+    try:
+        device = await dispositivo_objetivo(cliente)
+        params = {"device_id": device["id"]} if device and device.get("id") else None
+        async with _cliente(cliente) as (cli, _propio):
+            rp = await cli.request(metodo, f"{_API}/{ruta}", params=params, headers=auth)
+        if rp.status_code not in (200, 202, 204):
+            if rp.status_code == 403:
+                return {"ok": False, "tipo": "sin_premium",
+                        "mensaje": "Spotify rechazó el control (403): la cuenta no permite control remoto"}
+            if rp.status_code == 404:
+                return {"ok": False, "tipo": "sin_dispositivo",
+                        "mensaje": "no hay nada reproduciéndose en la PC ahora mismo"}
+            return {"ok": False, "tipo": "error_api", "mensaje": f"{accion} devolvió {rp.status_code}"}
+    except httpx.HTTPError as e:
+        return {"ok": False, "tipo": "error_red", "mensaje": type(e).__name__}
+    salida: dict[str, Any] = {"ok": True, "accion": accion}
+    if accion != "pausa":
+        est = await estado_reproduccion(cliente)
+        salida["track"] = est.get("track")
+        salida["is_playing"] = est.get("is_playing")
+    return salida
 
 
 async def reproducir_en_pc(

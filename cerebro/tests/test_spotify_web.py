@@ -292,10 +292,17 @@ async def test_handler_honesto_sin_credenciales(monkeypatch):
     assert "SPOTIFY_REFRESH_TOKEN" in res["datos"]["mensaje"]  # el muro, claro
 
 
+async def _sin_dormir(monkeypatch):
+    async def _noop(_s):
+        return None
+    monkeypatch.setattr(tools.asyncio, "sleep", _noop)
+
+
 async def test_handler_resuelve_consulta_y_da_play_por_api(monkeypatch):
     # VÍA GARANTIZADA completa: busca el top track, el device de ESTA PC está
-    # listo, play por la Web API, re-verifica audio y recién ahí dice «puse X».
+    # listo, play por la Web API, y confirma con el ESTADO REAL del player.
     _con_creds(monkeypatch, refresh=True)
+    await _sin_dormir(monkeypatch)
     llamadas = []
 
     async def fake_buscar(consulta, cliente=None):
@@ -309,31 +316,35 @@ async def test_handler_resuelve_consulta_y_da_play_por_api(monkeypatch):
         llamadas.append(("play", uri))
         return {"ok": True, "dispositivo": "GP"}
 
+    async def fake_estado(cliente=None):
+        # El player confirma que suena justo la nueva (reemplazo limpio).
+        return {"ok": True, "is_playing": True,
+                "track": {"uri": "spotify:track:b", "nombre": "Billie Jean",
+                          "artista": "Michael Jackson"}, "device": "GP"}
+
     async def fake_enviar(nombre, args, **kw):
         llamadas.append((nombre, args))
-        if nombre == "verificar_spotify":
-            return {"ok": True, "sonando": True,
-                    "reproduciendo": "Michael Jackson - Billie Jean"}
-        raise AssertionError(f"acción inesperada: {nombre}")
+        raise AssertionError(f"no debería tocar el agente: {nombre}")
 
     monkeypatch.setattr(tools.spotify_web, "buscar_mejor_track", fake_buscar)
     monkeypatch.setattr(tools.spotify_web, "dispositivo_objetivo", fake_device)
     monkeypatch.setattr(tools.spotify_web, "reproducir_en_pc", fake_play)
+    monkeypatch.setattr(tools.spotify_web, "estado_reproduccion", fake_estado)
     monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
     res = await tools.ejecutar_tool(None, "pc_reproducir_spotify",
                                     {"consulta": "Michael Jackson"})
     assert res["ok"] and res["datos"]["estado"] == "sonando"
     assert ("play", "spotify:track:b") in llamadas
-    assert res["datos"]["reproduciendo"] == "Michael Jackson - Billie Jean"
-    assert "Billie Jean" in res["datos"]["mensaje"]
-    # Con la API confirmando, NO se cae al fallback de abrir el cliente.
-    assert not any(n == "reproducir_spotify" for n, _ in llamadas)
+    assert "Billie Jean" in res["datos"]["reproduciendo"]
+    # Con el estado real confirmando, NO toca el agente (ni verificar ni abrir).
+    assert not any(n in ("verificar_spotify", "reproducir_spotify") for n, _ in llamadas)
 
 
 async def test_handler_play_por_api_pero_sin_sonido_es_honesto(monkeypatch):
-    # La API CONFIRMÓ el play pero el medidor local no detecta audio: el estado
-    # lo dice exacto (orden confirmada, sin audio local) — nunca fingir éxito.
+    # La API aceptó el play pero el estado NO confirma la nueva y el medidor
+    # local tampoco detecta audio: estado honesto, sin fingir éxito.
     _con_creds(monkeypatch, refresh=True)
+    await _sin_dormir(monkeypatch)
 
     async def fake_device(cliente=None):
         return {"id": "pc1", "name": "GP", "type": "Computer"}
@@ -341,12 +352,16 @@ async def test_handler_play_por_api_pero_sin_sonido_es_honesto(monkeypatch):
     async def fake_play(uri, cliente=None):
         return {"ok": True, "dispositivo": "GP"}
 
+    async def fake_estado(cliente=None):
+        return {"ok": True, "is_playing": False, "track": None, "device": "GP"}
+
     async def fake_enviar(nombre, args, **kw):
         assert nombre == "verificar_spotify"
         return {"ok": True, "sonando": False, "reproduciendo": None}
 
     monkeypatch.setattr(tools.spotify_web, "dispositivo_objetivo", fake_device)
     monkeypatch.setattr(tools.spotify_web, "reproducir_en_pc", fake_play)
+    monkeypatch.setattr(tools.spotify_web, "estado_reproduccion", fake_estado)
     monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
     res = await tools.ejecutar_tool(None, "pc_reproducir_spotify",
                                     {"uri": "spotify:track:abc"})
@@ -373,6 +388,10 @@ async def test_handler_abre_spotify_si_no_hay_device_y_espera(monkeypatch):
         llamadas.append(("play", uri))
         return {"ok": True, "dispositivo": "GP"}
 
+    async def fake_estado(cliente=None):
+        # El estado no confirma todavía → respaldo con el medidor del agente.
+        return {"ok": True, "is_playing": False, "track": None}
+
     async def fake_enviar(nombre, args, **kw):
         llamadas.append((nombre, args))
         if nombre == "abrir_app":
@@ -384,6 +403,7 @@ async def test_handler_abre_spotify_si_no_hay_device_y_espera(monkeypatch):
 
     monkeypatch.setattr(tools.spotify_web, "dispositivo_objetivo", fake_device)
     monkeypatch.setattr(tools.spotify_web, "reproducir_en_pc", fake_play)
+    monkeypatch.setattr(tools.spotify_web, "estado_reproduccion", fake_estado)
     monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
     res = await tools.ejecutar_tool(None, "pc_reproducir_spotify",
                                     {"uri": "spotify:track:abc"})
@@ -426,3 +446,161 @@ async def test_token_invalido_se_distingue_de_credenciales_faltantes(monkeypatch
     assert not r["ok"] and r["tipo"] == "sin_oauth"
     assert "vencido o revocado" in r["mensaje"]
     assert "spotify_autorizar_auto" in r["mensaje"]
+
+
+# ── Reemplazo limpio + control del player (cambiar de canción / pausa) ───────
+
+
+async def test_reproducir_prefiere_el_device_ACTIVO_de_la_pc(monkeypatch):
+    # Cambio de canción: si nuestra PC aparece DUPLICADA (una activa sonando,
+    # otra idle), gana la ACTIVA → el play reemplaza en la misma sesión (no se
+    # encima una segunda).
+    _con_creds(monkeypatch, refresh=True)
+    monkeypatch.setenv("SPOTIFY_DEVICE_NAME", "gp")
+    visto = {}
+
+    def manejar(req):
+        if req.url.path == "/api/token":
+            return _TOKEN_OK
+        if req.url.path == "/v1/me/player/devices":
+            return httpx.Response(200, json={"devices": [
+                {"id": "idle", "type": "Computer", "name": "GP", "is_active": False},
+                {"id": "activo", "type": "Computer", "name": "GP", "is_active": True},
+            ]})
+        if req.url.path == "/v1/me/player/play":
+            visto["device"] = req.url.params.get("device_id")
+            return httpx.Response(204)
+        return httpx.Response(404)
+
+    cli = httpx.AsyncClient(transport=httpx.MockTransport(manejar))
+    r = await spotify_web.reproducir_en_pc("spotify:track:nueva", cliente=cli)
+    assert r["ok"] and visto["device"] == "activo"  # la activa, no la idle
+
+
+async def test_estado_reproduccion_lee_el_track_real(monkeypatch):
+    _con_creds(monkeypatch, refresh=True)
+    cli = _cliente({
+        "POST /api/token": _TOKEN_OK,
+        "GET /v1/me/player": httpx.Response(200, json={
+            "is_playing": True,
+            "device": {"name": "GP"},
+            "item": {"uri": "spotify:track:x", "name": "Thriller",
+                     "artists": [{"name": "Michael Jackson"}]},
+        }),
+    })
+    est = await spotify_web.estado_reproduccion(cliente=cli)
+    assert est["ok"] and est["is_playing"] is True
+    assert est["track"]["nombre"] == "Thriller"
+    assert est["track"]["uri"] == "spotify:track:x"
+
+
+async def test_estado_reproduccion_sin_sesion(monkeypatch):
+    _con_creds(monkeypatch, refresh=True)
+    cli = _cliente({"POST /api/token": _TOKEN_OK,
+                    "GET /v1/me/player": httpx.Response(204)})
+    est = await spotify_web.estado_reproduccion(cliente=cli)
+    assert est["ok"] and est["is_playing"] is False and est["track"] is None
+
+
+async def test_control_player_pausa(monkeypatch):
+    _con_creds(monkeypatch, refresh=True)
+    visto = {}
+
+    def manejar(req):
+        if req.url.path == "/api/token":
+            return _TOKEN_OK
+        if req.url.path == "/v1/me/player/devices":
+            return httpx.Response(200, json={"devices": [
+                {"id": "pc1", "type": "Computer", "name": "GP", "is_active": True}]})
+        if req.url.path == "/v1/me/player/pause":
+            visto["metodo"] = req.method
+            visto["device"] = req.url.params.get("device_id")
+            return httpx.Response(204)
+        return httpx.Response(404)
+
+    cli = httpx.AsyncClient(transport=httpx.MockTransport(manejar))
+    r = await spotify_web.control_player("pausa", cliente=cli)
+    assert r["ok"] and r["accion"] == "pausa"
+    assert visto["metodo"] == "PUT" and visto["device"] == "pc1"
+
+
+async def test_control_player_siguiente_devuelve_track_real(monkeypatch):
+    _con_creds(monkeypatch, refresh=True)
+
+    def manejar(req):
+        if req.url.path == "/api/token":
+            return _TOKEN_OK
+        if req.url.path == "/v1/me/player/devices":
+            return httpx.Response(200, json={"devices": [
+                {"id": "pc1", "type": "Computer", "name": "GP", "is_active": True}]})
+        if req.url.path == "/v1/me/player/next":
+            return httpx.Response(204)
+        if req.url.path == "/v1/me/player":
+            return httpx.Response(200, json={
+                "is_playing": True, "device": {"name": "GP"},
+                "item": {"uri": "spotify:track:n", "name": "Beat It",
+                         "artists": [{"name": "Michael Jackson"}]}})
+        return httpx.Response(404)
+
+    cli = httpx.AsyncClient(transport=httpx.MockTransport(manejar))
+    r = await spotify_web.control_player("siguiente", cliente=cli)
+    assert r["ok"] and r["accion"] == "siguiente"
+    assert r["track"]["nombre"] == "Beat It"
+
+
+async def test_control_player_accion_invalida():
+    r = await spotify_web.control_player("explota")
+    assert not r["ok"] and r["tipo"] == "validacion"
+
+
+async def test_control_player_sin_oauth():
+    r = await spotify_web.control_player("pausa")
+    assert not r["ok"] and r["tipo"] == "sin_oauth"
+
+
+# ── Handler pc_control_spotify: directo, sin confirmar, mensaje real ─────────
+
+
+async def test_handler_control_pausa(monkeypatch):
+    async def fake_control(accion, cliente=None):
+        assert accion == "pausa"
+        return {"ok": True, "accion": "pausa"}
+
+    monkeypatch.setattr(tools.spotify_web, "control_player", fake_control)
+    res = await tools.ejecutar_tool(None, "pc_control_spotify", {"accion": "para la música"})
+    assert res["ok"] and res["datos"]["estado"] == "control_ok"
+    assert "accion_dispositivo" not in res["datos"]  # DIRECTO, sin confirmar
+    assert "Pausé" in res["datos"]["mensaje"]
+
+
+async def test_handler_control_siguiente_narra_lo_que_suena(monkeypatch):
+    async def fake_control(accion, cliente=None):
+        assert accion == "siguiente"
+        return {"ok": True, "accion": "siguiente",
+                "track": {"nombre": "Beat It", "artista": "Michael Jackson"},
+                "is_playing": True}
+
+    monkeypatch.setattr(tools.spotify_web, "control_player", fake_control)
+    res = await tools.ejecutar_tool(None, "pc_control_spotify", {"accion": "siguiente"})
+    assert res["datos"]["estado"] == "control_ok"
+    assert "Beat It" in res["datos"]["mensaje"]
+
+
+async def test_handler_control_sinonimos(monkeypatch):
+    # «pásala», «siguiente», «salta» → siguiente; «sigue» → reanuda.
+    capt = {}
+
+    async def fake_control(accion, cliente=None):
+        capt["accion"] = accion
+        return {"ok": True, "accion": accion, "track": None}
+
+    monkeypatch.setattr(tools.spotify_web, "control_player", fake_control)
+    for palabra, esperado in [("pásala", "siguiente"), ("salta", "siguiente"),
+                              ("sigue", "reanuda"), ("para", "pausa")]:
+        await tools.ejecutar_tool(None, "pc_control_spotify", {"accion": palabra})
+        assert capt["accion"] == esperado, palabra
+
+
+async def test_handler_control_accion_vacia():
+    res = await tools.ejecutar_tool(None, "pc_control_spotify", {"accion": "xyz"})
+    assert not res["ok"] and res["tipo"] == "validacion"

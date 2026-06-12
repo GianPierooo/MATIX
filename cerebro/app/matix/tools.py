@@ -3467,13 +3467,15 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "pc_reproducir_spotify",
             "description": (
-                "REPRODUCE música en el Spotify de la PC y VERIFICA si de verdad "
-                "suena. Resuelve el mejor track vía la Web API si hay credenciales "
-                "y le da play; si no, abre el track/búsqueda en el cliente. Para "
-                "«pon X en Spotify», «cualquier canción de Y» (orden COMPLETA: "
-                "pasa consulta='Y' y NO preguntes cuál). Se ejecuta DIRECTO, sin "
-                "confirmación. El resultado trae `estado`: di que la música SUENA "
-                "solo si estado='sonando'; si no, narra el mensaje honesto tal cual."
+                "REPRODUCE (o CAMBIA a) una canción en el Spotify de la PC y "
+                "VERIFICA con el estado real del player que quede SOLO esa "
+                "sonando (reemplaza limpio la anterior, no la encima). Resuelve "
+                "el mejor track vía la Web API y le da play en el device activo. "
+                "Para «pon X», «cualquier canción de Y», «cámbiala a Z» (órdenes "
+                "COMPLETAS: pasa consulta y NO preguntes cuál). Se ejecuta "
+                "DIRECTO, SIN confirmación ni «¿quieres que…?». El resultado trae "
+                "`estado`: di que SUENA solo si estado='sonando'; si no, narra el "
+                "mensaje honesto tal cual."
             ),
             "parameters": {
                 "type": "object",
@@ -3481,6 +3483,31 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "consulta": {"type": "string", "description": "Canción/artista a buscar y reproducir."},
                     "uri": {"type": "string", "description": "URI spotify: directo (opcional)."},
                 },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "pc_control_spotify",
+            "description": (
+                "Controla el player de Spotify de la PC SIN cambiar de canción: "
+                "pausar, reanudar, siguiente o anterior. Para «pausa», «para la "
+                "música», «siguiente», «pásala», «anterior», «reanuda», «sigue». "
+                "Se ejecuta DIRECTO, SIN confirmación ni «¿quieres que…?» (es "
+                "reversible). Para PONER una canción nueva usa pc_reproducir_spotify. "
+                "Narra el resultado real (qué quedó sonando)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "accion": {
+                        "type": "string",
+                        "description": "pausa | reanuda | siguiente | anterior.",
+                    },
+                },
+                "required": ["accion"],
                 "additionalProperties": False,
             },
         },
@@ -6911,9 +6938,24 @@ async def _pc_reproducir_spotify(db: Postgrest, args: dict) -> dict[str, Any]:
             rep = await spotify_web.reproducir_en_pc(uri)
             if rep.get("ok"):
                 api_confirmo = True
-                ver = await canal.enviar_accion("verificar_spotify", {"espera_s": 6.0}, timeout=15.0)
-                sonando = ver.get("sonando") is True
-                reproduciendo = ver.get("reproduciendo")
+                # VERIFICACIÓN AUTORITATIVA: leemos el ESTADO REAL del player
+                # (qué track suena de verdad), no el título de ventana. Así
+                # confirmamos que quedó SOLO la nueva (reemplazo limpio).
+                await asyncio.sleep(1.0)  # deja que el play se asiente
+                est = await spotify_web.estado_reproduccion()
+                track_real = est.get("track") or {}
+                if est.get("ok") and est.get("is_playing") and track_real.get("uri") == uri:
+                    sonando = True
+                    if track_real.get("nombre"):
+                        reproduciendo = f"{track_real['nombre']} — {track_real.get('artista', '')}".strip(" —")
+                else:
+                    # La API aceptó pero el estado aún no confirma: respaldo con
+                    # el medidor de audio local del agente.
+                    ver = await canal.enviar_accion("verificar_spotify", {"espera_s": 5.0}, timeout=12.0)
+                    sonando = ver.get("sonando") is True
+                    reproduciendo = (track_real.get("nombre") and
+                                     f"{track_real['nombre']} — {track_real.get('artista', '')}".strip(" —")
+                                     ) or ver.get("reproduciendo")
             else:
                 causa_api = rep.get("mensaje") or rep.get("tipo") or "fallo de la API"
         else:
@@ -6968,6 +7010,68 @@ async def _pc_reproducir_spotify(db: Postgrest, args: dict) -> dict[str, Any]:
         "estado": estado,
         "uri": uri or None,
         "reproduciendo": reproduciendo,
+        "mensaje": mensaje,
+    })
+
+
+# Sinónimos → acción canónica del player. El modelo manda `accion` libre.
+_SINONIMOS_CONTROL = {
+    "pausa": "pausa", "pausar": "pausa", "para": "pausa", "parar": "pausa",
+    "detener": "pausa", "stop": "pausa", "silencio": "pausa",
+    "reanuda": "reanuda", "reanudar": "reanuda", "sigue": "reanuda",
+    "continua": "reanuda", "continuar": "reanuda", "play": "reanuda", "reproduce": "reanuda",
+    "siguiente": "siguiente", "next": "siguiente", "salta": "siguiente",
+    "saltar": "siguiente", "otra": "siguiente", "pasala": "siguiente",
+    "anterior": "anterior", "previa": "anterior", "previous": "anterior",
+    "atras": "anterior", "regresa": "anterior", "vuelve": "anterior",
+}
+
+
+def _norm_control(texto: str) -> str:
+    """minúsculas sin tildes (para casar «pásala» → «pasala»)."""
+    import unicodedata
+    base = unicodedata.normalize("NFD", (texto or "").lower())
+    return "".join(c for c in base if unicodedata.category(c) != "Mn")
+
+
+async def _pc_control_spotify(db: Postgrest, args: dict) -> dict[str, Any]:
+    """Controla el player de Spotify SIN cambiar de canción: pausa, reanuda,
+    siguiente, anterior. DIRECTO (reversible, nunca confirma). Resultado honesto
+    leído del estado real del player."""
+    cruda = _norm_control(str((args or {}).get("accion") or "").strip())
+    # La acción puede venir como keyword o frase («para la música»): el primer
+    # token que mapee gana.
+    accion = _SINONIMOS_CONTROL.get(cruda)
+    if accion is None:
+        for palabra in cruda.split():
+            if palabra in _SINONIMOS_CONTROL:
+                accion = _SINONIMOS_CONTROL[palabra]
+                break
+    if accion not in ("pausa", "reanuda", "siguiente", "anterior"):
+        return _error("validacion", "Dime qué hacer: pausa, reanuda, siguiente o anterior.")
+    res = await spotify_web.control_player(accion)
+    if not res.get("ok"):
+        # Errores claros (sin OAuth / sin Premium / nada sonando).
+        return _ok({
+            "_nota": _NOTA_PC_DATO,
+            "estado": "control_fallo",
+            "mensaje": res.get("mensaje", f"No pude {accion} en Spotify."),
+        })
+    track = res.get("track") or {}
+    nombre = track.get("nombre")
+    quien = f"{nombre} — {track.get('artista', '')}".strip(" —") if nombre else None
+    if accion == "pausa":
+        mensaje = "Pausé la música en la PC."
+    elif accion == "reanuda":
+        mensaje = f"Reanudé: suena {quien}." if quien else "Reanudé la música en la PC."
+    else:  # siguiente / anterior
+        verbo = "Pasé a la siguiente" if accion == "siguiente" else "Volví a la anterior"
+        mensaje = f"{verbo}: ahora suena {quien}." if quien else f"{verbo} canción."
+    return _ok({
+        "_nota": _NOTA_PC_DATO + " Resultado leído del estado real del player.",
+        "estado": "control_ok",
+        "accion": accion,
+        "reproduciendo": quien,
         "mensaje": mensaje,
     })
 
@@ -7130,6 +7234,7 @@ _HANDLERS = {
     "pc_captura": _pc_captura,
     "pc_crear_word": _pc_crear_word,
     "pc_reproducir_spotify": _pc_reproducir_spotify,
+    "pc_control_spotify": _pc_control_spotify,
     # PC (Capa 6 · 6.3 control de pantalla): bucle autónomo con rails. FALLBACK.
     "pc_controlar_pantalla": _pc_controlar_pantalla,
 }
@@ -7275,6 +7380,7 @@ TABLAS_AFECTADAS = {
     "pc_captura": [],
     "pc_crear_word": [],
     "pc_reproducir_spotify": [],
+    "pc_control_spotify": [],
     "pc_controlar_pantalla": [],
 }
 

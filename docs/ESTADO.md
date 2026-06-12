@@ -658,6 +658,22 @@ teléfono y al volver «Ya autoricé» re-chequea. Client ID/Secret YA cargados 
 validados (la búsqueda resuelve tracks); falta solo que el dueño toque conectar
 una vez. VERIFICADO local: la authorize URL trae scopes y el redirect correcto.
 
+**Spotify — cambio de canción limpio + controles del player (J).** Dos pulidos:
+(1) **Reemplazo limpio**: al cambiar de canción ya no se encima una segunda.
+`_elegir_dispositivo` ahora prefiere la entrada ACTIVA de ESTA PC (Spotify a
+veces registra una entrada duplicada al reconectar → apuntar a la otra dejaba
+DOS sonando); el `PUT /me/player/play` reemplaza en la misma sesión. Y la
+confirmación pasó a leer el ESTADO REAL del player (`estado_reproduccion` →
+`GET /me/player`: qué track suena de verdad) en vez del título de ventana —
+se dice «puse X» solo si el player confirma que suena justo esa. (2) **Controles
+sin cambiar de track**: nueva `pc_control_spotify` (pausa/reanuda/siguiente/
+anterior vía `spotify_web.control_player` → endpoints del player apuntando al
+device de la PC), con sinónimos tolerantes a tildes/frases («pásala», «para la
+música»). MÚSICA NUNCA CONFIRMA: `pc_reproducir_spotify` y `pc_control_spotify`
+son directas; el prompt (`capacidades_pc.py`) prohíbe explícitamente el
+«¿quieres que…?» para órdenes de música. Resultado siempre leído del estado
+real. Solo cerebro (la app no cambió): redeploy, sin build nuevo.
+
 **Fiabilidad del agente PC — autoarranque con VIGILANTE (G).** Causa raíz del
 agente muerto tras un reinicio (boot 2026-06-12): el venv del disco real
 apuntaba a un build de Python que no existía ahí (las instalaciones de uv desde
