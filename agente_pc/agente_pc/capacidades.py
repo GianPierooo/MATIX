@@ -5,11 +5,13 @@ ciegas, sino de una herramienta CONFIABLE por tarea — determinista, validada,
 con resultado claro. El control de pantalla (`pantalla.py`) queda como ÚLTIMO
 RECURSO cuando no hay una capacidad nativa.
 
-Este módulo agrega el primer lote:
+Lote 1:
   - abrir_carpeta — abre una ruta permitida en el Explorador (sin shell).
   - tomar_captura — screenshot a PNG en una carpeta del usuario, devuelve ruta.
   - crear_documento_word — .docx real con python-docx (título, párrafos, tablas).
   - reproducir_spotify — abre Spotify por URI `spotify:` (determinista, no clics).
+Lote 2:
+  - abrir_web — abre una URL http/https en el navegador por defecto (sin shell).
 
 SEGURIDAD: todo se valida en el BORDE (aquí), nunca confiando en el modelo. Las
 rutas pasan por `seguridad.ruta_permitida` (denylist gana sobre allowlist); no se
@@ -24,7 +26,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from .registro import AccionDef, Contexto, NivelRiesgo, Param
 from .seguridad import ruta_permitida
@@ -279,6 +281,40 @@ def _verificar_spotify(args: dict[str, Any], ctx: Contexto) -> dict[str, Any]:
     }
 
 
+# ── abrir_web (URL http/https en el navegador por defecto) ───────────────────
+
+
+def _abrir_web(args: dict[str, Any], ctx: Contexto) -> dict[str, Any]:
+    """Abre una URL en el navegador por defecto, SIN shell. RIEL: solo http(s)
+    y con host — nunca file://, javascript:, data: ni esquemas raros (evita que
+    el modelo abra ficheros locales o ejecute pseudo-protocolos)."""
+    url = ((args or {}).get("url") or "").strip()
+    if not url:
+        return _err("validacion", "necesito la URL a abrir")
+    try:
+        p = urlparse(url)
+    except ValueError:
+        return _err("validacion", "no entendí esa URL")
+    # Sin esquema NI sitio (ej. «youtube.com»): es un host pelado → https.
+    # OJO: parsear PRIMERO evita que «data:text/html,x» (que tiene esquema pero
+    # no «://») se cuele como host y termine prefijado con https.
+    if not p.scheme and not p.netloc:
+        try:
+            p = urlparse("https://" + url)
+        except ValueError:
+            return _err("validacion", "no entendí esa URL")
+    if p.scheme not in ("http", "https"):
+        return _err("validacion", "solo abro páginas http o https")
+    if not p.netloc:
+        return _err("validacion", "esa URL no tiene un sitio válido")
+    url = p.geturl()
+    abridor = getattr(ctx, "abridor", None) or _abrir_uri
+    res = abridor(url)
+    if not res.get("ok"):
+        return _err("error_abrir", "no pude abrir el navegador")
+    return {"ok": True, "tipo": "web_abierta", "url": url}
+
+
 # ── Definiciones ──────────────────────────────────────────────────────────────
 
 # NIVELES: lo REVERSIBLE (abrir, reproducir, capturar, crear un doc nuevo que
@@ -332,5 +368,13 @@ DEFS_CAPACIDADES: list[AccionDef] = [
         (),
         NivelRiesgo.SEGURA,
         _verificar_spotify,
+    ),
+    AccionDef(
+        "abrir_web",
+        "Abre una URL (http/https) en el navegador por defecto. Determinista, "
+        "sin shell. Solo páginas web; nunca archivos locales ni pseudo-protocolos.",
+        (Param("url", str, requerido=True),),
+        NivelRiesgo.SEGURA,
+        _abrir_web,
     ),
 ]

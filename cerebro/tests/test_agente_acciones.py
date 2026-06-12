@@ -69,21 +69,30 @@ async def test_lectura_desconectada_falla_cerrado():
 # ── tools consecuentes: PROPONEN, no ejecutan ────────────────────────────────
 
 
-async def test_consecuentes_proponen_accion_dispositivo():
+async def test_ops_de_un_archivo_ejecutan_directo(monkeypatch):
+    # mover/copiar/renombrar/crear_carpeta/abrir_web son SEGURAS (reversibles,
+    # nunca sobreescriben) → ejecutan DIRECTO por el canal, sin bloque de
+    # confirmación. Cada una llama la acción real del agente.
+    llamadas = []
+
+    async def fake_enviar(nombre, args, **kw):
+        llamadas.append((nombre, args))
+        return {"ok": True, "destino": "/x/dest", "ruta": "/x/Nueva", "url": args.get("url")}
+
+    monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
     casos = [
         ("pc_mover_archivo", {"origen": "a.txt", "destino": "sub"}, "mover_archivo"),
+        ("pc_copiar_archivo", {"origen": "a.txt", "destino": "sub"}, "copiar_archivo"),
         ("pc_renombrar_archivo", {"ruta": "a.txt", "nuevo_nombre": "b.txt"}, "renombrar_archivo"),
         ("pc_crear_carpeta", {"ruta": "Nueva"}, "crear_carpeta"),
+        ("pc_abrir_web", {"url": "https://x.com"}, "abrir_web"),
     ]
     for tool, args, accion in casos:
         res = await tools.ejecutar_tool(None, tool, args)
         assert res["ok"] is True, tool
-        bloque = res["datos"]["accion_dispositivo"]
-        assert bloque["tipo"] == "pc_accion"
-        assert bloque["requiere_confirmacion"] is True
-        assert bloque["datos"]["accion"] == accion
-        # No se ejecutó nada: es una propuesta.
-        assert "ya" not in res["datos"].get("nota", "").lower() or "no" in res["datos"]["nota"].lower()
+        # DIRECTO: NO hay bloque de confirmación.
+        assert "accion_dispositivo" not in res["datos"], tool
+        assert any(n == accion for n, _ in llamadas), tool
 
 
 # ── anti-inyección: el contenido leído se devuelve como DATO ─────────────────
@@ -104,7 +113,7 @@ async def test_leer_contenido_es_dato(monkeypatch):
     assert "_nota" in d and "DATO" in d["_nota"]  # marcado explícito como dato
 
 
-# ── resumir_documento: extracción (reusada) + mini (mockeado) ────────────────
+# ── resumir_documento: extracción (reusada) + modelo FUERTE + troceo ─────────
 
 
 async def test_resumir_documento_flujo(monkeypatch):
@@ -119,18 +128,56 @@ async def test_resumir_documento_flujo(monkeypatch):
             "bytes": len(cuerpo),
         }
 
+    async def fake_par(db):
+        return ("gpt-4o-mini", "claude-sonnet-4-6")
+
     async def fake_responder(messages, **kw):
-        # El documento llega como contenido de usuario; el modelo es el mini.
-        assert kw.get("model") == "gpt-4o-mini"
+        # Documento corto → una sola pasada con el modelo FUERTE (no el mini).
+        assert kw.get("model") == "claude-sonnet-4-6"
         assert any("documento de prueba" in m["content"] for m in messages if m["role"] == "user")
         return "Resumen: trata de presupuestos del proyecto."
 
     monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
+    monkeypatch.setattr(tools.modelos_llm, "par_barato_fuerte", fake_par)
     monkeypatch.setattr(tools.llm, "responder", fake_responder)
     res = await tools.ejecutar_tool(None, "pc_resumir_documento", {"ruta": "informe.txt"})
     assert res["ok"] is True
     assert "presupuestos" in res["datos"]["resumen"]
     assert "_nota" in res["datos"]
+
+
+async def test_resumir_documento_largo_trocea(monkeypatch):
+    # Documento que excede un trozo → map-reduce: N resúmenes parciales + 1 final,
+    # todos con el modelo fuerte.
+    cuerpo = ("Párrafo con contenido relevante.\n" * 2000)  # ~64k chars
+    llamadas = {"map": 0, "reduce": 0}
+
+    async def fake_enviar(nombre, args, **kw):
+        return {
+            "ok": True, "nombre": "tesis.txt",
+            "base64": base64.b64encode(cuerpo.encode("utf-8")).decode("ascii"),
+            "bytes": len(cuerpo),
+        }
+
+    async def fake_par(db):
+        return ("gpt-4o-mini", "claude-sonnet-4-6")
+
+    async def fake_responder(messages, **kw):
+        assert kw.get("model") == "claude-sonnet-4-6"
+        sysmsg = next(m["content"] for m in messages if m["role"] == "system")
+        if "resúmenes parciales" in sysmsg.lower() or "combínalos" in sysmsg.lower():
+            llamadas["reduce"] += 1
+            return "Resumen final unificado."
+        llamadas["map"] += 1
+        return f"Parcial {llamadas['map']}."
+
+    monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
+    monkeypatch.setattr(tools.modelos_llm, "par_barato_fuerte", fake_par)
+    monkeypatch.setattr(tools.llm, "responder", fake_responder)
+    res = await tools.ejecutar_tool(None, "pc_resumir_documento", {"ruta": "tesis.txt"})
+    assert res["ok"] is True
+    assert llamadas["map"] >= 2 and llamadas["reduce"] == 1
+    assert res["datos"]["resumen"] == "Resumen final unificado."
 
 
 async def test_organizar_propone_con_plan(monkeypatch):
@@ -296,7 +343,15 @@ async def test_endpoint_whitelist_rechaza_las_seguras_directas():
 
 
 async def test_endpoint_consecuente_desconectada_limpio():
+    # organizar_aplicar sigue siendo confirmable (lote); con la PC desconectada
+    # falla limpio.
     assert canal.conectado is False
-    out = await ejecutar_accion(EjecutarAccionBody(accion="mover_archivo", args={"origen": "a", "destino": "b"}))
+    out = await ejecutar_accion(EjecutarAccionBody(accion="organizar_aplicar", args={"carpeta": "x", "criterio": "tipo"}))
     assert out["resultado"]["ok"] is False
     assert out["resultado"]["tipo"] == "pc_desconectada"
+
+
+async def test_endpoint_whitelist_rechaza_mover_directo():
+    # mover_archivo ya es SEGURA (directa): no viaja por el canal de confirmación.
+    with pytest.raises(HTTPException):
+        await ejecutar_accion(EjecutarAccionBody(accion="mover_archivo", args={"origen": "a", "destino": "b"}))

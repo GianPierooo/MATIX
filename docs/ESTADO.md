@@ -667,6 +667,28 @@ y NUNCA actúa si el foco es una superficie de comandos (terminal/Claude/cmd/
 PowerShell) — si el foco saltó, aborta. Así no vuelve a teclear en otra app.
 Rieles previos intactos (banner, kill switch, tope, denylist, confirmación).
 
+**Librería de capacidades — lote 2 (H): gestión de archivos directa, abrir web,
+resumen con modelo fuerte.** Tres incorporaciones, todas deterministas y con la
+denylist intacta (`.ssh`, `.env`, credenciales, repo, AppData, sistema →
+INVISIBLES aunque estén en el perfil; verificado en vivo: copiar/mover a `.ssh`
+o AppData devuelven `rechazada` con el original intacto). (1) **Archivos**: nueva
+`copiar_archivo` (`shutil.copy2`, origen intacto, nunca sobreescribe) +
+`pc_copiar_archivo`; y migración de criterio: como NINGUNA op de un solo archivo
+sobreescribe (todas rechazan si el destino existe), `mover_archivo`,
+`renombrar_archivo`, `crear_carpeta` y `copiar_archivo` pasan de CONSECUENTE a
+**SEGURA** → se ejecutan DIRECTO, sin sheet de confirmación («solo confirmar lo
+irreversible»). `organizar_aplicar` (lote, mueve muchos) SIGUE confirmando con
+plan previo. (2) **abrir_web**: capacidad nueva (`capacidades.py`) que abre una
+URL en el navegador por defecto sin shell, con riel de esquema (solo http/https;
+`file://`, `javascript:`, `data:` → rechazados; un host pelado tipo «youtube.com»
+se prefija https tras parsear) + `pc_abrir_web` directo. (3) **resumir_documento**
+arreglado de raíz: usaba el modelo BARATO y cortaba a 16k chars; ahora usa el
+**modelo FUERTE** y si el doc excede ~12k chars **trocea con sensatez**
+(map-reduce: resume cada trozo en paralelo y combina, tope 12 trozos con aviso de
+parcial). `extraccion_documentos` ganó `extraer_completo` (sin cap) y `trocear`.
+Ruteo en `capacidades_pc.py`; selección en `seleccion_tools.py`. Probado EN LA PC
+REAL: copiar (preserva original), mover, buscar, crear carpeta y abrir_web.
+
 **Captura de pantalla (C1).** El control 6.3 captura con `pyautogui`→`pyscreeze`→
 `Pillow`. Pillow NO era dependencia dura de pyscreeze, así que faltaba y
 `screenshot()` reventaba con un críptico «(PyAutoGUIException)». Se fija `Pillow`

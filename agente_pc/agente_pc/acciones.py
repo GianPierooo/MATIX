@@ -437,6 +437,38 @@ def _mover_archivo(args: dict[str, Any], ctx: Contexto) -> dict[str, Any]:
     return {"ok": True, "origen": real_origen, "destino": real_destino}
 
 
+def _copiar_archivo(args: dict[str, Any], ctx: Contexto) -> dict[str, Any]:
+    """Copia un archivo a destino. REVERSIBLE (el origen queda intacto) y NUNCA
+    sobreescribe: si el destino existe, rechaza con `destino_existe`. Mismo
+    patrón de validación que mover, pero con shutil.copy2 (preserva metadatos)."""
+    origen = _resolver_nombre(args.get("origen"))
+    destino_in = _resolver_nombre(args.get("destino"))
+    if not origen or not destino_in:
+        return {"ok": False, "tipo": "validacion", "mensaje": "necesito origen y destino"}
+    if not ruta_permitida(origen, ctx.allowlist).permitida:
+        return _rechazo("origen no permitido")
+    real_origen = _real(origen)
+    if not os.path.isfile(real_origen):
+        return {"ok": False, "tipo": "no_existe", "mensaje": "el origen no existe o no es un archivo"}
+
+    real_destino = _real(destino_in)
+    # Si el destino es una carpeta existente, copiamos DENTRO de ella.
+    if os.path.isdir(real_destino):
+        real_destino = os.path.join(real_destino, os.path.basename(real_origen))
+    motivo = _validar_destino_padre(real_destino, ctx.allowlist)
+    if motivo:
+        return _rechazo(motivo)
+    if os.path.normcase(real_destino) == os.path.normcase(real_origen):
+        return {"ok": False, "tipo": "sin_cambio", "mensaje": "origen y destino son el mismo"}
+    if os.path.exists(real_destino):
+        return {"ok": False, "tipo": "destino_existe", "mensaje": "ya existe algo en el destino; no sobreescribo"}
+    try:
+        shutil.copy2(real_origen, real_destino)
+    except OSError:
+        return {"ok": False, "tipo": "error_copiar", "mensaje": "no pude copiar ese archivo"}
+    return {"ok": True, "origen": real_origen, "destino": real_destino}
+
+
 def _renombrar_archivo(args: dict[str, Any], ctx: Contexto) -> dict[str, Any]:
     ruta = _resolver_nombre(args.get("ruta"))
     nuevo = (args.get("nuevo_nombre") or "").strip()
@@ -557,17 +589,25 @@ _DEFS = [
               "Calcula (sin ejecutar) el plan de organización de una carpeta según un criterio.",
               (Param("carpeta", str, requerido=True), Param("criterio", str, requerido=True)),
               NivelRiesgo.SEGURA, _planificar_organizacion),
+    # Ops de UN archivo/carpeta: REVERSIBLES (ninguna sobreescribe — rechazan si
+    # el destino existe) → SEGURA, directas, sin fricción de confirmación.
     AccionDef("mover_archivo",
               "Mueve un archivo de origen a destino (ambos permitidos, sin sobreescribir).",
               (Param("origen", str, requerido=True), Param("destino", str, requerido=True)),
-              NivelRiesgo.CONSECUENTE, _mover_archivo),
+              NivelRiesgo.SEGURA, _mover_archivo),
+    AccionDef("copiar_archivo",
+              "Copia un archivo a destino (origen intacto, sin sobreescribir).",
+              (Param("origen", str, requerido=True), Param("destino", str, requerido=True)),
+              NivelRiesgo.SEGURA, _copiar_archivo),
     AccionDef("renombrar_archivo",
               "Renombra un archivo/carpeta a un nombre simple (sin sobreescribir).",
               (Param("ruta", str, requerido=True), Param("nuevo_nombre", str, requerido=True)),
-              NivelRiesgo.CONSECUENTE, _renombrar_archivo),
+              NivelRiesgo.SEGURA, _renombrar_archivo),
     AccionDef("crear_carpeta",
               "Crea una carpeta nueva dentro de la allowlist.",
-              (Param("ruta", str, requerido=True),), NivelRiesgo.CONSECUENTE, _crear_carpeta),
+              (Param("ruta", str, requerido=True),), NivelRiesgo.SEGURA, _crear_carpeta),
+    # organizar_aplicar SÍ confirma: mueve MUCHOS archivos a la vez (mayor radio
+    # de impacto) y el usuario revisa el plan antes.
     AccionDef("organizar_aplicar",
               "Ejecuta el plan de organización de una carpeta, paso a paso y revalidando cada movimiento.",
               (Param("carpeta", str, requerido=True), Param("criterio", str, requerido=True)),

@@ -28,6 +28,40 @@ def test_capacidades_en_el_registro():
     assert reg.get("crear_documento_word").nivel is NivelRiesgo.SEGURA
     assert reg.get("reproducir_spotify").nivel is NivelRiesgo.SEGURA
     assert reg.get("verificar_spotify").nivel is NivelRiesgo.SEGURA
+    assert reg.get("abrir_web").nivel is NivelRiesgo.SEGURA
+
+
+# ── abrir_web ────────────────────────────────────────────────────────────────
+
+
+def test_abrir_web_http_ok():
+    ctx = _ctx()
+    abierto = {}
+    ctx.abridor = lambda u: abierto.update(url=u) or {"ok": True}
+    r = cap._abrir_web({"url": "https://github.com/x"}, ctx)
+    assert r["ok"] and r["tipo"] == "web_abierta"
+    assert abierto["url"] == "https://github.com/x"
+
+
+def test_abrir_web_sin_esquema_asume_https():
+    ctx = _ctx()
+    abierto = {}
+    ctx.abridor = lambda u: abierto.update(url=u) or {"ok": True}
+    r = cap._abrir_web({"url": "youtube.com"}, ctx)
+    assert r["ok"] and abierto["url"] == "https://youtube.com"
+
+
+def test_abrir_web_rechaza_no_http():
+    ctx = _ctx()
+    ctx.abridor = lambda u: (_ for _ in ()).throw(AssertionError("no debe abrir"))
+    for mala in ("file:///C:/Users/gianp/.ssh/id_rsa", "javascript:alert(1)", "data:text/html,x"):
+        r = cap._abrir_web({"url": mala}, ctx)
+        assert not r["ok"] and r["tipo"] == "validacion", mala
+
+
+def test_abrir_web_sin_url():
+    r = cap._abrir_web({}, _ctx())
+    assert not r["ok"] and r["tipo"] == "validacion"
 
 
 # ── abrir_carpeta ────────────────────────────────────────────────────────────

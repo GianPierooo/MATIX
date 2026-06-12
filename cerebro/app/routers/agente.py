@@ -31,11 +31,13 @@ router = APIRouter(prefix="/agente", tags=["agente"])
 # ejecuta por este canal. La lectura va por las tools del chat, no por aquí.
 _ACCIONES_CONFIRMABLES = frozenset(
     {
-        # 6.1 — organización de archivos
-        "mover_archivo", "renombrar_archivo", "crear_carpeta", "organizar_aplicar",
+        # 6.1 — organización: solo organizar_aplicar (lote) confirma. Las ops de
+        # UN archivo (mover/copiar/renombrar/crear_carpeta) son SEGURAS
+        # (reversibles, nunca sobreescriben) → directas, sin este gate.
+        "organizar_aplicar",
         # 6.2 — cerrar apps y tareas tipadas (el agente revalida la denylist).
-        # abrir_app / abrir_carpeta / crear_documento_word / reproducir_spotify
-        # son SEGURAS (reversibles): van directas por el canal, sin este gate.
+        # abrir_app / abrir_carpeta / crear_documento_word / reproducir_spotify /
+        # abrir_web son SEGURAS (reversibles): van directas, sin este gate.
         "cerrar_app", "ejecutar_tarea",
         # 6.3 — control de pantalla: SOLO la acción irreversible YA confirmada
         # por el usuario en el gate. Los primitivos del bucle (capturar/accion/

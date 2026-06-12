@@ -85,3 +85,42 @@ def extraer(nombre: str, datos: bytes) -> tuple[str, bool]:
         fin = corte if corte > 0 else MAX_CHARS
         return texto[:fin].strip(), True
     return texto, False
+
+
+def extraer_completo(nombre: str, datos: bytes) -> str:
+    """Texto COMPLETO del documento (sin el cap de `extraer`). Para resumir
+    documentos largos por troceo (map-reduce): el cap de 16k serviría para un
+    contexto de chat, pero para resumir TODO hay que leerlo entero y trocear.
+    Misma validación de formato/librería que `extraer`."""
+    ext = _ext(nombre)
+    if ext not in EXTENSIONES:
+        raise DocumentoNoSoportado(
+            f"No puedo leer «{nombre}». Formatos: PDF, DOCX, TXT, MD."
+        )
+    if ext in (".txt", ".md"):
+        texto = _texto_de_txt(datos)
+    elif ext == ".pdf":
+        texto = _texto_de_pdf(datos)
+    else:  # .docx
+        texto = _texto_de_docx(datos)
+    return (texto or "").strip()
+
+
+def trocear(texto: str, tam: int) -> list[str]:
+    """Parte `texto` en trozos de ~`tam` chars, cortando en un salto de línea
+    cercano para no romper frases. Trozos no vacíos, en orden."""
+    if tam <= 0:
+        return [texto] if texto else []
+    trozos: list[str] = []
+    i, n = 0, len(texto)
+    while i < n:
+        fin = min(i + tam, n)
+        if fin < n:
+            corte = texto.rfind("\n", i + tam // 2, fin)
+            if corte > i:
+                fin = corte
+        trozo = texto[i:fin].strip()
+        if trozo:
+            trozos.append(trozo)
+        i = fin if fin > i else fin + 1
+    return trozos
