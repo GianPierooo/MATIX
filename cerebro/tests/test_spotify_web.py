@@ -1,0 +1,222 @@
+"""Spotify Web API (spotify_web) + pipeline de pc_reproducir_spotify.
+
+Todo PURO: httpx.MockTransport para la API y canal falso para el agente.
+Cubre: credenciales ausentes (degrada limpio), búsqueda elige el más popular,
+playback apunta al dispositivo Computer, y la HONESTIDAD del handler (dice
+«sonando» solo si se midió; sin credenciales narra el muro con los NOMBRES
+de las variables)."""
+from __future__ import annotations
+
+import httpx
+import pytest
+
+from app.matix import spotify_web, tools
+
+
+@pytest.fixture(autouse=True)
+def _sin_env(monkeypatch):
+    for v in ("SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "SPOTIFY_REFRESH_TOKEN"):
+        monkeypatch.delenv(v, raising=False)
+    spotify_web._limpiar_cache()
+    yield
+    spotify_web._limpiar_cache()
+
+
+def _cliente(rutas: dict[str, httpx.Response]) -> httpx.AsyncClient:
+    """Cliente con transporte mock: la clave es '<METODO> <path>'."""
+
+    def manejar(req: httpx.Request) -> httpx.Response:
+        clave = f"{req.method} {req.url.path}"
+        if clave in rutas:
+            return rutas[clave]
+        return httpx.Response(404, json={"error": f"sin ruta {clave}"})
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(manejar))
+
+
+def _con_creds(monkeypatch, refresh: bool = False) -> None:
+    monkeypatch.setenv("SPOTIFY_CLIENT_ID", "cid-test")
+    monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "sec-test")
+    if refresh:
+        monkeypatch.setenv("SPOTIFY_REFRESH_TOKEN", "rt-test")
+
+
+_TOKEN_OK = httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
+
+
+# ── Credenciales y muro ──────────────────────────────────────────────────────
+
+
+def test_sin_credenciales_nada_disponible():
+    assert not spotify_web.busqueda_disponible()
+    assert not spotify_web.playback_disponible()
+    falta = spotify_web.que_falta_para_playback()
+    # Nombra las variables (solo NOMBRES) y el cómo conseguirlas.
+    assert "SPOTIFY_CLIENT_ID" in falta and "SPOTIFY_REFRESH_TOKEN" in falta
+    assert "spotify_autorizar" in falta
+
+
+def test_con_credenciales_pero_sin_refresh(monkeypatch):
+    _con_creds(monkeypatch)
+    assert spotify_web.busqueda_disponible()
+    assert not spotify_web.playback_disponible()
+    falta = spotify_web.que_falta_para_playback()
+    assert "SPOTIFY_REFRESH_TOKEN" in falta and "SPOTIFY_CLIENT_ID" not in falta
+
+
+async def test_buscar_sin_creds_devuelve_none():
+    assert await spotify_web.buscar_mejor_track("Michael Jackson") is None
+
+
+# ── Búsqueda: elige el track MÁS POPULAR ─────────────────────────────────────
+
+
+async def test_buscar_elige_el_mas_popular(monkeypatch):
+    _con_creds(monkeypatch)
+    items = [
+        {"id": "a", "uri": "spotify:track:a", "name": "Rara", "popularity": 10,
+         "artists": [{"name": "MJ"}]},
+        {"id": "b", "uri": "spotify:track:b", "name": "Billie Jean", "popularity": 92,
+         "artists": [{"name": "Michael Jackson"}]},
+    ]
+    cli = _cliente({
+        "POST /api/token": _TOKEN_OK,
+        "GET /v1/search": httpx.Response(200, json={"tracks": {"items": items}}),
+    })
+    t = await spotify_web.buscar_mejor_track("Michael Jackson", cliente=cli)
+    assert t["id"] == "b" and t["nombre"] == "Billie Jean"
+    assert t["artista"] == "Michael Jackson"
+
+
+async def test_buscar_api_caida_degrada_a_none(monkeypatch):
+    _con_creds(monkeypatch)
+    cli = _cliente({"POST /api/token": _TOKEN_OK,
+                    "GET /v1/search": httpx.Response(500)})
+    assert await spotify_web.buscar_mejor_track("x", cliente=cli) is None
+
+
+# ── Playback: apunta al dispositivo Computer ─────────────────────────────────
+
+
+async def test_reproducir_elige_computer_y_da_play(monkeypatch):
+    _con_creds(monkeypatch, refresh=True)
+    visto = {}
+
+    def manejar(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/api/token":
+            return _TOKEN_OK
+        if req.url.path == "/v1/me/player/devices":
+            return httpx.Response(200, json={"devices": [
+                {"id": "cel", "type": "Smartphone", "name": "Telefono"},
+                {"id": "pc1", "type": "Computer", "name": "MI-PC"},
+            ]})
+        if req.url.path == "/v1/me/player/play":
+            visto["device"] = req.url.params.get("device_id")
+            visto["cuerpo"] = req.read().decode()
+            return httpx.Response(204)
+        return httpx.Response(404)
+
+    cli = httpx.AsyncClient(transport=httpx.MockTransport(manejar))
+    r = await spotify_web.reproducir_en_pc("spotify:track:abc", cliente=cli)
+    assert r["ok"] and r["dispositivo"] == "MI-PC"
+    assert visto["device"] == "pc1"
+    assert "spotify:track:abc" in visto["cuerpo"] and "uris" in visto["cuerpo"]
+
+
+async def test_reproducir_sin_dispositivos(monkeypatch):
+    _con_creds(monkeypatch, refresh=True)
+    cli = _cliente({
+        "POST /api/token": _TOKEN_OK,
+        "GET /v1/me/player/devices": httpx.Response(200, json={"devices": []}),
+    })
+    r = await spotify_web.reproducir_en_pc("spotify:track:abc", cliente=cli)
+    assert not r["ok"] and r["tipo"] == "sin_dispositivo"
+
+
+async def test_reproducir_sin_oauth_no_revienta():
+    r = await spotify_web.reproducir_en_pc("spotify:track:abc")
+    assert not r["ok"] and r["tipo"] == "sin_oauth"
+
+
+# ── Handler pc_reproducir_spotify: directo y HONESTO ─────────────────────────
+
+
+async def test_handler_suena_de_una_en_el_cliente(monkeypatch):
+    # El agente abre el track y mide que SÍ suena → estado sonando, sin Web API.
+    async def fake_enviar(nombre, args, **kw):
+        assert nombre == "reproducir_spotify"
+        return {"ok": True, "tipo": "spotify_abierto", "uri": args.get("uri"),
+                "sonando": True, "reproduciendo": "MJ - Billie Jean"}
+
+    monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
+    res = await tools.ejecutar_tool(None, "pc_reproducir_spotify",
+                                    {"uri": "spotify:track:abc"})
+    assert res["ok"] and res["datos"]["estado"] == "sonando"
+    assert "accion_dispositivo" not in res["datos"]  # DIRECTO, sin confirmación
+
+
+async def test_handler_honesto_sin_credenciales(monkeypatch):
+    # Sin Web API: abre el track, NO suena → estado honesto + nombra el muro.
+    async def fake_enviar(nombre, args, **kw):
+        return {"ok": True, "tipo": "spotify_abierto", "uri": args.get("uri"),
+                "sonando": False, "reproduciendo": None}
+
+    monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
+    res = await tools.ejecutar_tool(None, "pc_reproducir_spotify",
+                                    {"uri": "spotify:track:abc"})
+    assert res["ok"] and res["datos"]["estado"] == "abierto_sin_sonar"
+    assert "SPOTIFY_REFRESH_TOKEN" in res["datos"]["mensaje"]  # el muro, claro
+
+
+async def test_handler_resuelve_consulta_y_da_play_por_api(monkeypatch):
+    # Camino completo: busca el top track, abre, no suena, play por la Web API,
+    # re-verifica y recién ahí dice «sonando».
+    _con_creds(monkeypatch, refresh=True)
+    llamadas = []
+
+    async def fake_buscar(consulta, cliente=None):
+        return {"id": "b", "uri": "spotify:track:b", "nombre": "Billie Jean",
+                "artista": "Michael Jackson"}
+
+    async def fake_play(uri, cliente=None):
+        llamadas.append(("play", uri))
+        return {"ok": True, "dispositivo": "MI-PC"}
+
+    async def fake_enviar(nombre, args, **kw):
+        llamadas.append((nombre, args))
+        if nombre == "reproducir_spotify":
+            return {"ok": True, "tipo": "spotify_abierto", "sonando": False}
+        if nombre == "verificar_spotify":
+            return {"ok": True, "sonando": True,
+                    "reproduciendo": "Michael Jackson - Billie Jean"}
+        raise AssertionError(nombre)
+
+    monkeypatch.setattr(tools.spotify_web, "buscar_mejor_track", fake_buscar)
+    monkeypatch.setattr(tools.spotify_web, "reproducir_en_pc", fake_play)
+    monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
+    res = await tools.ejecutar_tool(None, "pc_reproducir_spotify",
+                                    {"consulta": "Michael Jackson"})
+    assert res["ok"] and res["datos"]["estado"] == "sonando"
+    assert ("play", "spotify:track:b") in llamadas
+    assert res["datos"]["reproduciendo"] == "Michael Jackson - Billie Jean"
+    assert "Billie Jean" in res["datos"]["mensaje"]
+
+
+async def test_handler_play_por_api_pero_sin_sonido_es_honesto(monkeypatch):
+    # La API aceptó el play pero la PC no reporta sonido: NUNCA fingir éxito.
+    _con_creds(monkeypatch, refresh=True)
+
+    async def fake_play(uri, cliente=None):
+        return {"ok": True, "dispositivo": "MI-PC"}
+
+    async def fake_enviar(nombre, args, **kw):
+        if nombre == "reproducir_spotify":
+            return {"ok": True, "sonando": False}
+        return {"ok": True, "sonando": False, "reproduciendo": None}
+
+    monkeypatch.setattr(tools.spotify_web, "reproducir_en_pc", fake_play)
+    monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
+    res = await tools.ejecutar_tool(None, "pc_reproducir_spotify",
+                                    {"uri": "spotify:track:abc"})
+    assert res["datos"]["estado"] == "abierto_sin_sonar"
+    assert "no reporta sonido" in res["datos"]["mensaje"]

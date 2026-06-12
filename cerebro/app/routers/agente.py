@@ -33,10 +33,10 @@ _ACCIONES_CONFIRMABLES = frozenset(
     {
         # 6.1 — organización de archivos
         "mover_archivo", "renombrar_archivo", "crear_carpeta", "organizar_aplicar",
-        # 6.2 — apps y tareas tipadas (el agente revalida allowlist+denylist)
-        "abrir_app", "cerrar_app", "ejecutar_tarea",
-        # Capacidades tipadas CONSECUENTES (deterministas; el agente valida)
-        "abrir_carpeta", "crear_documento_word", "reproducir_spotify",
+        # 6.2 — cerrar apps y tareas tipadas (el agente revalida la denylist).
+        # abrir_app / abrir_carpeta / crear_documento_word / reproducir_spotify
+        # son SEGURAS (reversibles): van directas por el canal, sin este gate.
+        "cerrar_app", "ejecutar_tarea",
         # 6.3 — control de pantalla: SOLO la acción irreversible YA confirmada
         # por el usuario en el gate. Los primitivos del bucle (capturar/accion/
         # iniciar/terminar) NO son confirmables por aquí: solo los conduce el

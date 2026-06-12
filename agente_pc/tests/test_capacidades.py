@@ -21,11 +21,13 @@ def _ctx(**kw) -> Contexto:
 
 
 def test_capacidades_en_el_registro():
+    # Todo lo REVERSIBLE es SEGURA: directo, sin fricción de confirmación.
     reg = crear_registro()
-    assert reg.get("abrir_carpeta").nivel is NivelRiesgo.CONSECUENTE
+    assert reg.get("abrir_carpeta").nivel is NivelRiesgo.SEGURA
     assert reg.get("tomar_captura").nivel is NivelRiesgo.SEGURA
-    assert reg.get("crear_documento_word").nivel is NivelRiesgo.CONSECUENTE
-    assert reg.get("reproducir_spotify").nivel is NivelRiesgo.CONSECUENTE
+    assert reg.get("crear_documento_word").nivel is NivelRiesgo.SEGURA
+    assert reg.get("reproducir_spotify").nivel is NivelRiesgo.SEGURA
+    assert reg.get("verificar_spotify").nivel is NivelRiesgo.SEGURA
 
 
 # ── abrir_carpeta ────────────────────────────────────────────────────────────
@@ -102,17 +104,38 @@ def test_spotify_consulta_arma_uri_busqueda():
     ctx = _ctx()
     capturado = {}
     ctx.abridor = lambda uri: capturado.update(uri=uri) or {"ok": True}
+    ctx.verificador_spotify = lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no medir"))
     r = cap._reproducir_spotify({"consulta": "Michael Jackson"}, ctx)
     assert r["ok"] and r["tipo"] == "spotify_abierto"
     assert capturado["uri"].startswith("spotify:search:")
     assert "Michael" in capturado["uri"]
+    # Una búsqueda nunca reproduce sola: lo dice honesto, sin gastar la espera.
+    assert r["sonando"] is False
 
 
-def test_spotify_uri_directo():
+def test_spotify_uri_track_verifica_si_suena():
     ctx = _ctx()
     ctx.abridor = lambda uri: {"ok": True}
+    ctx.verificador_spotify = lambda espera: {"sonando": True, "titulo": "MJ - Billie Jean"}
     r = cap._reproducir_spotify({"uri": "spotify:track:abc"}, ctx)
     assert r["ok"] and r["uri"] == "spotify:track:abc"
+    assert r["sonando"] is True and r["reproduciendo"] == "MJ - Billie Jean"
+
+
+def test_spotify_uri_track_honesto_si_no_suena():
+    ctx = _ctx()
+    ctx.abridor = lambda uri: {"ok": True}
+    ctx.verificador_spotify = lambda espera: {"sonando": False, "titulo": None}
+    r = cap._reproducir_spotify({"uri": "spotify:track:abc"}, ctx)
+    assert r["ok"] and r["sonando"] is False  # abrió, pero NO miente con «suena»
+
+
+def test_verificar_spotify_solo_mide():
+    ctx = _ctx()
+    ctx.verificador_spotify = lambda espera: {"sonando": True, "titulo": "X - Y"}
+    r = cap._verificar_spotify({"espera_s": 2}, ctx)
+    assert r["ok"] and r["tipo"] == "spotify_verificado"
+    assert r["sonando"] is True and r["reproduciendo"] == "X - Y"
 
 
 def test_spotify_uri_no_protocolo_rechaza():

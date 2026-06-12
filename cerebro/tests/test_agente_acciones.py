@@ -153,12 +153,11 @@ async def test_organizar_propone_con_plan(monkeypatch):
     assert res["datos"]["total"] == 1  # el plan viaja para que el modelo lo narre
 
 
-# ── 6.2: apps y tareas PROPONEN (gate); whitelist las admite ─────────────────
+# ── 6.2: cerrar/tareas PROPONEN (gate); abrir_app va DIRECTO (reversible) ────
 
 
-async def test_apps_y_tareas_proponen_accion_dispositivo():
+async def test_cerrar_y_tareas_proponen_accion_dispositivo():
     casos = [
-        ("pc_abrir_app", {"nombre": "code"}, "abrir_app"),
         ("pc_cerrar_app", {"nombre": "code"}, "cerrar_app"),
         ("pc_ejecutar_tarea", {"nombre": "sesion_de_foco", "params": {"apps": "code"}}, "ejecutar_tarea"),
     ]
@@ -170,6 +169,22 @@ async def test_apps_y_tareas_proponen_accion_dispositivo():
         assert bloque["requiere_confirmacion"] is True, tool
         assert bloque["datos"]["accion"] == accion, tool
         # PROPONE: no ejecuta nada por sí mismo (no toca el canal del agente).
+
+
+async def test_abrir_app_ejecuta_directo_sin_confirmacion(monkeypatch):
+    llamadas = []
+
+    async def fake_enviar(nombre, args, **kw):
+        llamadas.append((nombre, args))
+        return {"ok": True, "tipo": "app_abierta", "app": "code"}
+
+    monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
+    res = await tools.ejecutar_tool(None, "pc_abrir_app", {"nombre": "code"})
+    assert res["ok"] is True
+    assert llamadas == [("abrir_app", {"nombre": "code"})]
+    # DIRECTO: no hay bloque de confirmación; el resultado es el hecho real.
+    assert "accion_dispositivo" not in res["datos"]
+    assert res["datos"]["estado"] == "app_abierta"
 
 
 async def test_pc_ejecutar_tarea_propaga_params():
@@ -264,13 +279,20 @@ async def test_endpoint_whitelist_rechaza_desconocida():
 
 
 async def test_endpoint_whitelist_admite_acciones_6_2():
-    # Las acciones 6.2 están en la whitelist del endpoint (no dan 400 por
-    # whitelist). Con la PC desconectada, fallan limpio con pc_desconectada.
+    # Las acciones 6.2 CONSECUENTES siguen en la whitelist del endpoint (no dan
+    # 400). Con la PC desconectada, fallan limpio con pc_desconectada.
     assert canal.conectado is False
-    for accion in ("abrir_app", "cerrar_app", "ejecutar_tarea"):
+    for accion in ("cerrar_app", "ejecutar_tarea"):
         out = await ejecutar_accion(EjecutarAccionBody(accion=accion, args={"nombre": "code"}))
         assert out["resultado"]["ok"] is False, accion
         assert out["resultado"]["tipo"] == "pc_desconectada", accion
+
+
+async def test_endpoint_whitelist_rechaza_las_seguras_directas():
+    # Las SEGURAS (abrir_app/abrir_carpeta/…) ya no viajan por el canal de
+    # confirmación: el endpoint las rechaza con 400 (whitelist explícita).
+    with pytest.raises(HTTPException):
+        await ejecutar_accion(EjecutarAccionBody(accion="abrir_app", args={"nombre": "code"}))
 
 
 async def test_endpoint_consecuente_desconectada_limpio():

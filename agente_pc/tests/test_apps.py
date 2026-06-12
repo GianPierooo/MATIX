@@ -166,20 +166,20 @@ def test_cerrar_app_sin_nada_abierto():
 # ── Gate consecuente (vía el Registro real) ──────────────────────────────────
 
 
-def test_abrir_app_es_consecuente_y_exige_confirmado():
+def test_abrir_app_es_segura_y_cerrar_app_exige_confirmado():
     reg = crear_registro()
-    # Confirmamos el nivel declarado.
-    assert reg.get("abrir_app").nivel is NivelRiesgo.CONSECUENTE
+    # abrir_app es REVERSIBLE → SEGURA (directa, sin fricción de confirmación);
+    # cerrar_app puede perder trabajo a medias → sigue CONSECUENTE.
+    assert reg.get("abrir_app").nivel is NivelRiesgo.SEGURA
     assert reg.get("cerrar_app").nivel is NivelRiesgo.CONSECUENTE
     lz = _LanzadorFake()
     ctx = _ctx({"code": _CODE}, lanzador=lz)
-    # Sin confirmado: el registry corta ANTES de ejecutar (no lanza nada).
+    # abrir_app SIN confirmado: ejecuta directo.
     r = asyncio.run(reg.ejecutar("abrir_app", {"nombre": "code"}, ctx, confirmado=False))
-    assert not r["ok"] and r["tipo"] == "requiere_confirmacion"
-    assert lz.llamadas == []
-    # Con confirmado: ejecuta.
-    r2 = asyncio.run(reg.ejecutar("abrir_app", {"nombre": "code"}, ctx, confirmado=True))
-    assert r2["ok"] and len(lz.llamadas) == 1
+    assert r["ok"] and len(lz.llamadas) == 1
+    # cerrar_app SIN confirmado: el registry corta ANTES de ejecutar.
+    r2 = asyncio.run(reg.ejecutar("cerrar_app", {"nombre": "code"}, ctx, confirmado=False))
+    assert not r2["ok"] and r2["tipo"] == "requiere_confirmacion"
 
 
 def test_no_existe_accion_de_shell_arbitrario():

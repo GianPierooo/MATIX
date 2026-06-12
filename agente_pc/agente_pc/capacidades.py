@@ -223,6 +223,18 @@ def _abrir_uri(uri: str) -> dict[str, Any]:
         return {"ok": False, "error": type(e).__name__}
 
 
+# URIs que apuntan a algo REPRODUCIBLE (vs. spotify:search:, que solo navega).
+_SPOTIFY_REPRODUCIBLES = {"track", "album", "playlist", "episode", "show"}
+
+
+def _verificador(ctx: Contexto):
+    inyectado = getattr(ctx, "verificador_spotify", None)
+    if inyectado is not None:
+        return inyectado
+    from . import audio
+    return audio.verificar_sonando
+
+
 def _reproducir_spotify(args: dict[str, Any], ctx: Contexto) -> dict[str, Any]:
     args = args or {}
     uri = (args.get("uri") or "").strip()
@@ -242,18 +254,44 @@ def _reproducir_spotify(args: dict[str, Any], ctx: Contexto) -> dict[str, Any]:
     res = abridor(destino)
     if not res.get("ok"):
         return _err("error_spotify", "no pude abrir Spotify; ¿está instalado?")
-    return {"ok": True, "tipo": "spotify_abierto", "uri": destino, "detalle": humano}
+    salida: dict[str, Any] = {"ok": True, "tipo": "spotify_abierto", "uri": destino, "detalle": humano}
+    # HONESTIDAD: si el destino es reproducible, MEDIMOS si de verdad suena
+    # (peak de audio + título de ventana). Abrir spotify:track:… NAVEGA pero el
+    # cliente no auto-reproduce; jamás reportamos «sonando» sin medirlo.
+    partes = destino.split(":")
+    if len(partes) >= 2 and partes[1] in _SPOTIFY_REPRODUCIBLES:
+        v = _verificador(ctx)(float(args.get("espera_s") or 8.0)) or {}
+        salida["sonando"] = v.get("sonando")
+        salida["reproduciendo"] = v.get("titulo")
+    else:
+        salida["sonando"] = False  # una búsqueda nunca reproduce sola
+        salida["reproduciendo"] = None
+    return salida
+
+
+def _verificar_spotify(args: dict[str, Any], ctx: Contexto) -> dict[str, Any]:
+    """Solo MIDE si Spotify está sonando (peak + título). No abre nada. Lo usa
+    el cerebro para re-verificar tras ordenar play por la Web API."""
+    v = _verificador(ctx)(float((args or {}).get("espera_s") or 6.0)) or {}
+    return {
+        "ok": True, "tipo": "spotify_verificado",
+        "sonando": v.get("sonando"), "reproduciendo": v.get("titulo"),
+    }
 
 
 # ── Definiciones ──────────────────────────────────────────────────────────────
 
+# NIVELES: lo REVERSIBLE (abrir, reproducir, capturar, crear un doc nuevo que
+# nunca sobreescribe) es SEGURA — se ejecuta directo, sin fricción de
+# confirmación. La confirmación queda para lo irreversible/grave (borrar,
+# sobrescribir, cerrar apps con trabajo a medias), no para abrir una carpeta.
 DEFS_CAPACIDADES: list[AccionDef] = [
     AccionDef(
         "abrir_carpeta",
         "Abre una carpeta del usuario en el Explorador (ruta permitida). Si le "
         "pasas un archivo, abre su carpeta. Determinista, sin tocar la pantalla.",
         (Param("ruta", str, requerido=True),),
-        NivelRiesgo.CONSECUENTE,
+        NivelRiesgo.SEGURA,
         _abrir_carpeta,
     ),
     AccionDef(
@@ -275,15 +313,24 @@ DEFS_CAPACIDADES: list[AccionDef] = [
             Param("nombre", str, requerido=False),
             Param("carpeta", str, requerido=False),
         ),
-        NivelRiesgo.CONSECUENTE,
+        NivelRiesgo.SEGURA,
         _crear_documento_word,
     ),
     AccionDef(
         "reproducir_spotify",
-        "Abre Spotify por URI (spotify:search:… o un uri dado). Determinista: "
-        "abre la búsqueda/recurso exacto, sin clics a ciegas.",
+        "Abre Spotify por URI (spotify:search:… o un uri dado) y VERIFICA si "
+        "suena (peak de audio + título de ventana). Determinista, sin clics.",
+        # espera_s llega sin declarar (el handler la coerciona con float()).
         (Param("consulta", str, requerido=False), Param("uri", str, requerido=False)),
-        NivelRiesgo.CONSECUENTE,
+        NivelRiesgo.SEGURA,
         _reproducir_spotify,
+    ),
+    AccionDef(
+        "verificar_spotify",
+        "Mide si Spotify está sonando en este momento (peak + título de "
+        "ventana). Solo lectura; no abre ni toca nada.",
+        (),
+        NivelRiesgo.SEGURA,
+        _verificar_spotify,
     ),
 ]

@@ -315,9 +315,10 @@ DEFS_APPS: list[AccionDef] = [
     AccionDef(
         "abrir_app",
         "Abre una app del escritorio. SOLO apps de la allowlist; la denylist "
-        "(shells, sistema, instaladores) gana siempre. Sin shell.",
+        "(shells, sistema, instaladores) gana siempre. Sin shell. REVERSIBLE "
+        "(se puede cerrar) → SEGURA: directa, sin fricción de confirmación.",
         (Param("nombre", str, requerido=True),),
-        NivelRiesgo.CONSECUENTE,
+        NivelRiesgo.SEGURA,
         _abrir_app,
     ),
     AccionDef(

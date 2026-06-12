@@ -14,6 +14,11 @@ dependencies = [
     # Capacidad crear_documento_word: genera .docx REALES (título/párrafos/tablas)
     # sin tocar la GUI de Word. Liviano y puro Python.
     "python-docx>=1.1",
+    # Verificación HONESTA de reproducción (audio.py): peak de audio del proceso
+    # Spotify (pycaw/Core Audio) + título de ventana (psutil + ctypes). Solo
+    # Windows: en Linux/CI el marker los omite y audio.py degrada a «no medible».
+    "pycaw>=20240210; sys_platform == 'win32'",
+    "psutil>=5.9; sys_platform == 'win32'",
 ]
 
 # Fase 6.3 — control de pantalla. Opcional: solo se necesita si activas

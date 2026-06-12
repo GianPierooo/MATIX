@@ -597,10 +597,30 @@ herramienta DETERMINISTA por tarea, no de clicar a ciegas. Nuevo módulo
 (abre carpeta en Explorador o archivo en su app, sin shell, ruta validada),
 `tomar_captura` (PNG full-res a ~/Pictures/Matix, SEGURA), `crear_documento_word`
 (`.docx` REAL con python-docx: título/párrafos/tablas, sin tocar la GUI de Word)
-y `reproducir_spotify` (URI `spotify:search:…`, determinista, sin clics). Cerebro:
+y `reproducir_spotify` (URI `spotify:`, determinista, sin clics). Cerebro:
 tools `pc_abrir_carpeta`/`pc_captura`/`pc_crear_word`/`pc_reproducir_spotify` +
 ruteo en `capacidades_pc.py` que PREFIERE la capacidad tipada y deja
-`pc_controlar_pantalla` como fallback. **Confinamiento del control de pantalla
+`pc_controlar_pantalla` como fallback.
+
+**Spotify que SUENA de verdad + fin del interrogatorio (F).** Dos cambios:
+(1) **Sin fricción en órdenes reversibles**: `abrir_app`, `abrir_carpeta`,
+`crear_documento_word` (archivo nuevo, nunca sobreescribe) y
+`reproducir_spotify` pasaron de CONSECUENTE a **SEGURA** — se ejecutan DIRECTO,
+sin sheet de confirmación ni preguntas («cualquier canción de X» es orden
+completa). La confirmación queda para lo que puede perder datos: `cerrar_app`,
+mover/renombrar/organizar, tareas tipadas y la acción irreversible de pantalla.
+(2) **Reproducción REAL y verificada**: pipeline en `_pc_reproducir_spotify` →
+con `SPOTIFY_CLIENT_ID/SECRET` resuelve el track más popular vía Web API; el
+agente abre el URI y **MIDE si suena** (`agente_pc/audio.py`: peak de audio del
+proceso Spotify vía pycaw + título de ventana «Artista - Canción»); si no
+arrancó y hay `SPOTIFY_REFRESH_TOKEN` (Premium, se obtiene una vez con
+`tools/spotify_autorizar.py`), ordena play por `PUT /me/player/play` al device
+Computer y RE-VERIFICA (`verificar_spotify`). El mensaje dice «suena» SOLO si
+se midió; si no, narra el muro exacto (qué variable falta) sin loops. Hallazgo
+empírico (en la PC real): abrir `spotify:track:…` a veces auto-reproduce y a
+veces solo navega — por eso se mide siempre en vez de asumir. Módulo
+`cerebro/app/matix/spotify_web.py` (client-credentials + refresh token, caché
+de tokens, mockeado en `test_spotify_web.py`). **Confinamiento del control de pantalla
 (la seguridad que falló):** cada captura reporta la VENTANA enfocada; antes de
 cada acción el agente verifica que la ventana siga siendo esa (`ventana_esperada`)
 y NUNCA actúa si el foco es una superficie de comandos (terminal/Claude/cmd/

@@ -81,6 +81,7 @@ from . import (
     memoria_conversacional,
     modos,
     perfil_proyecto,
+    spotify_web,
 )
 from .biblioteca import buscar_material as _buscar_material_rag
 from .indexador import buscar_apuntes as _buscar_apuntes_rag
@@ -3277,15 +3278,14 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "pc_abrir_app",
             "description": (
-                "PROPONE abrir una app del escritorio del usuario (ej. su editor, "
-                "el navegador, Spotify). SOLO para abrir y nada más: si el usuario "
-                "quiere además hacer algo DENTRO de la app («…y pon una canción»), "
-                "usa pc_controlar_pantalla con el objetivo completo. Puede abrir "
-                "CUALQUIER app instalada que el usuario nombre (el agente la "
-                "resuelve solo); únicamente se rechazan shells/terminales, "
-                "instaladores y herramientas de sistema (denylist dura). NO la "
-                "abres tú: la app le pide confirmar y recién entonces se abre. Di "
-                "que la dejaste LISTA para confirmar, no que ya la abriste."
+                "Abre DIRECTO una app del escritorio del usuario (ej. su editor, "
+                "el navegador, Spotify) — reversible, sin pedir confirmación. "
+                "SOLO para abrir: si quiere música usa pc_reproducir_spotify; si "
+                "quiere operar DENTRO de la app y no hay capacidad tipada, "
+                "pc_controlar_pantalla. Puede abrir CUALQUIER app instalada que "
+                "el usuario nombre (el agente la resuelve solo); únicamente se "
+                "rechazan shells/terminales, instaladores y herramientas de "
+                "sistema (denylist dura)."
             ),
             "parameters": {
                 "type": "object",
@@ -3338,7 +3338,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "el Explorador para carpetas, la app por defecto para archivos "
                 "(un .docx → Word, un .pdf → el lector). Determinista, NO toca la "
                 "pantalla. Úsala para «abre la carpeta X», «abre el documento Y». "
-                "La app pide confirmar; di que la dejaste lista para confirmar."
+                "Se ejecuta DIRECTO (reversible): no preguntes ni pidas confirmar."
             ),
             "parameters": {
                 "type": "object",
@@ -3384,9 +3384,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "Crea un documento Word REAL (.docx) en la PC con python-docx: "
                 "título, párrafos y TABLAS con los datos que le pases. NO maneja "
                 "la GUI de Word — escribe el archivo directo y lo guarda (por "
-                "defecto en Documentos). Para «hazme un Word con…», «crea un "
-                "documento con esta tabla». La app pide confirmar; luego puedes "
-                "ofrecer abrirlo con pc_abrir_carpeta(ruta)."
+                "defecto en Documentos; NUNCA sobreescribe, agrega sufijo). Para "
+                "«hazme un Word con…», «crea un documento con esta tabla». Se "
+                "ejecuta DIRECTO sin confirmación; luego puedes ofrecer abrirlo "
+                "con pc_abrir_carpeta(ruta)."
             ),
             "parameters": {
                 "type": "object",
@@ -3424,11 +3425,13 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "pc_reproducir_spotify",
             "description": (
-                "Abre Spotify en la PC y va a la canción/artista pedido por URI "
-                "(spotify:search:…), determinista y SIN clics a ciegas. Para «pon "
-                "X en Spotify», «reproduce a Y en mi compu». Pasa `consulta` (ej. "
-                "'Michael Jackson Billie Jean') o un `uri` spotify: directo. La "
-                "app pide confirmar."
+                "REPRODUCE música en el Spotify de la PC y VERIFICA si de verdad "
+                "suena. Resuelve el mejor track vía la Web API si hay credenciales "
+                "y le da play; si no, abre el track/búsqueda en el cliente. Para "
+                "«pon X en Spotify», «cualquier canción de Y» (orden COMPLETA: "
+                "pasa consulta='Y' y NO preguntes cuál). Se ejecuta DIRECTO, sin "
+                "confirmación. El resultado trae `estado`: di que la música SUENA "
+                "solo si estado='sonando'; si no, narra el mensaje honesto tal cual."
             ),
             "parameters": {
                 "type": "object",
@@ -3446,9 +3449,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "name": "pc_controlar_pantalla",
             "description": (
                 "AUTÓNOMO: controla la pantalla de la PC (mira, mueve el mouse "
-                "y teclea) para cumplir un objetivo MULTI-PASO. Es LA tool para "
-                "«abre X y haz Y dentro» (ej. «abre Spotify y pon una canción de "
-                "Michael Jackson» → objetivo completo aquí, no pc_abrir_app). "
+                "y teclea) para cumplir un objetivo MULTI-PASO. ÚLTIMO RECURSO: "
+                "si existe una capacidad tipada úsala (música → "
+                "pc_reproducir_spotify; documentos → pc_crear_word). Es LA tool "
+                "para «abre X y haz Y dentro» cuando NINGUNA capacidad nativa "
+                "cubre el pedido (ej. «entra a tal web y descarga el informe»). "
                 "NUNCA digas que solo puedes abrir apps sin controlarlas por "
                 "dentro: esta tool existe para eso. No asumas que el control "
                 "está desactivado: LLÁMALA; si está apagado o la PC no está "
@@ -6465,14 +6470,21 @@ async def _pc_organizar_carpeta(db: Postgrest, args: dict) -> dict[str, Any]:
 
 
 async def _pc_abrir_app(db: Postgrest, args: dict) -> dict[str, Any]:
-    """PROPONE abrir una app (Fase 6.2). El cerebro NO valida la allowlist: eso
-    lo hace el AGENTE en su borde (allowlist + denylist dura). Aquí solo se
-    propone; el agente rechaza lo que no corresponda al confirmar."""
+    """Abre una app DIRECTO (reversible: se puede cerrar; cero fricción). El
+    cerebro NO valida la allowlist: eso lo hace el AGENTE en su borde
+    (resolver por nombre + denylist dura de shells/instaladores)."""
     nombre = (args or {}).get("nombre")
     if not nombre or not str(nombre).strip():
-        return _error("validacion", "Dime qué app abrir (debe estar en tu allowlist de apps).")
-    resumen = f"Abrir «{nombre}» en tu PC."
-    return _pc_propuesta("abrir_app", {"nombre": str(nombre).strip()}, resumen)
+        return _error("validacion", "Dime qué app abrir.")
+    res = await canal.enviar_accion("abrir_app", {"nombre": str(nombre).strip()})
+    if not res.get("ok"):
+        return _pc_error(res)
+    return _ok({
+        "_nota": _NOTA_PC_DATO,
+        "estado": "app_abierta",
+        "app": res.get("app") or str(nombre).strip(),
+        "mensaje": f"Abrí «{res.get('app') or nombre}» en la PC.",
+    })
 
 
 async def _pc_cerrar_app(db: Postgrest, args: dict) -> dict[str, Any]:
@@ -6606,15 +6618,21 @@ async def _pc_controlar_pantalla(db: Postgrest, args: dict) -> dict[str, Any]:
 
 
 async def _pc_abrir_carpeta(db: Postgrest, args: dict) -> dict[str, Any]:
-    """PROPONE abrir una carpeta (o archivo) de la PC en su app. Determinista,
-    no toca la pantalla. El agente valida la ruta (denylist gana)."""
+    """Abre una carpeta (o archivo) de la PC DIRECTO en su app — reversible,
+    sin fricción de confirmación. El agente valida la ruta (denylist gana)."""
     ruta = (args or {}).get("ruta")
     if not ruta or not str(ruta).strip():
         return _error("validacion", "Dime qué carpeta o archivo de tu PC abrir.")
-    return _pc_propuesta(
-        "abrir_carpeta", {"ruta": str(ruta).strip()},
-        f"Abrir «{str(ruta).strip()}» en tu PC.",
-    )
+    res = await canal.enviar_accion("abrir_carpeta", {"ruta": str(ruta).strip()})
+    if not res.get("ok"):
+        return _pc_error(res)
+    que = "la carpeta" if res.get("es_carpeta") else "el archivo"
+    return _ok({
+        "_nota": _NOTA_PC_DATO,
+        "estado": "abierto",
+        "ruta": res.get("ruta"),
+        "mensaje": f"Abrí {que} {res.get('ruta')} en la PC.",
+    })
 
 
 async def _pc_captura(db: Postgrest, args: dict) -> dict[str, Any]:
@@ -6633,8 +6651,8 @@ async def _pc_captura(db: Postgrest, args: dict) -> dict[str, Any]:
 
 
 async def _pc_crear_word(db: Postgrest, args: dict) -> dict[str, Any]:
-    """PROPONE crear un documento Word REAL (.docx) con título, párrafos y tablas
-    vía python-docx. NO maneja la GUI de Word."""
+    """Crea un documento Word REAL (.docx) DIRECTO con python-docx (título,
+    párrafos, tablas). Reversible: archivo NUEVO, nunca sobreescribe."""
     args = args or {}
     titulo = args.get("titulo")
     parrafos = args.get("parrafos") or []
@@ -6650,30 +6668,94 @@ async def _pc_crear_word(db: Postgrest, args: dict) -> dict[str, Any]:
         payload["nombre"] = str(args["nombre"]).strip()
     if args.get("carpeta"):
         payload["carpeta"] = str(args["carpeta"]).strip()
-    nombre_h = str(titulo or args.get("nombre") or "documento").strip()
-    return _pc_propuesta(
-        "crear_documento_word", payload,
-        f"Crear un documento Word «{nombre_h}» en tu PC.",
-    )
+    res = await canal.enviar_accion("crear_documento_word", payload, timeout=30.0)
+    if not res.get("ok"):
+        return _pc_error(res)
+    return _ok({
+        "_nota": _NOTA_PC_DATO,
+        "estado": "documento_creado",
+        "ruta": res.get("ruta"),
+        "mensaje": (
+            f"Creé el documento «{res.get('nombre')}» en {res.get('ruta')}. "
+            "Puedo abrirlo si el usuario quiere (pc_abrir_carpeta con esa ruta)."
+        ),
+    })
 
 
 async def _pc_reproducir_spotify(db: Postgrest, args: dict) -> dict[str, Any]:
-    """PROPONE reproducir/abrir algo en Spotify por URI (determinista, sin clics
-    a ciegas). `consulta` (artista/canción) o `uri` (spotify:…)."""
+    """Reproduce música en el Spotify de la PC, DIRECTO y con resultado HONESTO.
+
+    Pipeline (cada nivel degrada limpio al siguiente):
+      1. Con SPOTIFY_CLIENT_ID/SECRET: resuelve el track más popular vía la
+         Web API («cualquier canción de X» → su top, sin preguntar).
+      2. El agente abre el track en el cliente local (registra el dispositivo)
+         y MIDE si suena (peak de audio + título de ventana).
+      3. Si no arrancó y hay SPOTIFY_REFRESH_TOKEN (Premium): ordena play por
+         la Web API (la única vía garantizada — abrir un track solo navega) y
+         RE-VERIFICA en la PC.
+    El mensaje final dice «suena» SOLO si se midió que suena. Sin loops."""
     args = args or {}
     consulta = (args.get("consulta") or "").strip()
     uri = (args.get("uri") or "").strip()
     if not consulta and not uri:
         return _error("validacion", "Dime qué canción o artista reproducir en Spotify.")
-    payload: dict[str, Any] = {}
-    if consulta:
-        payload["consulta"] = consulta
-    if uri:
-        payload["uri"] = uri
-    return _pc_propuesta(
-        "reproducir_spotify", payload,
-        f"Abrir Spotify con «{consulta or uri}».",
-    )
+
+    track = None
+    if not uri and spotify_web.busqueda_disponible():
+        track = await spotify_web.buscar_mejor_track(consulta)
+        if track and track.get("uri"):
+            uri = track["uri"]
+    humano = f"«{track['nombre']}» de {track['artista']}" if track else f"«{consulta or uri}»"
+
+    # Paso 1: abrir en el cliente local (navega + registra el device) y medir.
+    payload = {"uri": uri} if uri else {"consulta": consulta}
+    res = await canal.enviar_accion("reproducir_spotify", payload, timeout=30.0)
+    if not res.get("ok"):
+        return _pc_error(res)
+    sonando = res.get("sonando") is True
+    reproduciendo = res.get("reproduciendo")
+
+    # Paso 2: si no arrancó, la orden REAL de play va por la Web API (Premium).
+    via_api = False
+    if not sonando and uri.startswith("spotify:") and spotify_web.playback_disponible():
+        rep = await spotify_web.reproducir_en_pc(uri)
+        if rep.get("ok"):
+            via_api = True
+            ver = await canal.enviar_accion("verificar_spotify", {"espera_s": 6.0}, timeout=15.0)
+            sonando = ver.get("sonando") is True
+            reproduciendo = ver.get("reproduciendo") or reproduciendo
+
+    if sonando:
+        detalle = f" (el cliente reporta: {reproduciendo})" if reproduciendo else ""
+        mensaje = f"Está SONANDO {humano} en la PC{detalle}."
+    elif uri and not uri.startswith("spotify:search:"):
+        muro = spotify_web.que_falta_para_playback()
+        causa = (
+            "ordené play por la Web API pero la PC no reporta sonido"
+            if via_api else
+            (f"el cliente no auto-reproduce al abrir un track y {muro}" if muro
+             else "la orden de play por la Web API no se pudo ejecutar")
+        )
+        mensaje = (
+            f"Abrí {humano} en el Spotify de la PC pero NO está sonando: {causa}. "
+            "Sé honesto con el usuario: que le dé play allí o que configure eso."
+        )
+    else:
+        muro = spotify_web.que_falta_para_playback()
+        mensaje = (
+            f"Abrí Spotify con la búsqueda {humano}, pero sin la Web API no puedo "
+            f"elegir el track ni darle play ({muro}). Dile la verdad al usuario."
+        )
+    return _ok({
+        "_nota": _NOTA_PC_DATO + (
+            " HONESTIDAD: di que la música SUENA solo si estado='sonando'; si es "
+            "'abierto_sin_sonar', narra el motivo tal cual, sin inventar éxito."
+        ),
+        "estado": "sonando" if sonando else "abierto_sin_sonar",
+        "uri": uri or None,
+        "reproduciendo": reproduciendo,
+        "mensaje": mensaje,
+    })
 
 
 _HANDLERS = {
