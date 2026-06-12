@@ -246,6 +246,16 @@ String _mensajePcResultado(String accion, Map<String, dynamic> res) {
         final abiertas = (res['abiertas'] as List?)?.length;
         if (abiertas != null) return 'Listo, abrí $abiertas app(s) para tu sesión.';
         return 'Tarea ejecutada en tu PC.';
+      // Capacidades tipadas
+      case 'abrir_carpeta':
+        return res['es_carpeta'] == false
+            ? 'Abrí el archivo en tu PC.'
+            : 'Abrí la carpeta en tu PC.';
+      case 'crear_documento_word':
+        final nombre = res['nombre'] ?? 'el documento';
+        return 'Listo, creé $nombre en tu PC.';
+      case 'reproducir_spotify':
+        return 'Abrí Spotify en tu PC con lo que pediste.';
       // 6.3 — control de pantalla: acción irreversible ya confirmada
       case 'pantalla_accion_confirmada':
         return 'Listo, hice esa acción en tu pantalla.';

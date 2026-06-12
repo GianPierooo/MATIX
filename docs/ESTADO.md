@@ -590,6 +590,23 @@ el agente abrió en la sesión (por PID). Honestidad: el resultado real de cada
 acción de PC (abrió / no encontró / bloqueó por denylist) se inyecta en el CHAT
 (`agregarNotaMatix`), no solo en un toast.
 
+**Librería de capacidades TIPADAS (E) — el control de pantalla es el ÚLTIMO
+recurso.** Lección (arquitectura tipo OpenClaw): la fiabilidad viene de una
+herramienta DETERMINISTA por tarea, no de clicar a ciegas. Nuevo módulo
+`agente_pc/capacidades.py` (registrado en `crear_registro`): `abrir_carpeta`
+(abre carpeta en Explorador o archivo en su app, sin shell, ruta validada),
+`tomar_captura` (PNG full-res a ~/Pictures/Matix, SEGURA), `crear_documento_word`
+(`.docx` REAL con python-docx: título/párrafos/tablas, sin tocar la GUI de Word)
+y `reproducir_spotify` (URI `spotify:search:…`, determinista, sin clics). Cerebro:
+tools `pc_abrir_carpeta`/`pc_captura`/`pc_crear_word`/`pc_reproducir_spotify` +
+ruteo en `capacidades_pc.py` que PREFIERE la capacidad tipada y deja
+`pc_controlar_pantalla` como fallback. **Confinamiento del control de pantalla
+(la seguridad que falló):** cada captura reporta la VENTANA enfocada; antes de
+cada acción el agente verifica que la ventana siga siendo esa (`ventana_esperada`)
+y NUNCA actúa si el foco es una superficie de comandos (terminal/Claude/cmd/
+PowerShell) — si el foco saltó, aborta. Así no vuelve a teclear en otra app.
+Rieles previos intactos (banner, kill switch, tope, denylist, confirmación).
+
 **Captura de pantalla (C1).** El control 6.3 captura con `pyautogui`→`pyscreeze`→
 `Pillow`. Pillow NO era dependencia dura de pyscreeze, así que faltaba y
 `screenshot()` reventaba con un críptico «(PyAutoGUIException)». Se fija `Pillow`

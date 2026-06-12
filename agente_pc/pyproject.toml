@@ -11,6 +11,9 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "python-dotenv>=1.0",
+    # Capacidad crear_documento_word: genera .docx REALES (título/párrafos/tablas)
+    # sin tocar la GUI de Word. Liviano y puro Python.
+    "python-docx>=1.1",
 ]
 
 # Fase 6.3 — control de pantalla. Opcional: solo se necesita si activas

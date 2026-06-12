@@ -30,6 +30,8 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import os
+import re
 from typing import Any
 
 from .registro import AccionDef, Contexto, NivelRiesgo, Param
@@ -85,9 +87,33 @@ def _cargar_pyautogui():
     return pyautogui
 
 
+# Ventanas en las que NUNCA actuamos en control autónomo: superficies de
+# EJECUCIÓN DE COMANDOS o el propio controlador. Que el piloto teclee acá (como
+# pasó dentro de Claude Code) podría correr comandos arbitrarios — justo lo que
+# todos los demás rieles evitan. Comparación por título, en minúsculas.
+_VENTANA_PROHIBIDA = re.compile(
+    r"(claude|cursor|terminal|powershell|command prompt|símbolo del sistema|"
+    r"\bcmd\b|git bash|conhost|windows terminal|wsl|consola)"
+)
+
+
+def ventana_activa() -> str:
+    """Título de la ventana en primer plano (best-effort, vía pygetwindow). ''
+    si no se puede determinar. Sirve para CONFINAR el control: una acción solo
+    se ejecuta si la ventana enfocada es la misma que cuando se capturó."""
+    try:
+        import pygetwindow  # type: ignore
+        w = pygetwindow.getActiveWindow()
+        return (getattr(w, "title", "") or "").strip()
+    except Exception:  # noqa: BLE001 — no poder leerla no debe romper nada
+        return ""
+
+
 def capturar_pantalla() -> dict[str, Any]:
     """Captura la pantalla → JPEG comprimido y reescalado (barato para la
-    visión). Devuelve {ok, imagen(data URL), ancho, alto}. Real (pyautogui+PIL)."""
+    visión). Devuelve {ok, imagen(data URL), ancho, alto, ventana}. La `ventana`
+    (título en primer plano) viaja al cerebro para confinar la SIGUIENTE acción
+    a esa misma ventana. Real (pyautogui+PIL)."""
     try:
         pg = _cargar_pyautogui()
     except _PyAutoGuiNoDisponible as e:
@@ -109,6 +135,7 @@ def capturar_pantalla() -> dict[str, Any]:
             "imagen": f"data:image/jpeg;base64,{b64}",
             "ancho": ancho,
             "alto": alto,
+            "ventana": ventana_activa(),
         }
     except Exception as e:  # noqa: BLE001
         # Traceback REAL al log (agente_runtime.log): sin esto, un fallo de
@@ -128,6 +155,27 @@ def capturar_pantalla() -> dict[str, Any]:
             "error_captura",
             f"no pude capturar la pantalla — {type(e).__name__}: {e}",
         )
+
+
+def capturar_a_archivo(ruta_png: str) -> dict[str, Any]:
+    """Captura la pantalla a FULL resolución y la guarda como PNG en `ruta_png`
+    (crea la carpeta si falta). Devuelve {ok, ancho, alto} o un error claro. Lo
+    usa la capacidad `tomar_captura` (independiente de la visión del control)."""
+    try:
+        pg = _cargar_pyautogui()
+    except _PyAutoGuiNoDisponible as e:
+        return _err("sin_pyautogui", str(e))
+    try:
+        os.makedirs(os.path.dirname(ruta_png), exist_ok=True)
+        img = pg.screenshot()
+        img.convert("RGB").save(ruta_png, format="PNG")
+        return {"ok": True, "ancho": img.size[0], "alto": img.size[1]}
+    except Exception as e:  # noqa: BLE001
+        log.exception("capturar_a_archivo falló")
+        msg = str(e).lower()
+        if "pyscreeze" in msg or "pillow" in msg or "screenshot" in msg:
+            return _err("sin_pillow", "la captura necesita Pillow; corre uv sync --extra control")
+        return _err("error_captura", f"no pude guardar la captura ({type(e).__name__})")
 
 
 def ejecutar_accion_real(accion: dict[str, Any]) -> dict[str, Any]:
@@ -342,6 +390,29 @@ def _pantalla_accion(args: dict[str, Any], ctx: Contexto) -> dict[str, Any]:
     ok, val = validar_accion(accion)
     if not ok:
         return _err("accion_invalida", val)
+    # CONFINAMIENTO A LA VENTANA OBJETIVO (riel de seguridad): la acción solo se
+    # ejecuta sobre la MISMA ventana que estaba enfocada cuando se capturó. Si el
+    # foco saltó a otra app entre captura y acción, abortamos — así NUNCA tecleamos
+    # en otra ventana (p. ej. una terminal o Claude Code).
+    leer_ventana = getattr(ctx, "lector_ventana", None) or ventana_activa
+    actual = (leer_ventana() or "").strip()
+    esperada = str(args.get("ventana_esperada") or "").strip()
+    # 1) Nunca actuar sobre una superficie de comandos / el propio controlador.
+    if actual and _VENTANA_PROHIBIDA.search(actual.lower()):
+        sesion["activa"] = False
+        return _err(
+            "ventana_protegida",
+            f"la ventana enfocada es «{actual[:60]}» (terminal/editor de comandos); "
+            "no tecleo ahí por seguridad. Aborté.",
+        )
+    # 2) Si sé qué ventana esperaba y la actual es OTRA, abortar (foco robado).
+    if esperada and actual and actual != esperada:
+        sesion["activa"] = False
+        return _err(
+            "ventana_cambio",
+            f"el foco cambió de «{esperada[:40]}» a «{actual[:40]}»; aborté para no "
+            "actuar en la ventana equivocada.",
+        )
     ctrl = ctx.controlador or ejecutar_accion_real
     res = ctrl(accion)
     # Cuenta TODA acción intentada (aunque falle) contra el tope.

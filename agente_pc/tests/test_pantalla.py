@@ -45,14 +45,18 @@ class _IndicadorFake:
         self.ocultado += 1
 
 
-def _ctx(control=True, max_acc=40, ctrl=None, cap=None, ind=None) -> Contexto:
-    return Contexto(
+def _ctx(control=True, max_acc=40, ctrl=None, cap=None, ind=None, ventana="") -> Contexto:
+    c = Contexto(
         control_pantalla=control,
         max_acciones_pantalla=max_acc,
         controlador=ctrl,
         capturador=cap,
         indicador=ind,
     )
+    # Ventana neutra por defecto: el confinamiento (que lee la ventana REAL) no
+    # debe disparar en los tests por la ventana del runner (una terminal).
+    c.lector_ventana = lambda: ventana
+    return c
 
 
 _CLICK = {"tipo": "click", "x": 100, "y": 200}
@@ -210,3 +214,41 @@ def test_pantalla_accion_es_consecuente():
     r = asyncio.run(reg.ejecutar("pantalla_accion", {"accion": _CLICK}, ctx, confirmado=False))
     assert not r["ok"] and r["tipo"] == "requiere_confirmacion"
     assert ctrl.acciones == []
+
+
+# ── Confinamiento a la ventana objetivo (riel: no teclear en otra app) ───────
+
+
+def test_accion_aborta_en_ventana_de_comandos():
+    from agente_pc import pantalla
+    ctx = Contexto(allowlist=[], control_pantalla=True)
+    ctx.pantalla_sesion = {"activa": True, "acciones": 0}
+    ctx.controlador = lambda a: {"ok": True}
+    ctx.lector_ventana = lambda: "Windows PowerShell"
+    r = pantalla._pantalla_accion({"accion": {"tipo": "escribir", "texto": "x"}}, ctx)
+    assert not r["ok"] and r["tipo"] == "ventana_protegida"
+    assert ctx.pantalla_sesion["activa"] is False  # cierra la sesión
+
+
+def test_accion_aborta_si_el_foco_cambio():
+    from agente_pc import pantalla
+    ctx = Contexto(allowlist=[], control_pantalla=True)
+    ctx.pantalla_sesion = {"activa": True, "acciones": 0}
+    ctx.controlador = lambda a: {"ok": True}
+    ctx.lector_ventana = lambda: "Spotify"
+    r = pantalla._pantalla_accion(
+        {"accion": {"tipo": "click", "x": 5, "y": 5}, "ventana_esperada": "Bloc de notas"}, ctx
+    )
+    assert not r["ok"] and r["tipo"] == "ventana_cambio"
+
+
+def test_accion_ejecuta_en_la_misma_ventana():
+    from agente_pc import pantalla
+    ctx = Contexto(allowlist=[], control_pantalla=True)
+    ctx.pantalla_sesion = {"activa": True, "acciones": 0}
+    ctx.controlador = lambda a: {"ok": True}
+    ctx.lector_ventana = lambda: "Spotify"
+    r = pantalla._pantalla_accion(
+        {"accion": {"tipo": "click", "x": 5, "y": 5}, "ventana_esperada": "Spotify"}, ctx
+    )
+    assert r["ok"] and r["tipo"] == "accion_hecha"

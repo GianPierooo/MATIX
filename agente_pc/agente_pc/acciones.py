@@ -580,10 +580,11 @@ def crear_registro() -> Registro:
     tareas tipadas (6.2). Importes locales para mantener el grafo de imports
     plano (apps/tareas dependen de registro+seguridad, no de acciones)."""
     from .apps import DEFS_APPS
+    from .capacidades import DEFS_CAPACIDADES
     from .pantalla import DEFS_PANTALLA
     from .tareas import DEFS_TAREAS
 
     reg = Registro()
-    for d in (*_DEFS, *DEFS_APPS, *DEFS_TAREAS, *DEFS_PANTALLA):
+    for d in (*_DEFS, *DEFS_APPS, *DEFS_TAREAS, *DEFS_CAPACIDADES, *DEFS_PANTALLA):
         reg.registrar(d)
     return reg
