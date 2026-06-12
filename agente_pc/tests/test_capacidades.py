@@ -42,10 +42,12 @@ def test_abrir_carpeta_permitida(tmp_path, monkeypatch):
     assert r["ok"] and r["tipo"] == "abierto" and r["es_carpeta"] is True
 
 
-def test_abrir_carpeta_denylist_sistema():
+def test_abrir_carpeta_denylist():
+    # `.ssh` es un componente prohibido cross-platform (no como C:\Windows, que
+    # solo aplica en Windows): la denylist lo bloquea aunque esté en el home.
     ctx = _ctx()
     ctx.abridor = lambda ruta: {"ok": True}
-    r = cap._abrir_carpeta({"ruta": r"C:\Windows\System32"}, ctx)
+    r = cap._abrir_carpeta({"ruta": str(_HOME / ".ssh")}, ctx)
     assert not r["ok"] and r["tipo"] == "rechazada"
 
 
