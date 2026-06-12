@@ -240,8 +240,8 @@ async def test_handler_honesto_sin_credenciales(monkeypatch):
 
 
 async def test_handler_resuelve_consulta_y_da_play_por_api(monkeypatch):
-    # Camino completo: busca el top track, abre, no suena, play por la Web API,
-    # re-verifica y recién ahí dice «sonando».
+    # VÍA GARANTIZADA completa: busca el top track, el device de ESTA PC está
+    # listo, play por la Web API, re-verifica audio y recién ahí dice «puse X».
     _con_creds(monkeypatch, refresh=True)
     llamadas = []
 
@@ -249,20 +249,22 @@ async def test_handler_resuelve_consulta_y_da_play_por_api(monkeypatch):
         return {"id": "b", "uri": "spotify:track:b", "nombre": "Billie Jean",
                 "artista": "Michael Jackson"}
 
+    async def fake_device(cliente=None):
+        return {"id": "pc1", "name": "GP", "type": "Computer"}
+
     async def fake_play(uri, cliente=None):
         llamadas.append(("play", uri))
-        return {"ok": True, "dispositivo": "MI-PC"}
+        return {"ok": True, "dispositivo": "GP"}
 
     async def fake_enviar(nombre, args, **kw):
         llamadas.append((nombre, args))
-        if nombre == "reproducir_spotify":
-            return {"ok": True, "tipo": "spotify_abierto", "sonando": False}
         if nombre == "verificar_spotify":
             return {"ok": True, "sonando": True,
                     "reproduciendo": "Michael Jackson - Billie Jean"}
-        raise AssertionError(nombre)
+        raise AssertionError(f"acción inesperada: {nombre}")
 
     monkeypatch.setattr(tools.spotify_web, "buscar_mejor_track", fake_buscar)
+    monkeypatch.setattr(tools.spotify_web, "dispositivo_objetivo", fake_device)
     monkeypatch.setattr(tools.spotify_web, "reproducir_en_pc", fake_play)
     monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
     res = await tools.ejecutar_tool(None, "pc_reproducir_spotify",
@@ -271,23 +273,103 @@ async def test_handler_resuelve_consulta_y_da_play_por_api(monkeypatch):
     assert ("play", "spotify:track:b") in llamadas
     assert res["datos"]["reproduciendo"] == "Michael Jackson - Billie Jean"
     assert "Billie Jean" in res["datos"]["mensaje"]
+    # Con la API confirmando, NO se cae al fallback de abrir el cliente.
+    assert not any(n == "reproducir_spotify" for n, _ in llamadas)
 
 
 async def test_handler_play_por_api_pero_sin_sonido_es_honesto(monkeypatch):
-    # La API aceptó el play pero la PC no reporta sonido: NUNCA fingir éxito.
+    # La API CONFIRMÓ el play pero el medidor local no detecta audio: el estado
+    # lo dice exacto (orden confirmada, sin audio local) — nunca fingir éxito.
     _con_creds(monkeypatch, refresh=True)
 
+    async def fake_device(cliente=None):
+        return {"id": "pc1", "name": "GP", "type": "Computer"}
+
     async def fake_play(uri, cliente=None):
-        return {"ok": True, "dispositivo": "MI-PC"}
+        return {"ok": True, "dispositivo": "GP"}
 
     async def fake_enviar(nombre, args, **kw):
-        if nombre == "reproducir_spotify":
-            return {"ok": True, "sonando": False}
+        assert nombre == "verificar_spotify"
         return {"ok": True, "sonando": False, "reproduciendo": None}
 
+    monkeypatch.setattr(tools.spotify_web, "dispositivo_objetivo", fake_device)
     monkeypatch.setattr(tools.spotify_web, "reproducir_en_pc", fake_play)
     monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
     res = await tools.ejecutar_tool(None, "pc_reproducir_spotify",
                                     {"uri": "spotify:track:abc"})
+    assert res["datos"]["estado"] == "reproduccion_ordenada"
+    assert "CONFIRMÓ" in res["datos"]["mensaje"]
+    assert "volumen" in res["datos"]["mensaje"]
+
+
+async def test_handler_abre_spotify_si_no_hay_device_y_espera(monkeypatch):
+    # Spotify cerrado: no hay device → lo ABRE vía el agente, espera (acotado)
+    # a que se registre y recién entonces ordena el play.
+    _con_creds(monkeypatch, refresh=True)
+    monkeypatch.setattr(tools, "_ESPERA_DISPOSITIVO_S", 0.0)
+    estado = {"intentos": 0}
+    llamadas = []
+
+    async def fake_device(cliente=None):
+        estado["intentos"] += 1
+        if estado["intentos"] < 3:
+            return None  # recién abierto: aún no se registra
+        return {"id": "pc1", "name": "GP", "type": "Computer"}
+
+    async def fake_play(uri, cliente=None):
+        llamadas.append(("play", uri))
+        return {"ok": True, "dispositivo": "GP"}
+
+    async def fake_enviar(nombre, args, **kw):
+        llamadas.append((nombre, args))
+        if nombre == "abrir_app":
+            assert args == {"nombre": "spotify"}
+            return {"ok": True, "tipo": "app_abierta", "app": "spotify"}
+        if nombre == "verificar_spotify":
+            return {"ok": True, "sonando": True, "reproduciendo": "X - Y"}
+        raise AssertionError(f"acción inesperada: {nombre}")
+
+    monkeypatch.setattr(tools.spotify_web, "dispositivo_objetivo", fake_device)
+    monkeypatch.setattr(tools.spotify_web, "reproducir_en_pc", fake_play)
+    monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
+    res = await tools.ejecutar_tool(None, "pc_reproducir_spotify",
+                                    {"uri": "spotify:track:abc"})
+    assert res["datos"]["estado"] == "sonando"
+    assert ("abrir_app", {"nombre": "spotify"}) in llamadas
+    assert ("play", "spotify:track:abc") in llamadas
+
+
+async def test_handler_causa_exacta_si_el_device_nunca_aparece(monkeypatch):
+    # Si ni abriendo Spotify se registra el device, cae al fallback (abrir y
+    # medir) y el mensaje trae la CAUSA exacta, sin loops infinitos.
+    _con_creds(monkeypatch, refresh=True)
+    monkeypatch.setattr(tools, "_ESPERA_DISPOSITIVO_S", 0.0)
+    monkeypatch.setattr(tools, "_INTENTOS_DISPOSITIVO", 2)
+
+    async def fake_device(cliente=None):
+        return None
+
+    async def fake_enviar(nombre, args, **kw):
+        if nombre == "abrir_app":
+            return {"ok": True, "tipo": "app_abierta", "app": "spotify"}
+        if nombre == "reproducir_spotify":
+            return {"ok": True, "tipo": "spotify_abierto", "sonando": False}
+        raise AssertionError(f"acción inesperada: {nombre}")
+
+    monkeypatch.setattr(tools.spotify_web, "dispositivo_objetivo", fake_device)
+    monkeypatch.setattr(tools.canal, "enviar_accion", fake_enviar)
+    res = await tools.ejecutar_tool(None, "pc_reproducir_spotify",
+                                    {"uri": "spotify:track:abc"})
     assert res["datos"]["estado"] == "abierto_sin_sonar"
-    assert "no reporta sonido" in res["datos"]["mensaje"]
+    assert "no llegó a registrarse" in res["datos"]["mensaje"]
+
+
+async def test_token_invalido_se_distingue_de_credenciales_faltantes(monkeypatch):
+    # Con las 3 credenciales puestas pero el refresh REVOCADO (Spotify devuelve
+    # 400 al renovar): el mensaje dice «vencido/revocado», no «falta configurar».
+    _con_creds(monkeypatch, refresh=True)
+    cli = _cliente({"POST /api/token": httpx.Response(400, json={"error": "invalid_grant"})})
+    r = await spotify_web.reproducir_en_pc("spotify:track:abc", cliente=cli)
+    assert not r["ok"] and r["tipo"] == "sin_oauth"
+    assert "vencido o revocado" in r["mensaje"]
+    assert "spotify_autorizar_auto" in r["mensaje"]

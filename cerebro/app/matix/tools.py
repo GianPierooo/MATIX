@@ -46,6 +46,7 @@ providers del Flutter):
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import subprocess
 import uuid
@@ -6682,18 +6683,50 @@ async def _pc_crear_word(db: Postgrest, args: dict) -> dict[str, Any]:
     })
 
 
-async def _pc_reproducir_spotify(db: Postgrest, args: dict) -> dict[str, Any]:
-    """Reproduce música en el Spotify de la PC, DIRECTO y con resultado HONESTO.
+# Espera acotada a que el cliente de escritorio aparezca como device tras
+# abrirlo (Spotify tarda unos segundos en registrarse con el backend).
+_ESPERA_DISPOSITIVO_S = 2.0
+_INTENTOS_DISPOSITIVO = 6
 
-    Pipeline (cada nivel degrada limpio al siguiente):
-      1. Con SPOTIFY_CLIENT_ID/SECRET: resuelve el track más popular vía la
-         Web API («cualquier canción de X» → su top, sin preguntar).
-      2. El agente abre el track en el cliente local (registra el dispositivo)
-         y MIDE si suena (peak de audio + título de ventana).
-      3. Si no arrancó y hay SPOTIFY_REFRESH_TOKEN (Premium): ordena play por
-         la Web API (la única vía garantizada — abrir un track solo navega) y
-         RE-VERIFICA en la PC.
-    El mensaje final dice «suena» SOLO si se midió que suena. Sin loops."""
+
+async def _spotify_dispositivo_listo() -> dict[str, Any]:
+    """Garantiza que el Spotify de ESTA PC figure como dispositivo de la Web
+    API: si no está, lo ABRE vía el agente y espera (acotado, sin loops
+    infinitos) a que se registre."""
+    d = await spotify_web.dispositivo_objetivo()
+    if d:
+        return {"ok": True, "dispositivo": d.get("name")}
+    ab = await canal.enviar_accion("abrir_app", {"nombre": "spotify"})
+    if not ab.get("ok"):
+        return {
+            "ok": False, "tipo": "sin_spotify",
+            "mensaje": "no pude abrir el cliente de Spotify en la PC "
+                       f"({ab.get('mensaje', ab.get('tipo', 'sin detalle'))})",
+        }
+    for _ in range(_INTENTOS_DISPOSITIVO):
+        await asyncio.sleep(_ESPERA_DISPOSITIVO_S)
+        d = await spotify_web.dispositivo_objetivo()
+        if d:
+            return {"ok": True, "dispositivo": d.get("name")}
+    return {
+        "ok": False, "tipo": "sin_dispositivo",
+        "mensaje": "abrí Spotify pero no llegó a registrarse como dispositivo "
+                   "de la Web API (puede tardar; intenta de nuevo en un momento)",
+    }
+
+
+async def _pc_reproducir_spotify(db: Postgrest, args: dict) -> dict[str, Any]:
+    """Reproduce música en el Spotify de escritorio de LA PC — vía GARANTIZADA
+    primero, DIRECTO (sin confirmaciones) y con resultado HONESTO.
+
+    1. Resuelve el track con la Web API («cualquier canción de X» → su top;
+       una canción específica → el match más popular). Sin preguntar.
+    2. Con OAuth (Premium): asegura el dispositivo (si Spotify está cerrado lo
+       abre y espera acotado), PUT /me/player/play apuntando a ESTA PC
+       (SPOTIFY_DEVICE_NAME) y re-verifica el audio con el agente.
+    3. Sin OAuth o si la API falla: abre el track en el cliente y MIDE si
+       suena. Errores con causa exacta (sin dispositivo / token vencido /
+       sin Premium). Determinista, sin loops."""
     args = args or {}
     consulta = (args.get("consulta") or "").strip()
     uri = (args.get("uri") or "").strip()
@@ -6707,40 +6740,62 @@ async def _pc_reproducir_spotify(db: Postgrest, args: dict) -> dict[str, Any]:
             uri = track["uri"]
     humano = f"«{track['nombre']}» de {track['artista']}" if track else f"«{consulta or uri}»"
 
-    # Paso 1: abrir en el cliente local (navega + registra el device) y medir.
-    payload = {"uri": uri} if uri else {"consulta": consulta}
-    res = await canal.enviar_accion("reproducir_spotify", payload, timeout=30.0)
-    if not res.get("ok"):
-        return _pc_error(res)
-    sonando = res.get("sonando") is True
-    reproduciendo = res.get("reproduciendo")
+    sonando = False
+    reproduciendo = None
+    api_confirmo = False
+    causa_api = ""
 
-    # Paso 2: si no arrancó, la orden REAL de play va por la Web API (Premium).
-    via_api = False
-    if not sonando and uri.startswith("spotify:") and await spotify_web.playback_disponible():
-        rep = await spotify_web.reproducir_en_pc(uri)
-        if rep.get("ok"):
-            via_api = True
-            ver = await canal.enviar_accion("verificar_spotify", {"espera_s": 6.0}, timeout=15.0)
-            sonando = ver.get("sonando") is True
-            reproduciendo = ver.get("reproduciendo") or reproduciendo
+    # VÍA GARANTIZADA: play por la Web API apuntando al device de ESTA PC.
+    reproducible = uri.startswith("spotify:") and not uri.startswith("spotify:search:")
+    if reproducible and await spotify_web.playback_disponible():
+        listo = await _spotify_dispositivo_listo()
+        if listo.get("ok"):
+            rep = await spotify_web.reproducir_en_pc(uri)
+            if rep.get("ok"):
+                api_confirmo = True
+                ver = await canal.enviar_accion("verificar_spotify", {"espera_s": 6.0}, timeout=15.0)
+                sonando = ver.get("sonando") is True
+                reproduciendo = ver.get("reproduciendo")
+            else:
+                causa_api = rep.get("mensaje") or rep.get("tipo") or "fallo de la API"
+        else:
+            causa_api = listo.get("mensaje") or listo.get("tipo") or "sin dispositivo"
+
+    # FALLBACK: sin OAuth (o API caída) → abrir en el cliente y MEDIR.
+    if not api_confirmo:
+        payload = {"uri": uri} if uri else {"consulta": consulta}
+        res = await canal.enviar_accion("reproducir_spotify", payload, timeout=30.0)
+        if not res.get("ok"):
+            return _pc_error(res)
+        sonando = res.get("sonando") is True
+        reproduciendo = res.get("reproduciendo")
 
     if sonando:
+        estado = "sonando"
         detalle = f" (el cliente reporta: {reproduciendo})" if reproduciendo else ""
-        mensaje = f"Está SONANDO {humano} en la PC{detalle}."
-    elif uri and not uri.startswith("spotify:search:"):
-        muro = await spotify_web.que_falta_para_playback()
-        causa = (
-            "ordené play por la Web API pero la PC no reporta sonido"
-            if via_api else
-            (f"el cliente no auto-reproduce al abrir un track y {muro}" if muro
-             else "la orden de play por la Web API no se pudo ejecutar")
+        confirmacion = "la API confirmó la reproducción y " if api_confirmo else ""
+        mensaje = f"Puse {humano} en la PC: {confirmacion}el audio está sonando{detalle}."
+    elif api_confirmo:
+        # La API aceptó el play (204) pero el medidor local no reporta audio.
+        estado = "reproduccion_ordenada"
+        mensaje = (
+            f"Spotify CONFIRMÓ la orden de reproducir {humano} en la PC, pero no "
+            "mido audio local: revisa el volumen o si Spotify está silenciado en "
+            "el mezclador de Windows."
+        )
+    elif reproducible:
+        estado = "abierto_sin_sonar"
+        causa = causa_api or (
+            "el cliente no auto-reproduce al abrir un track y "
+            + (await spotify_web.que_falta_para_playback()
+               or "la orden por la Web API no se pudo ejecutar")
         )
         mensaje = (
             f"Abrí {humano} en el Spotify de la PC pero NO está sonando: {causa}. "
-            "Sé honesto con el usuario: que le dé play allí o que configure eso."
+            "Sé honesto con el usuario."
         )
     else:
+        estado = "abierto_sin_sonar"
         muro = await spotify_web.que_falta_para_playback()
         mensaje = (
             f"Abrí Spotify con la búsqueda {humano}, pero sin la Web API no puedo "
@@ -6748,10 +6803,11 @@ async def _pc_reproducir_spotify(db: Postgrest, args: dict) -> dict[str, Any]:
         )
     return _ok({
         "_nota": _NOTA_PC_DATO + (
-            " HONESTIDAD: di que la música SUENA solo si estado='sonando'; si es "
-            "'abierto_sin_sonar', narra el motivo tal cual, sin inventar éxito."
+            " HONESTIDAD: di que la música SUENA solo si estado='sonando'; con "
+            "'reproduccion_ordenada' di que la orden fue confirmada pero no se "
+            "detecta audio; con 'abierto_sin_sonar' narra el motivo tal cual."
         ),
-        "estado": "sonando" if sonando else "abierto_sin_sonar",
+        "estado": estado,
         "uri": uri or None,
         "reproduciendo": reproduciendo,
         "mensaje": mensaje,

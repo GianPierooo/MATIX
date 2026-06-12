@@ -620,7 +620,25 @@ se midió; si no, narra el muro exacto (qué variable falta) sin loops. Hallazgo
 empírico (en la PC real): abrir `spotify:track:…` a veces auto-reproduce y a
 veces solo navega — por eso se mide siempre en vez de asumir. Módulo
 `cerebro/app/matix/spotify_web.py` (client-credentials + refresh token, caché
-de tokens, mockeado en `test_spotify_web.py`). **Confinamiento del control de pantalla
+de tokens, mockeado en `test_spotify_web.py`).
+
+**Spotify — vía garantizada PRIMERO (cierre).** El pipeline de
+`_pc_reproducir_spotify` se invirtió: con OAuth (Premium) la Web API es el
+camino PRINCIPAL, no el rescate. Orden: (1) resolver track; (2) asegurar el
+dispositivo — si el cliente de escritorio está cerrado, el agente lo ABRE
+(`abrir_app spotify`) y se espera ACOTADO (~12s máx) a que figure en
+`/me/player/devices` (`dispositivo_objetivo`, prefiere `SPOTIFY_DEVICE_NAME` =
+hostname de la PC, nunca la laptop); (3) `PUT /me/player/play` a ese device;
+(4) re-verificar el audio con el agente. Estados honestos: `sonando` (API
+confirmó Y se mide audio), `reproduccion_ordenada` (API confirmó pero no se
+mide audio local — volumen/mezclador), `abierto_sin_sonar` (con la CAUSA
+exacta: sin dispositivo / token vencido o revocado → reautorizar con
+`tools/spotify_autorizar_auto.py` / sin Premium 403 / faltan credenciales).
+Renovación del access token automática (refresh + caché con expiración).
+Credenciales: env vars o `secretos_runtime` (Supabase, solo service role);
+`spotify_autorizar_auto.py` guarda todo sin imprimir valores. PENDIENTE del
+dueño (una sola vez): crear la app en developer.spotify.com y autorizar
+(pasos exactos en el cierre del prompt). **Confinamiento del control de pantalla
 (la seguridad que falló):** cada captura reporta la VENTANA enfocada; antes de
 cada acción el agente verifica que la ventana siga siendo esa (`ventana_esperada`)
 y NUNCA actúa si el foco es una superficie de comandos (terminal/Claude/cmd/

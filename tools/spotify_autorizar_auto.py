@@ -23,6 +23,7 @@ import secrets as pysecrets
 import sys
 import urllib.parse
 import urllib.request
+import webbrowser
 from pathlib import Path
 
 REDIRECT = "http://127.0.0.1:8888/callback"
@@ -104,6 +105,10 @@ def main() -> int:
         "state": estado,
     })
     print("AUTORIZA_EN: " + url, flush=True)
+    try:
+        webbrowser.open(url)  # mejor esfuerzo; la URL impresa es el plan B
+    except Exception:  # noqa: BLE001
+        pass
 
     codigo: list[str | None] = [None]
 

@@ -159,6 +159,44 @@ async def buscar_mejor_track(
         return None
 
 
+async def _mensaje_sin_oauth() -> str:
+    """Distingue «faltan credenciales» de «el token está vencido/revocado»."""
+    muro = await que_falta_para_playback()
+    return muro or (
+        "el refresh token de Spotify parece vencido o revocado; reautoriza "
+        "una vez con tools/spotify_autorizar_auto.py"
+    )
+
+
+async def _elegir_dispositivo(dispositivos: list[dict]) -> dict | None:
+    """LA PC correcta: si hay varios Computer (laptop + PC), gana el que
+    coincide con SPOTIFY_DEVICE_NAME (hostname de la PC del agente)."""
+    nombre_pref = (await secretos.obtener("SPOTIFY_DEVICE_NAME") or "").strip().lower()
+    preferidos = [
+        d for d in dispositivos
+        if nombre_pref and (d.get("name") or "").strip().lower() == nombre_pref
+    ]
+    compus = [d for d in dispositivos if d.get("type") == "Computer"]
+    return (preferidos or compus or dispositivos or [None])[0]
+
+
+async def dispositivo_objetivo(cliente: httpx.AsyncClient | None = None) -> dict[str, Any] | None:
+    """El dispositivo de ESTA PC según /me/player/devices, o None si el
+    cliente de escritorio no está abierto/registrado (o no hay OAuth)."""
+    token = await _token("user", cliente)
+    if not token:
+        return None
+    try:
+        async with _cliente(cliente) as (cli, _propio):
+            r = await cli.get(f"{_API}/me/player/devices",
+                              headers={"Authorization": f"Bearer {token}"})
+        if r.status_code != 200:
+            return None
+        return await _elegir_dispositivo(r.json().get("devices") or [])
+    except httpx.HTTPError:
+        return None
+
+
 async def reproducir_en_pc(
     uri: str, cliente: httpx.AsyncClient | None = None
 ) -> dict[str, Any]:
@@ -167,7 +205,7 @@ async def reproducir_en_pc(
     Computer (el cliente de escritorio debe estar abierto)."""
     token = await _token("user", cliente)
     if not token:
-        return {"ok": False, "tipo": "sin_oauth", "mensaje": que_falta_para_playback()}
+        return {"ok": False, "tipo": "sin_oauth", "mensaje": await _mensaje_sin_oauth()}
     auth = {"Authorization": f"Bearer {token}"}
     try:
         async with _cliente(cliente) as (cli, _propio):
@@ -175,15 +213,7 @@ async def reproducir_en_pc(
             if r.status_code != 200:
                 return {"ok": False, "tipo": "error_api", "mensaje": f"devices devolvió {r.status_code}"}
             dispositivos = r.json().get("devices") or []
-            # LA PC correcta: si hay varios Computer (laptop + PC), gana el que
-            # coincide con SPOTIFY_DEVICE_NAME (el hostname de la PC del agente).
-            nombre_pref = (await secretos.obtener("SPOTIFY_DEVICE_NAME") or "").strip().lower()
-            preferidos = [
-                d for d in dispositivos
-                if nombre_pref and (d.get("name") or "").strip().lower() == nombre_pref
-            ]
-            compus = [d for d in dispositivos if d.get("type") == "Computer"]
-            elegido = (preferidos or compus or dispositivos or [None])[0]
+            elegido = await _elegir_dispositivo(dispositivos)
             if not elegido:
                 return {
                     "ok": False, "tipo": "sin_dispositivo",
