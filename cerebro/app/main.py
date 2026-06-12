@@ -55,6 +55,7 @@ from .routers import (
     rituales,
     rollover,
     sesiones_clase,
+    spotify,
     subtareas,
     tareas,
     version,
@@ -235,11 +236,13 @@ for r in (
     matix.router,
     version.router,
     google.router,
+    spotify.router,
     briefing.router,
 ):
     app.include_router(r, prefix="/api/v1")
 
-# El callback de OAuth Google va sin auth (Google no manda nuestra
-# X-Matix-Key). La defensa contra CSRF es el `state` que se valida
-# en el handler. Lo registramos con su propio router separado.
+# Los callbacks de OAuth (Google, Spotify) van SIN auth: el proveedor redirige
+# desde el navegador del usuario y no puede mandar la X-Matix-Key. La defensa
+# contra CSRF es el `state` que se valida en cada handler.
 app.include_router(google.router_callback, prefix="/api/v1")
+app.include_router(spotify.router_callback, prefix="/api/v1")

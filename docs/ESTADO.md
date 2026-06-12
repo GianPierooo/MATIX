@@ -640,6 +640,24 @@ Credenciales: env vars o `secretos_runtime` (Supabase, solo service role);
 dueño (una sola vez): crear la app en developer.spotify.com y autorizar
 (pasos exactos en el cierre del prompt).
 
+**Spotify — OAuth DESDE LA APP (I).** Se reemplazó el OAuth local por 127.0.0.1
+por un flujo authorization-code con el cerebro como redirect público — el dueño
+conecta su Premium desde Ajustes, sin Chrome en la PC. Cerebro: router
+`spotify.py` (espejo de `google.py`) — `GET /spotify/status`,
+`GET /spotify/oauth/url` (URL de consentimiento con scopes
+`user-modify-playback-state` + `user-read-playback-state`, state CSRF en memoria
+con TTL), `GET /spotify/callback` (PÚBLICO, sin `X-Matix-Key`: Spotify redirige
+desde el navegador; valida el state e intercambia el code) y
+`DELETE /spotify/disconnect`. `spotify_web` ganó `url_de_autorizacion`,
+`intercambiar_code` (guarda el refresh en `secretos_runtime` vía nuevo
+`secretos.guardar`, NUNCA lo loggea), `conectado` y `olvidar_refresh`. Redirect
+URI: `https://matix-production.up.railway.app/api/v1/spotify/callback` (a
+registrar en el dashboard de la app de Spotify). App: tile «Conectar Spotify» en
+Ajustes › Conexiones (`features/spotify/`), abre la URL en el navegador del
+teléfono y al volver «Ya autoricé» re-chequea. Client ID/Secret YA cargados y
+validados (la búsqueda resuelve tracks); falta solo que el dueño toque conectar
+una vez. VERIFICADO local: la authorize URL trae scopes y el redirect correcto.
+
 **Fiabilidad del agente PC — autoarranque con VIGILANTE (G).** Causa raíz del
 agente muerto tras un reinicio (boot 2026-06-12): el venv del disco real
 apuntaba a un build de Python que no existía ahí (las instalaciones de uv desde

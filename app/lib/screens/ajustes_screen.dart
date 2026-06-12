@@ -18,6 +18,7 @@ import '../features/cierre/presentation/cierre_dia_screen.dart';
 import '../features/cierre/presentation/cierre_screen.dart';
 import '../features/cierre/providers/cierre_providers.dart';
 import '../features/google/presentation/conexion_google_tile.dart';
+import '../features/spotify/presentation/conexion_spotify_tile.dart';
 import '../features/matix/presentation/accesibilidad_screen.dart';
 import '../features/matix/presentation/voz_matix_screen.dart';
 import '../features/memoria/presentation/sobre_mi_screen.dart';
@@ -356,12 +357,11 @@ class _AjustesScreenState extends ConsumerState<AjustesScreen> {
             ),
           ),
 
-          // Capa 4 dormida: la conexión con Google no se muestra. El
-          // tile sigue vivo tras el flag para poder revivirla.
-          if (MatixConfig.googleVisible) ...[
-            const _Seccion('Conexiones'),
-            const ConexionGoogleTile(),
-          ],
+          // Conexiones. Spotify (Capa 6) siempre visible; Google (Capa 4)
+          // sigue tras su flag — el tile vive para poder revivirla.
+          const _Seccion('Conexiones'),
+          const ConexionSpotifyTile(),
+          if (MatixConfig.googleVisible) const ConexionGoogleTile(),
 
           const _Seccion('Versión'),
           _BuscarActualizacionTile(),

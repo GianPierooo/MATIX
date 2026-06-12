@@ -62,3 +62,39 @@ async def obtener(clave: str, cliente: httpx.AsyncClient | None = None) -> str |
     except httpx.HTTPError as e:
         log.warning("secretos_runtime inalcanzable (%s) para «%s»", type(e).__name__, clave)
         return None
+
+
+async def guardar(clave: str, valor: str, cliente: httpx.AsyncClient | None = None) -> bool:
+    """Upsert de un secreto en `secretos_runtime` (merge-duplicates). Invalida
+    la caché para que la próxima lectura lo vea. NUNCA loggea el valor; devuelve
+    True si quedó guardado. Requiere el service role (solo el cerebro)."""
+    url = os.getenv("SUPABASE_URL")
+    srk = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    if not url or not srk:
+        log.warning("secretos.guardar: falta SUPABASE_URL/SERVICE_ROLE_KEY")
+        return False
+    try:
+        propio = cliente is None
+        cli = cliente or httpx.AsyncClient(timeout=6.0)
+        try:
+            r = await cli.post(
+                f"{url}/rest/v1/secretos_runtime",
+                json={"clave": clave, "valor": valor},
+                headers={
+                    "apikey": srk,
+                    "Authorization": f"Bearer {srk}",
+                    "Content-Type": "application/json",
+                    "Prefer": "resolution=merge-duplicates",
+                },
+            )
+        finally:
+            if propio:
+                await cli.aclose()
+        if r.status_code in (200, 201, 204):
+            _cache[clave] = (valor, time.monotonic() + _TTL_S)
+            return True
+        log.warning("secretos.guardar «%s» devolvió %s", clave, r.status_code)
+        return False
+    except httpx.HTTPError as e:
+        log.warning("secretos.guardar «%s» falló: %s", clave, type(e).__name__)
+        return False

@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
 import time
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 
@@ -26,8 +28,19 @@ from . import secretos
 log = logging.getLogger(__name__)
 
 _URL_TOKEN = "https://accounts.spotify.com/api/token"
+_URL_AUTORIZA = "https://accounts.spotify.com/authorize"
 _API = "https://api.spotify.com/v1"
 _TIMEOUT = 10.0
+
+# Redirect URI: endpoint PÚBLICO del cerebro (Spotify redirige acá tras el
+# consentimiento). Configurable por env/secreto; por defecto, producción.
+_REDIRECT_DEFECTO = "https://matix-production.up.railway.app/api/v1/spotify/callback"
+# Scopes mínimos para reproducir: ordenar play + leer el estado del player.
+_SCOPES = "user-modify-playback-state user-read-playback-state"
+
+
+async def redirect_uri() -> str:
+    return await secretos.obtener("SPOTIFY_REDIRECT_URI") or _REDIRECT_DEFECTO
 
 # Caché de tokens por modo ("cc" | "user"): (token, expira_monotonic).
 _tokens: dict[str, tuple[str, float]] = {}
@@ -64,6 +77,73 @@ async def que_falta_para_playback() -> str:
         + "; se obtienen creando una app en developer.spotify.com y corriendo "
         "tools/spotify_autorizar.py una sola vez)"
     )
+
+
+async def conectado() -> bool:
+    """True si ya hay refresh token (el usuario autorizó). Para el botón de la
+    app: muestra «Conectado» vs «Conectar Spotify»."""
+    return bool(await secretos.obtener("SPOTIFY_REFRESH_TOKEN"))
+
+
+async def url_de_autorizacion(state: str) -> str:
+    """URL de consentimiento de Spotify (authorization code) que la app abre en
+    el navegador del teléfono. `state` es la defensa CSRF (lo verifica el
+    callback). Lanza RuntimeError si faltan client id/secret."""
+    c = await _credenciales()
+    if not c["SPOTIFY_CLIENT_ID"] or not c["SPOTIFY_CLIENT_SECRET"]:
+        raise RuntimeError("Faltan SPOTIFY_CLIENT_ID/SECRET en el cerebro.")
+    params = {
+        "client_id": c["SPOTIFY_CLIENT_ID"],
+        "response_type": "code",
+        "redirect_uri": await redirect_uri(),
+        "scope": _SCOPES,
+        "state": state,
+    }
+    return f"{_URL_AUTORIZA}?{urlencode(params)}"
+
+
+async def intercambiar_code(code: str, cliente: httpx.AsyncClient | None = None) -> bool:
+    """Cierra el OAuth: intercambia `code` por tokens y GUARDA el refresh token
+    en secretos_runtime (nunca lo loggea). Devuelve True si quedó conectado.
+    Tras esto, `playback_disponible()` pasa a True."""
+    c = await _credenciales()
+    cid, sec = c["SPOTIFY_CLIENT_ID"], c["SPOTIFY_CLIENT_SECRET"]
+    if not cid or not sec:
+        return False
+    basic = base64.b64encode(f"{cid}:{sec}".encode()).decode()
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": await redirect_uri(),
+    }
+    try:
+        async with _cliente(cliente) as (cli, _propio):
+            r = await cli.post(_URL_TOKEN, data=data, headers={"Authorization": f"Basic {basic}"})
+        if r.status_code != 200:
+            log.warning("spotify intercambiar_code devolvió %s", r.status_code)
+            return False
+        refresh = r.json().get("refresh_token")
+        if not refresh:
+            log.warning("spotify intercambiar_code: sin refresh_token en la respuesta")
+            return False
+    except httpx.HTTPError as e:
+        log.warning("spotify intercambiar_code falló: %s", type(e).__name__)
+        return False
+    # Guardado en secretos_runtime (y en el entorno del proceso para que la
+    # caché de _credenciales lo vea ya). El VALOR nunca se loggea.
+    ok = await secretos.guardar("SPOTIFY_REFRESH_TOKEN", refresh)
+    if ok:
+        os.environ["SPOTIFY_REFRESH_TOKEN"] = refresh
+        _tokens.pop("user", None)  # invalida un token de usuario viejo
+    return ok
+
+
+async def olvidar_refresh() -> None:
+    """Desconecta: borra el refresh token (deja id/secret → la búsqueda sigue).
+    Vacía el valor en secretos_runtime y el entorno + caché del token de usuario."""
+    await secretos.guardar("SPOTIFY_REFRESH_TOKEN", "")
+    os.environ.pop("SPOTIFY_REFRESH_TOKEN", None)
+    _tokens.pop("user", None)
 
 
 def _limpiar_cache() -> None:

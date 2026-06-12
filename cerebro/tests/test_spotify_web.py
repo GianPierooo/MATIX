@@ -67,6 +67,59 @@ async def test_con_credenciales_pero_sin_refresh(monkeypatch):
     assert "SPOTIFY_REFRESH_TOKEN" in falta and "SPOTIFY_CLIENT_ID" not in falta
 
 
+# ── OAuth authorization-code (conectar desde la app) ─────────────────────────
+
+
+async def test_url_de_autorizacion(monkeypatch):
+    _con_creds(monkeypatch)
+    url = await spotify_web.url_de_autorizacion("estado123")
+    assert url.startswith("https://accounts.spotify.com/authorize?")
+    assert "client_id=cid-test" in url
+    assert "response_type=code" in url
+    assert "user-modify-playback-state" in url
+    assert "user-read-playback-state" in url
+    assert "state=estado123" in url
+    # Redirect al endpoint público del cerebro.
+    assert "spotify%2Fcallback" in url or "spotify/callback" in url
+
+
+async def test_url_de_autorizacion_sin_creds_lanza(monkeypatch):
+    with pytest.raises(RuntimeError):
+        await spotify_web.url_de_autorizacion("x")
+
+
+async def test_intercambiar_code_guarda_refresh(monkeypatch):
+    _con_creds(monkeypatch)
+    guardado = {}
+
+    async def fake_guardar(clave, valor, cliente=None):
+        guardado[clave] = valor
+        return True
+
+    monkeypatch.setattr(spotify_web.secretos, "guardar", fake_guardar)
+    cli = _cliente({"POST /api/token": httpx.Response(200, json={
+        "access_token": "ac", "refresh_token": "EL-REFRESH", "expires_in": 3600,
+    })})
+    ok = await spotify_web.intercambiar_code("code-abc", cliente=cli)
+    assert ok is True
+    # El refresh quedó guardado y la conexión pasa a disponible.
+    assert guardado.get("SPOTIFY_REFRESH_TOKEN") == "EL-REFRESH"
+    assert await spotify_web.conectado() is True
+    assert await spotify_web.playback_disponible() is True
+
+
+async def test_intercambiar_code_sin_refresh_en_respuesta(monkeypatch):
+    _con_creds(monkeypatch)
+    cli = _cliente({"POST /api/token": httpx.Response(200, json={"access_token": "ac"})})
+    assert await spotify_web.intercambiar_code("code-abc", cliente=cli) is False
+
+
+async def test_intercambiar_code_error_api(monkeypatch):
+    _con_creds(monkeypatch)
+    cli = _cliente({"POST /api/token": httpx.Response(400, json={"error": "invalid_grant"})})
+    assert await spotify_web.intercambiar_code("code-malo", cliente=cli) is False
+
+
 # ── Fallback de credenciales en Supabase (secretos_runtime) ──────────────────
 
 
