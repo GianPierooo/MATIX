@@ -6701,7 +6701,7 @@ async def _pc_reproducir_spotify(db: Postgrest, args: dict) -> dict[str, Any]:
         return _error("validacion", "Dime qué canción o artista reproducir en Spotify.")
 
     track = None
-    if not uri and spotify_web.busqueda_disponible():
+    if not uri and await spotify_web.busqueda_disponible():
         track = await spotify_web.buscar_mejor_track(consulta)
         if track and track.get("uri"):
             uri = track["uri"]
@@ -6717,7 +6717,7 @@ async def _pc_reproducir_spotify(db: Postgrest, args: dict) -> dict[str, Any]:
 
     # Paso 2: si no arrancó, la orden REAL de play va por la Web API (Premium).
     via_api = False
-    if not sonando and uri.startswith("spotify:") and spotify_web.playback_disponible():
+    if not sonando and uri.startswith("spotify:") and await spotify_web.playback_disponible():
         rep = await spotify_web.reproducir_en_pc(uri)
         if rep.get("ok"):
             via_api = True
@@ -6729,7 +6729,7 @@ async def _pc_reproducir_spotify(db: Postgrest, args: dict) -> dict[str, Any]:
         detalle = f" (el cliente reporta: {reproduciendo})" if reproduciendo else ""
         mensaje = f"Está SONANDO {humano} en la PC{detalle}."
     elif uri and not uri.startswith("spotify:search:"):
-        muro = spotify_web.que_falta_para_playback()
+        muro = await spotify_web.que_falta_para_playback()
         causa = (
             "ordené play por la Web API pero la PC no reporta sonido"
             if via_api else
@@ -6741,7 +6741,7 @@ async def _pc_reproducir_spotify(db: Postgrest, args: dict) -> dict[str, Any]:
             "Sé honesto con el usuario: que le dé play allí o que configure eso."
         )
     else:
-        muro = spotify_web.que_falta_para_playback()
+        muro = await spotify_web.que_falta_para_playback()
         mensaje = (
             f"Abrí Spotify con la búsqueda {humano}, pero sin la Web API no puedo "
             f"elegir el track ni darle play ({muro}). Dile la verdad al usuario."

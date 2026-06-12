@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import base64
 import logging
-import os
 import time
 from typing import Any
 
 import httpx
+
+from . import secretos
 
 log = logging.getLogger(__name__)
 
@@ -31,31 +32,34 @@ _TIMEOUT = 10.0
 # Caché de tokens por modo ("cc" | "user"): (token, expira_monotonic).
 _tokens: dict[str, tuple[str, float]] = {}
 
-
-def _credenciales() -> tuple[str | None, str | None]:
-    return os.getenv("SPOTIFY_CLIENT_ID"), os.getenv("SPOTIFY_CLIENT_SECRET")
+_CLAVES = ("SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "SPOTIFY_REFRESH_TOKEN")
 
 
-def busqueda_disponible() -> bool:
-    cid, sec = _credenciales()
-    return bool(cid and sec)
+async def _credenciales() -> dict[str, str | None]:
+    """Las tres credenciales, cada una de env var o de `secretos_runtime`
+    (fallback en Supabase, solo service role). Los valores NUNCA se loggean."""
+    return {clave: await secretos.obtener(clave) for clave in _CLAVES}
 
 
-def playback_disponible() -> bool:
-    return busqueda_disponible() and bool(os.getenv("SPOTIFY_REFRESH_TOKEN"))
+async def busqueda_disponible() -> bool:
+    c = await _credenciales()
+    return bool(c["SPOTIFY_CLIENT_ID"] and c["SPOTIFY_CLIENT_SECRET"])
 
 
-def que_falta_para_playback() -> str:
-    """Nombres (solo NOMBRES) de las variables que faltan para poder ordenar
+async def playback_disponible() -> bool:
+    c = await _credenciales()
+    return all(c.values())
+
+
+async def que_falta_para_playback() -> str:
+    """Nombres (solo NOMBRES) de las credenciales que faltan para poder ordenar
     reproducción real. Texto listo para narrar al usuario."""
-    faltan = [
-        v for v in ("SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "SPOTIFY_REFRESH_TOKEN")
-        if not os.getenv(v)
-    ]
+    c = await _credenciales()
+    faltan = [clave for clave in _CLAVES if not c[clave]]
     if not faltan:
         return ""
     return (
-        "falta configurar la Web API de Spotify en el cerebro (variables "
+        "falta configurar la Web API de Spotify en el cerebro ("
         + ", ".join(faltan)
         + "; se obtienen creando una app en developer.spotify.com y corriendo "
         "tools/spotify_autorizar.py una sola vez)"
@@ -73,11 +77,12 @@ async def _token(modo: str, cliente: httpx.AsyncClient | None = None) -> str | N
     en_cache = _tokens.get(modo)
     if en_cache and en_cache[1] > time.monotonic():
         return en_cache[0]
-    cid, sec = _credenciales()
+    c = await _credenciales()
+    cid, sec = c["SPOTIFY_CLIENT_ID"], c["SPOTIFY_CLIENT_SECRET"]
     if not cid or not sec:
         return None
     if modo == "user":
-        refresh = os.getenv("SPOTIFY_REFRESH_TOKEN")
+        refresh = c["SPOTIFY_REFRESH_TOKEN"]
         if not refresh:
             return None
         data = {"grant_type": "refresh_token", "refresh_token": refresh}

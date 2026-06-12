@@ -10,16 +10,19 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.matix import spotify_web, tools
+from app.matix import secretos, spotify_web, tools
 
 
 @pytest.fixture(autouse=True)
 def _sin_env(monkeypatch):
-    for v in ("SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "SPOTIFY_REFRESH_TOKEN"):
+    for v in ("SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "SPOTIFY_REFRESH_TOKEN",
+              "SUPABASE_SERVICE_ROLE_KEY"):
         monkeypatch.delenv(v, raising=False)
     spotify_web._limpiar_cache()
+    secretos._limpiar_cache()
     yield
     spotify_web._limpiar_cache()
+    secretos._limpiar_cache()
 
 
 def _cliente(rutas: dict[str, httpx.Response]) -> httpx.AsyncClient:
@@ -47,21 +50,64 @@ _TOKEN_OK = httpx.Response(200, json={"access_token": "tok", "expires_in": 3600}
 # ── Credenciales y muro ──────────────────────────────────────────────────────
 
 
-def test_sin_credenciales_nada_disponible():
-    assert not spotify_web.busqueda_disponible()
-    assert not spotify_web.playback_disponible()
-    falta = spotify_web.que_falta_para_playback()
+async def test_sin_credenciales_nada_disponible():
+    assert not await spotify_web.busqueda_disponible()
+    assert not await spotify_web.playback_disponible()
+    falta = await spotify_web.que_falta_para_playback()
     # Nombra las variables (solo NOMBRES) y el cómo conseguirlas.
     assert "SPOTIFY_CLIENT_ID" in falta and "SPOTIFY_REFRESH_TOKEN" in falta
     assert "spotify_autorizar" in falta
 
 
-def test_con_credenciales_pero_sin_refresh(monkeypatch):
+async def test_con_credenciales_pero_sin_refresh(monkeypatch):
     _con_creds(monkeypatch)
-    assert spotify_web.busqueda_disponible()
-    assert not spotify_web.playback_disponible()
-    falta = spotify_web.que_falta_para_playback()
+    assert await spotify_web.busqueda_disponible()
+    assert not await spotify_web.playback_disponible()
+    falta = await spotify_web.que_falta_para_playback()
     assert "SPOTIFY_REFRESH_TOKEN" in falta and "SPOTIFY_CLIENT_ID" not in falta
+
+
+# ── Fallback de credenciales en Supabase (secretos_runtime) ──────────────────
+
+
+async def test_secretos_fallback_en_supabase(monkeypatch):
+    # Sin env vars de Spotify, pero con la tabla secretos_runtime poblada:
+    # las credenciales llegan igual (env PRIMERO, DB después, cacheado).
+    monkeypatch.setenv("SUPABASE_URL", "https://fake.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "srk-test")
+    pedidos = []
+
+    valores = {"SPOTIFY_CLIENT_ID": "cid-db", "SPOTIFY_CLIENT_SECRET": "sec-db",
+               "SPOTIFY_REFRESH_TOKEN": "rt-db"}
+
+    def manejar(req: httpx.Request) -> httpx.Response:
+        clave = req.url.params.get("clave", "").removeprefix("eq.")
+        pedidos.append(clave)
+        v = valores.get(clave)
+        return httpx.Response(200, json=([{"valor": v}] if v else []))
+
+    cli = httpx.AsyncClient(transport=httpx.MockTransport(manejar))
+    for clave, esperado in valores.items():
+        assert await secretos.obtener(clave, cliente=cli) == esperado
+    # Cacheado: una segunda lectura no vuelve a la red.
+    n = len(pedidos)
+    assert await secretos.obtener("SPOTIFY_CLIENT_ID", cliente=cli) == "cid-db"
+    assert len(pedidos) == n
+
+
+async def test_secretos_env_gana_sobre_db(monkeypatch):
+    monkeypatch.setenv("SPOTIFY_CLIENT_ID", "cid-env")
+
+    def explota(req: httpx.Request) -> httpx.Response:
+        raise AssertionError("no debe tocar la red si la env var existe")
+
+    cli = httpx.AsyncClient(transport=httpx.MockTransport(explota))
+    assert await secretos.obtener("SPOTIFY_CLIENT_ID", cliente=cli) == "cid-env"
+
+
+async def test_secretos_sin_service_role_devuelve_none(monkeypatch):
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    assert await secretos.obtener("SPOTIFY_CLIENT_ID") is None
 
 
 async def test_buscar_sin_creds_devuelve_none():
