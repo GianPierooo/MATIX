@@ -638,7 +638,29 @@ Renovación del access token automática (refresh + caché con expiración).
 Credenciales: env vars o `secretos_runtime` (Supabase, solo service role);
 `spotify_autorizar_auto.py` guarda todo sin imprimir valores. PENDIENTE del
 dueño (una sola vez): crear la app en developer.spotify.com y autorizar
-(pasos exactos en el cierre del prompt). **Confinamiento del control de pantalla
+(pasos exactos en el cierre del prompt).
+
+**Fiabilidad del agente PC — autoarranque con VIGILANTE (G).** Causa raíz del
+agente muerto tras un reinicio (boot 2026-06-12): el venv del disco real
+apuntaba a un build de Python que no existía ahí (las instalaciones de uv desde
+la sesión de Claude caen en un overlay que el sistema real no ve) → el `.lnk`
+del Startup lanzaba un trampolín que moría en silencio. Fix en dos capas:
+(1) `uv sync` (+ `--extra control`) ejecutado EN CONTEXTO REAL vía tarea
+programada → venv real sano (Python 3.14 + todas las deps); (2) tarea
+`MatixAgenteVigilante` (cada 5 min, `scripts/vigilar_agente.ps1`, instalador
+`scripts/instalar_vigilante.ps1`): si el proceso del agente no está, lo relanza
+oculto vía `cmd /c` con stdio explícito a `agente_vigilante.log` (pythonw
+directo bajo el scheduler se cuelga; y redirigir a `agente_autostart.log`
+chocaba con arrancar.py → PermissionError). El `.lnk` del Startup queda como
+arranque inmediato al logon; el vigilante cubre boots donde el Startup no
+dispara y cualquier muerte a mitad de sesión. VERIFICADO en vivo: kill →
+resurrección + reconexión al cerebro. Reconexión WS con backoff + latido de
+datos (25s) + motivo de cada caída logueado ya estaban (sobrevivió 2 redeploys
+de Railway reconectando en ~1s); ninguna acción tumba el proceso
+(`registro.ejecutar` captura todo y reporta error estructurado). Lote 1
+re-verificado EN EL SISTEMA REAL: abrir_carpeta (Explorador), tomar_captura
+(PNG 1920x1080 en ~/Pictures/Matix) y crear_documento_word (.docx con tabla,
+releído y validado). **Confinamiento del control de pantalla
 (la seguridad que falló):** cada captura reporta la VENTANA enfocada; antes de
 cada acción el agente verifica que la ventana siga siendo esa (`ventana_esperada`)
 y NUNCA actúa si el foco es una superficie de comandos (terminal/Claude/cmd/
