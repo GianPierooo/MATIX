@@ -604,3 +604,42 @@ async def test_handler_control_sinonimos(monkeypatch):
 async def test_handler_control_accion_vacia():
     res = await tools.ejecutar_tool(None, "pc_control_spotify", {"accion": "xyz"})
     assert not res["ok"] and res["tipo"] == "validacion"
+
+
+# ── Endurecimiento (auditoría): JSON malformado con status 200 degrada limpio ─
+
+
+async def test_intercambiar_code_json_malformado_no_revienta(monkeypatch):
+    # Spotify responde 200 pero con cuerpo NO-JSON (red corrupta, proxy): el
+    # codigo debe degradar a False, no propagar JSONDecodeError.
+    _con_creds(monkeypatch)
+    cli = _cliente({"POST /api/token": httpx.Response(200, content=b"<html>boom</html>")})
+    assert await spotify_web.intercambiar_code("code", cliente=cli) is False
+
+
+async def test_buscar_track_json_malformado_degrada_a_none(monkeypatch):
+    _con_creds(monkeypatch)
+    cli = _cliente({
+        "POST /api/token": _TOKEN_OK,
+        "GET /v1/search": httpx.Response(200, content=b"no-json"),
+    })
+    assert await spotify_web.buscar_mejor_track("x", cliente=cli) is None
+
+
+async def test_estado_reproduccion_json_malformado_degrada(monkeypatch):
+    _con_creds(monkeypatch, refresh=True)
+    cli = _cliente({
+        "POST /api/token": _TOKEN_OK,
+        "GET /v1/me/player": httpx.Response(200, content=b"{rota"),
+    })
+    est = await spotify_web.estado_reproduccion(cliente=cli)
+    assert est["ok"] is False  # no revienta; reporta error_api/red
+
+
+async def test_secretos_json_malformado_degrada_a_none(monkeypatch):
+    # secretos_runtime responde 200 con cuerpo no-JSON -> obtener() devuelve None,
+    # no propaga JSONDecodeError (antes el except solo cubria httpx.HTTPError).
+    monkeypatch.setenv("SUPABASE_URL", "https://fake.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "srk-test")
+    cli = _cliente({"GET /rest/v1/secretos_runtime": httpx.Response(200, content=b"<<roto>>")})
+    assert await secretos.obtener("SPOTIFY_CLIENT_ID", cliente=cli) is None

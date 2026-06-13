@@ -405,6 +405,16 @@ def _pantalla_accion(args: dict[str, Any], ctx: Contexto) -> dict[str, Any]:
             f"la ventana enfocada es «{actual[:60]}» (terminal/editor de comandos); "
             "no tecleo ahí por seguridad. Aborté.",
         )
+    # 1b) FAIL-CLOSED: si SÍ conocía la ventana objetivo (esperada) pero AHORA no
+    # puedo leer cuál está enfocada (actual vacío: pygetwindow falló, sin foco…),
+    # NO actúo a ciegas — no puedo confirmar que sigue siendo la misma. Abortar.
+    if esperada and not actual:
+        sesion["activa"] = False
+        return _err(
+            "ventana_indeterminada",
+            f"no puedo confirmar que la ventana enfocada siga siendo «{esperada[:40]}» "
+            "(no logro leer el foco actual); aborté para no actuar en la equivocada.",
+        )
     # 2) Si sé qué ventana esperaba y la actual es OTRA, abortar (foco robado).
     if esperada and actual and actual != esperada:
         sesion["activa"] = False

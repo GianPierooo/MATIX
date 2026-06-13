@@ -16,6 +16,7 @@ Todos requieren `X-Matix-Key` EXCEPTO `/callback` (Spotify no manda la header).
 """
 from __future__ import annotations
 
+import logging
 import secrets
 import time
 
@@ -91,8 +92,14 @@ async def callback(
         return HTMLResponse(_pagina(ok=False, mensaje="Spotify no devolvió el código."), status_code=400)
     try:
         ok = await spotify_web.intercambiar_code(code)
-    except Exception as e:  # noqa: BLE001
-        return HTMLResponse(_pagina(ok=False, mensaje=f"No se pudo completar: {e}"), status_code=500)
+    except Exception:  # noqa: BLE001
+        # No renderizamos el detalle de la excepción al navegador (podría traer
+        # internals); lo logueamos y mostramos un mensaje genérico.
+        logging.getLogger("matix.spotify").exception("callback: intercambiar_code falló")
+        return HTMLResponse(
+            _pagina(ok=False, mensaje="No se pudo completar la conexión. Reintenta desde Matix."),
+            status_code=500,
+        )
     if not ok:
         return HTMLResponse(_pagina(
             ok=False,
@@ -114,7 +121,7 @@ async def desconectar() -> None:
 
 def _pagina(*, ok: bool, mensaje: str) -> str:
     color = "#1DB954" if ok else "#FF4D5E"  # verde Spotify / rojo
-    titulo = "✓ Conectado" if ok else "✗ Algo falló"
+    titulo = "Conectado" if ok else "Algo falló"
     return f"""<!doctype html>
 <html lang="es">
 <head>

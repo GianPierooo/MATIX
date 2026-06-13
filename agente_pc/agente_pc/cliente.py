@@ -131,7 +131,12 @@ async def _sesion(
                 while True:
                     await asyncio.sleep(LATIDO_INTERVAL)
                     await ws.send(json.dumps({"tipo": "latido"}))
-            except (asyncio.CancelledError, WebSocketException, OSError):
+            except asyncio.CancelledError:
+                return
+            except (WebSocketException, OSError) as e:
+                # La conexión murió mientras latíamos: el bucle principal lo
+                # detecta y reconecta. Dejamos rastro (no en silencio).
+                log(f"latido: conexión caída ({type(e).__name__}); el bucle reconecta.")
                 return
 
         tarea_stop = asyncio.create_task(_vigilar_stop())
@@ -148,9 +153,31 @@ async def _sesion(
                     continue
                 tipo_msg = msg.get("tipo")
                 if tipo_msg == "accion":
-                    respuesta = await _atender(msg, registro, ctx, log)
-                    await ws.send(json.dumps(respuesta))
-                    log(f"resultado devuelto al cerebro id={respuesta.get('id')}")
+                    try:
+                        respuesta = await _atender(msg, registro, ctx, log)
+                        await ws.send(json.dumps(respuesta))
+                        log(f"resultado devuelto al cerebro id={respuesta.get('id')}")
+                    except (WebSocketException, OSError) as e:
+                        # Falló el TRANSPORTE al responder: re-lanzamos para que el
+                        # `async for` termine y el bucle exterior reconecte (el
+                        # cerebro maneja la respuesta faltante por timeout/gracia).
+                        log(f"no pude responder al cerebro id={msg.get('id')} "
+                            f"({type(e).__name__}); reconecto.")
+                        raise
+                    except Exception as e:  # noqa: BLE001
+                        # Falló serializar o algo inesperado (NO debería: _atender
+                        # devuelve estructurado). Avisamos al cerebro para que no
+                        # quede esperando, y seguimos vivos.
+                        log(f"error inesperado atendiendo id={msg.get('id')}: {type(e).__name__}")
+                        try:
+                            await ws.send(json.dumps({
+                                "tipo": "resultado", "id": msg.get("id"),
+                                "resultado": {"ok": False, "tipo": "interno",
+                                              "mensaje": f"el agente falló: {type(e).__name__}"},
+                            }))
+                        except Exception:  # noqa: BLE001
+                            log("tampoco pude enviar el error al cerebro; reconecto.")
+                            raise
                 else:
                     # Otros tipos (ping de control, mensajes del cerebro): los
                     # ignoramos sin ruido, pero un log de debug ayuda a saber

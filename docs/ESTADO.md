@@ -314,6 +314,25 @@ turno** e inyecta como contexto — sin depender de que el modelo decida buscar.
 - **Validado**: "¿qué tenía pendiente de OneXotic?" recupera el proyecto +
   tareas reales; A/B confirma que la respuesta pasa de "no tengo acceso a tus
   datos" (sin memoria) a la lista real de pendientes (con memoria).
+
+### Endurecimiento por auditoría adversarial (app/cerebro/agente)
+
+Auditoría multi-agente (10 dimensiones × verificación adversarial, 54 hallazgos
+confirmados, 0 críticos). Arreglado lo seguro y claro: (1) **errores tragados**
+— `.json()` de Spotify/secretos ahora captura `ValueError` (un 200 con cuerpo
+malformado degradaba lanzando JSONDecodeError sin avisar); persistencia del
+turno de chat loguea su fallo; el latido del WS del agente y el guard de
+instancia del daemon dejan rastro; las tareas del agente loguean el traceback
+real. (2) **WS del agente robusto**: si falla el transporte al responder,
+re-lanza para reconectar; si falla serializar, manda un error estructurado al
+cerebro (nunca lo deja colgado esperando). (3) **Riel de pantalla FAIL-CLOSED**:
+si conocía la ventana objetivo pero no puede leer el foco actual, ABORTA en vez
+de teclear a ciegas (`ventana_indeterminada`). (4) **Higiene**: el callback de
+Spotify ya no renderiza el detalle de la excepción al navegador (solo loguea) ni
+usa emojis. Confirmado por la auditoría que SIGUEN sólidos: denylist (gana sobre
+allowlist), sin ejecución de shell, credenciales nunca logueadas, `.env`
+gitignored y no versionado, anti-inyección en documentos/visión/recuerdos.
+Pendientes de DECISIÓN del dueño (no tocados): ver cierre del prompt.
 - Observabilidad: el medidor de costos etiqueta proveedor (`por_proveedor`); el
   chat surfacea `failover`/`modelo_usado` (la app muestra "respondiendo con …").
 - Búsqueda web: Tavily. Push: Firebase Cloud Messaging (FCM).

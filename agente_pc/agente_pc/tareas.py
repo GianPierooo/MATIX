@@ -17,6 +17,7 @@ del lado agente), igual que las demás acciones que lanzan o mutan.
 """
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -25,6 +26,8 @@ from typing import Any
 from . import apps as _apps
 from .registro import AccionDef, Contexto, NivelRiesgo, Param
 from .seguridad import app_denylisted, ruta_permitida
+
+log = logging.getLogger("matix.agente")
 
 
 @dataclass(frozen=True)
@@ -202,7 +205,10 @@ def _ejecutar_tarea(args: dict[str, Any], ctx: Contexto) -> dict[str, Any]:
             return _err("interno", "la tarea no devolvió un dict")
         return resultado
     except Exception as e:  # noqa: BLE001 — nunca propagar al transporte
-        return _err("interno", f"falló la tarea «{nombre}»: {type(e).__name__}")
+        # Traceback REAL al log (no solo el tipo): si una tarea falla, hay que
+        # poder diagnosticar por qué, no quedarnos con «falló X».
+        log.exception("tarea «%s» lanzó excepción", nombre)
+        return _err("interno", f"falló la tarea «{nombre}»: {type(e).__name__}: {e}")
 
 
 DEFS_TAREAS: list[AccionDef] = [

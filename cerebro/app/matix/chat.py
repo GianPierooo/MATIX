@@ -599,7 +599,10 @@ async def conversar(
                     respuesta=ultima_respuesta,
                 )
             except Exception:  # noqa: BLE001
-                pass
+                # Persistir el turno es best-effort (no rompe la respuesta ya
+                # entregada), pero el fallo se LOGUEA: si no, perderíamos turnos
+                # del historial en silencio y el recall futuro quedaría ciego.
+                logger.exception("no pude persistir el turno (best-effort)")
 
     cron.cerrar(
         motivo="llm",

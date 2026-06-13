@@ -208,13 +208,19 @@ def _ya_hay_otra_instancia() -> bool:
         kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
         handle = kernel32.CreateMutexW(None, False, "Local\\MatixAgentePC")
         if not handle:
-            return False  # no pudimos crear el mutex: no bloqueamos el arranque
+            # no pudimos crear el mutex: no bloqueamos el arranque, pero dejamos
+            # rastro (si no, un fallo del guard pasa inadvertido).
+            logging.getLogger("matix.agente").warning(
+                "mutex de instancia: CreateMutexW devolvió NULL; no bloqueo el arranque")
+            return False
         if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
             return True
         global _MUTEX_INSTANCIA
         _MUTEX_INSTANCIA = handle  # lo conservamos vivo
         return False
     except Exception:  # noqa: BLE001 — ante cualquier duda, NO bloquear el arranque
+        logging.getLogger("matix.agente").exception(
+            "mutex de instancia falló; no bloqueo el arranque")
         return False
 
 

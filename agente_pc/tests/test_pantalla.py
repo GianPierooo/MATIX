@@ -252,3 +252,20 @@ def test_accion_ejecuta_en_la_misma_ventana():
         {"accion": {"tipo": "click", "x": 5, "y": 5}, "ventana_esperada": "Spotify"}, ctx
     )
     assert r["ok"] and r["tipo"] == "accion_hecha"
+
+
+def test_accion_aborta_si_no_puede_leer_la_ventana_actual():
+    # FAIL-CLOSED: sabía la ventana objetivo (esperada) pero AHORA no puede leer
+    # el foco (lector devuelve "") → NO actúa a ciegas, aborta.
+    from agente_pc import pantalla
+    ctx = Contexto(allowlist=[], control_pantalla=True)
+    ctx.pantalla_sesion = {"activa": True, "acciones": 0}
+    tecleado = []
+    ctx.controlador = lambda a: tecleado.append(a) or {"ok": True}
+    ctx.lector_ventana = lambda: ""  # no se puede leer el foco
+    r = pantalla._pantalla_accion(
+        {"accion": {"tipo": "escribir", "texto": "x"}, "ventana_esperada": "Bloc de notas"}, ctx
+    )
+    assert not r["ok"] and r["tipo"] == "ventana_indeterminada"
+    assert ctx.pantalla_sesion["activa"] is False  # cierra la sesión
+    assert tecleado == []  # NO tecleó nada

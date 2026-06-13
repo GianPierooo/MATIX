@@ -126,7 +126,7 @@ async def intercambiar_code(code: str, cliente: httpx.AsyncClient | None = None)
         if not refresh:
             log.warning("spotify intercambiar_code: sin refresh_token en la respuesta")
             return False
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, ValueError) as e:
         log.warning("spotify intercambiar_code falló: %s", type(e).__name__)
         return False
     # Guardado en secretos_runtime (y en el entorno del proceso para que la
@@ -182,7 +182,7 @@ async def _token(modo: str, cliente: httpx.AsyncClient | None = None) -> str | N
         vida = float(cuerpo.get("expires_in") or 3600)
         _tokens[modo] = (token, time.monotonic() + vida - 60)
         return token
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, ValueError) as e:
         log.warning("spotify token (%s) falló: %s", modo, type(e).__name__)
         return None
 
@@ -234,7 +234,7 @@ async def buscar_mejor_track(
             "nombre": mejor.get("name"),
             "artista": ", ".join(a.get("name", "") for a in mejor.get("artists") or []),
         }
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, ValueError) as e:
         log.warning("spotify search falló: %s", type(e).__name__)
         return None
 
@@ -283,7 +283,7 @@ async def dispositivo_objetivo(cliente: httpx.AsyncClient | None = None) -> dict
         if r.status_code != 200:
             return None
         return await _elegir_dispositivo(r.json().get("devices") or [])
-    except httpx.HTTPError:
+    except (httpx.HTTPError, ValueError):
         return None
 
 
@@ -322,7 +322,7 @@ async def estado_reproduccion(cliente: httpx.AsyncClient | None = None) -> dict[
             "track": _track_de_estado(cuerpo),
             "device": (cuerpo.get("device") or {}).get("name"),
         }
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, ValueError) as e:
         return {"ok": False, "tipo": "error_red", "mensaje": type(e).__name__}
 
 
@@ -361,7 +361,7 @@ async def control_player(accion: str, cliente: httpx.AsyncClient | None = None) 
                 return {"ok": False, "tipo": "sin_dispositivo",
                         "mensaje": "no hay nada reproduciéndose en la PC ahora mismo"}
             return {"ok": False, "tipo": "error_api", "mensaje": f"{accion} devolvió {rp.status_code}"}
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, ValueError) as e:
         return {"ok": False, "tipo": "error_red", "mensaje": type(e).__name__}
     salida: dict[str, Any] = {"ok": True, "accion": accion}
     if accion != "pausa":
@@ -409,6 +409,6 @@ async def reproducir_en_pc(
         if rp.status_code == 403:
             return {"ok": False, "tipo": "sin_premium", "mensaje": "Spotify rechazó la orden (403): la cuenta no permite control remoto"}
         return {"ok": False, "tipo": "error_api", "mensaje": f"play devolvió {rp.status_code}"}
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, ValueError) as e:
         log.warning("spotify play falló: %s", type(e).__name__)
         return {"ok": False, "tipo": "error_red", "mensaje": f"no pude hablar con Spotify ({type(e).__name__})"}

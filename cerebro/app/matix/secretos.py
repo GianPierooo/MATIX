@@ -59,7 +59,9 @@ async def obtener(clave: str, cliente: httpx.AsyncClient | None = None) -> str |
             log.warning("secretos_runtime devolvió %s para «%s»", r.status_code, clave)
         _cache[clave] = (valor, time.monotonic() + _TTL_S)
         return valor
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, ValueError) as e:
+        # ValueError cubre un .json() malformado con status 200 (red corrupta,
+        # proxy): degrada limpio (None) en vez de propagar al caller.
         log.warning("secretos_runtime inalcanzable (%s) para «%s»", type(e).__name__, clave)
         return None
 
