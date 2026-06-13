@@ -141,6 +141,15 @@ class RegistroComandos:
             nombre, origen, cmd.riesgo.value, es_ok,
             "" if es_ok else f" tipo={res.get('tipo')}",
         )
+        # Memoria semántica (Capa 3 · RAG unificado): tras un comando OK, indexa
+        # u olvida el recuerdo de la entidad afectada, en segundo plano. Un solo
+        # punto cubre UI + IA. Best-effort: jamás afecta el resultado del comando.
+        if es_ok:
+            try:
+                from ..matix import recuerdos
+                recuerdos.hook_comando(db, nombre, res)
+            except Exception:  # noqa: BLE001
+                pass
         return res
 
 

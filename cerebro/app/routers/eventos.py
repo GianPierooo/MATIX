@@ -37,6 +37,7 @@ from googleapiclient.errors import HttpError
 from ..comandos import registro
 from ..comandos.http import datos_o_http as _datos_o_http
 from ..db import Postgrest, get_db
+from ..matix import recuerdos
 from ..google import calendar as gcal
 from ..google import oauth as goauth
 from ..schemas.eventos import EventoCreate, EventoRead, EventoUpdate
@@ -280,3 +281,5 @@ async def eliminar_permanente(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Evento no encontrado"
         )
+    # Borrado duro: olvidar el recuerdo (no pasa por el comando).
+    recuerdos.olvidar_entidad_async(db, "universidad", str(evento_id), subtipo="evento")

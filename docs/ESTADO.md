@@ -278,6 +278,42 @@ SOLO-BACKEND (existe en el cerebro, sin pantalla propia en la app).
 - Embeddings (RAG): OpenAI `text-embedding-3-small`. Degradan elegante: sin
   crédito, la búsqueda RAG/recall vuelve vacía (el chat NO se cae) y la ingesta
   responde honesto ("ingesta en pausa: sin crédito de embeddings").
+
+### Memoria UNIFICADA de la vida del usuario — RAG auto-recuperado (Capa 3)
+
+**Causa raíz que cierra:** hasta hoy TODO el recall era por herramienta (el
+modelo decidía si llamar `buscar_apuntes`/`buscar_memoria`/`buscar_en_historial`)
+→ a menudo NO lo hacía y "Matix no recordaba la vida"; y tareas/proyectos/
+universidad no tenían NINGÚN embedding. Ahora hay una tienda semántica ÚNICA,
+`recuerdos` (migración `0048`), que el chat recupera **SOLO, automático, cada
+turno** e inyecta como contexto — sin depender de que el modelo decida buscar.
+
+- **Tabla `recuerdos`** (`fuente_tipo` ∈ tarea/nota/proyecto/universidad/chat,
+  `fuente_id`, `contenido`, `contenido_hash`, `embedding vector(1536)`, `fecha`,
+  `metadata`, UNIQUE(tipo,id)). HNSW coseno; RLS sin políticas (solo service
+  role). RPC `buscar_recuerdos(query_embedding, match_count, tipos[])`.
+- **Ingesta incremental** (`cerebro/app/matix/recuerdos.py`): `indexar` salta el
+  re-embeber si el `contenido_hash` no cambió (sin re-embeber cada edición);
+  best-effort (si OpenAI cae, guarda sin vector y reintenta luego). Hooks en UN
+  punto: `comandos/registro.ejecutar` llama `recuerdos.hook_comando` tras cada
+  comando OK (UI + IA convergen) → indexa/olvida tareas, proyectos, universidad
+  (cursos/evaluaciones/eventos, enriquecidos con el nombre del curso); las notas
+  se enganchan en el router de apuntes (índice doble: `apunte_chunks` para la
+  tool + `recuerdos` para el recall). `sesiones_clase` se omite a propósito
+  (franjas recurrentes, ruido). Borrar → olvida; restaurar nota → re-indexa.
+- **Recuperación AUTOMÁTICA** (`chat.py::_recall_automatico`): embebe el mensaje
+  UNA vez por turno y trae, en paralelo, los recuerdos del hub (`recuerdos`) +
+  el recall de conversaciones pasadas (`memoria_conversacional`, reusando el
+  embedding) — inyecta un bloque MEMORIA con dos secciones. Acotado (top-K 6+3)
+  y con UMBRAL de distancia (0.75: descarta matches flojos → no mete ruido). Si
+  no hay nada relevante o no hay crédito, no inyecta y el chat sigue igual. Solo
+  en la ruta normal (la ruta rápida sin-LLM no lo necesita).
+- **Backfill**: `cerebro/scripts/backfill_recuerdos.py` (idempotente por hash;
+  omite lo borrado). Corrido en prod: 70 entidades reales indexadas
+  (26 tareas, 9 proyectos, 7 cursos, 3 evaluaciones, 25 eventos).
+- **Validado**: "¿qué tenía pendiente de OneXotic?" recupera el proyecto +
+  tareas reales; A/B confirma que la respuesta pasa de "no tengo acceso a tus
+  datos" (sin memoria) a la lista real de pendientes (con memoria).
 - Observabilidad: el medidor de costos etiqueta proveedor (`por_proveedor`); el
   chat surfacea `failover`/`modelo_usado` (la app muestra "respondiendo con …").
 - Búsqueda web: Tavily. Push: Firebase Cloud Messaging (FCM).

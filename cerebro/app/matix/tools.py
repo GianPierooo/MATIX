@@ -83,6 +83,7 @@ from . import (
     modelos_llm,
     modos,
     perfil_proyecto,
+    recuerdos,
     spotify_web,
 )
 from .biblioteca import buscar_material as _buscar_material_rag
@@ -3819,11 +3820,17 @@ async def _indexar_silencioso(db: Postgrest, apunte: dict) -> None:
     """Indexa el apunte para el RAG sin propagar fallos. El apunte ya
     quedó guardado; si el embedding falla (OpenAI caído, etc.) no
     rompemos la tool: el próximo edit o el backfill lo reintenta.
-    Mismo criterio que `_reindexar_silencioso` del router de apuntes."""
+    Mismo criterio que `_reindexar_silencioso` del router de apuntes:
+    indexa en `apunte_chunks` (tool buscar_apuntes) Y en la memoria
+    UNIFICADA `recuerdos` (recall automático del chat)."""
     try:
         await indexar_apunte(db, apunte)
     except Exception:  # noqa: BLE001
         logger.exception("indexador falló para apunte %s", apunte.get("id"))
+    try:
+        await recuerdos.indexar_entidad(db, "nota", apunte)
+    except Exception:  # noqa: BLE001
+        logger.exception("recuerdos falló para apunte %s", apunte.get("id"))
 
 
 async def _destino_apunte(db: Postgrest, apunte: dict) -> dict[str, Any]:
@@ -4059,6 +4066,9 @@ async def _editar_apunte(db: Postgrest, args: dict) -> dict[str, Any]:
     fila = await db.update("apuntes", apunte_id, payload)
     if fila is None:
         return _error("no_existe", "Ese apunte ya no está en el hub.")
+    # Re-indexar si cambió algo relevante para la búsqueda (igual que el router).
+    if any(k in payload for k in ("titulo", "contenido", "etiquetas")):
+        await _indexar_silencioso(db, fila)
     return _ok(
         {
             "id": apunte_id,
@@ -4079,6 +4089,8 @@ async def _eliminar_apunte(db: Postgrest, args: dict) -> dict[str, Any]:
     fila = await db.update("apuntes", apunte_id, {"eliminado_en": ahora})
     if fila is None:
         return _error("interno", "No se pudo mandar el apunte a la papelera.")
+    # En la papelera → fuera del recall (no recordar lo borrado).
+    recuerdos.olvidar_entidad_async(db, "nota", apunte_id)
     return _ok(
         {
             "id": apunte_id,

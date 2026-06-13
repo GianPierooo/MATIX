@@ -27,6 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from ..comandos import registro
 from ..comandos.http import datos_o_http as _datos_o_http
 from ..db import Postgrest, get_db
+from ..matix import recuerdos
 from ..schemas.tareas import TareaCreate, TareaRead, TareaUpdate
 from ..security import require_api_key
 
@@ -121,6 +122,9 @@ async def eliminar_tarea_permanente(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Tarea no encontrada"
         )
+    # El borrado duro NO pasa por el comando → olvidar el recuerdo aquí para que
+    # no quede un embedding fantasma de una tarea que ya no existe.
+    recuerdos.olvidar_entidad_async(db, "tarea", str(tarea_id))
 
 # La lógica de repetición (avanzar fecha + crear siguiente instancia) ya NO vive
 # aquí: es del comando `editar_tarea`/`completar_tarea` (app/comandos/tareas.py).

@@ -39,6 +39,7 @@ from . import (
     memoria_conversacional,
     modelos_llm,
     modos,
+    recuerdos,
     seleccion_tools,
 )
 from .contexto import contexto_vivo
@@ -138,6 +139,81 @@ _MAX_IMAGENES = 5
 # intercambios ≈ 24 mensajes). Recorta el contexto para bajar latencia/costo;
 # lo más viejo se recupera por el recall semántico, no se reenvía entero.
 _MAX_HISTORIAL_MENSAJES = 24
+
+# Recall automático por turno: cuántos recuerdos del hub y cuántos del historial
+# de chat traer. Acotado para no inflar el prompt; el umbral de distancia
+# (recuerdos.UMBRAL_DISTANCIA) descarta los flojos.
+_RECALL_TOPK_HUB = 6
+_RECALL_TOPK_CHAT = 3
+# Mensajes muy cortos ("ok", "sí", "jaja") no ameritan recall (ni su costo).
+_RECALL_MIN_CHARS = 5
+# El recall del historial de chat (memoria_conversacional) no filtra por umbral
+# en su RPC; aplicamos el MISMO criterio que el hub aquí para no inyectar
+# conversaciones flojamente parecidas (el chat es más ruidoso, umbral algo más
+# estricto).
+_RECALL_UMBRAL_CHAT = 0.6
+
+
+def _bloque_historial(recuerdos_chat: list[dict[str, Any]]) -> str:
+    """Bloque para inyectar el recall de conversaciones pasadas (con su fecha en
+    lenguaje natural). PURO. Cadena vacía si no hay."""
+    if not recuerdos_chat:
+        return ""
+    lineas = [
+        "DE CONVERSACIONES PASADAS (lo que hablamos antes, recuperado por "
+        "relevancia a este mensaje; menciona cuándo fue si viene al caso):",
+    ]
+    for r in recuerdos_chat:
+        cuando = (r.get("fecha_texto") or "").strip()
+        contenido = " ".join((r.get("contenido") or "").split())
+        prefijo = f"({cuando}) " if cuando else ""
+        lineas.append(f"- {prefijo}{contenido}")
+    return "\n".join(lineas)
+
+
+async def _recall_automatico(
+    db: Postgrest, mensaje: str, conversacion_id: str | None
+) -> str:
+    """Embebe el mensaje UNA vez y recupera, en paralelo, los recuerdos del hub
+    (recuerdos) y el recall de conversaciones pasadas (memoria_conversacional),
+    reutilizando el mismo embedding. Devuelve el bloque combinado a inyectar (o
+    "" si no hay nada relevante). Best-effort: NUNCA rompe el turno."""
+    texto = (mensaje or "").strip()
+    if db is None or len(texto) < _RECALL_MIN_CHARS:
+        return ""
+    try:
+        embs = await llm.embebir_seguro([texto])
+        if not embs:
+            return ""  # sin crédito de embeddings → sin recall, el chat sigue
+        emb = embs[0]
+        hub, chat_hist = await asyncio.gather(
+            recuerdos.recuperar(db, embedding=emb, top_k=_RECALL_TOPK_HUB),
+            memoria_conversacional.buscar_en_historial(
+                db, consulta=texto, embedding=emb, top_k=_RECALL_TOPK_CHAT,
+                excluir_conversacion=conversacion_id,
+            ),
+            return_exceptions=True,
+        )
+        partes: list[str] = []
+        if not isinstance(hub, BaseException):
+            bloque_hub = recuerdos.bloque_recuerdos(hub)
+            if bloque_hub:
+                partes.append(bloque_hub)
+        if not isinstance(chat_hist, BaseException):
+            # Filtra por umbral (la RPC del historial no lo hace): nada de
+            # conversaciones flojamente parecidas inyectadas como "lo que
+            # hablamos".
+            relevantes = [
+                r for r in (chat_hist or [])
+                if (r.get("distancia") is None or r["distancia"] <= _RECALL_UMBRAL_CHAT)
+            ]
+            bloque_chat = _bloque_historial(relevantes)
+            if bloque_chat:
+                partes.append(bloque_chat)
+        return "\n\n".join(partes)
+    except Exception as e:  # noqa: BLE001 — el recall jamás tumba el chat
+        logger.warning("recall automático falló: %s", type(e).__name__)
+        return ""
 
 
 async def conversar(
@@ -242,6 +318,18 @@ async def conversar(
     # hay nada, no inyecta nada. Lo extenso se recupera con `buscar_memoria`.
     if bloque_mem:
         mensajes.append({"role": "system", "content": bloque_mem})
+
+    # RECUPERACIÓN AUTOMÁTICA (Capa Memoria · RAG unificado): embebe el mensaje
+    # UNA vez y trae lo relevante de la vida del usuario — los recuerdos del hub
+    # (tareas/notas/proyectos/universidad) y el recall de conversaciones pasadas
+    # — e inyecta lo que supere el umbral. Esto NO depende de que el modelo
+    # decida llamar una tool (la causa de que "no recordara"): ancla CADA turno
+    # en lo real. Acotado (top-K + umbral) y best-effort: si falla o no hay nada
+    # relevante, no inyecta y el chat sigue igual.
+    with cron.etapa("recall"):
+        bloque_recall = await _recall_automatico(db, mensaje, conversacion_id)
+    if bloque_recall:
+        mensajes.append({"role": "system", "content": bloque_recall})
 
     # Modo activo (Capa Modos): si hay uno, entra como `system` ADICIONAL,
     # encima del prompt base. Las reglas base e identidad de Matix mandan

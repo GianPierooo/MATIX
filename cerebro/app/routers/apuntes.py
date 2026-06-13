@@ -19,6 +19,7 @@ from fastapi import (
 )
 
 from ..db import Postgrest, get_db
+from ..matix import recuerdos
 from ..matix.indexador import indexar_apunte
 from ..schemas.apuntes import (
     ApunteCreate,
@@ -69,13 +70,21 @@ async def _reindexar_silencioso(db: Postgrest, apunte: dict) -> None:
     """Wrapper que indexa el apunte en background y NO propaga
     excepciones — el usuario ya recibió el 200/201, no queremos
     abortarlo si OpenAI está caído o algo falla. El próximo edit
-    del apunte (o el script de backfill) lo reintenta."""
+    del apunte (o el script de backfill) lo reintenta.
+
+    Indexa en DOS tiendas: `apunte_chunks` (búsqueda explícita por la tool
+    `buscar_apuntes`) Y la memoria UNIFICADA `recuerdos` (recall automático del
+    chat). Ambas best-effort."""
     try:
         await indexar_apunte(db, apunte)
     except Exception:  # noqa: BLE001
         logger.exception(
             "indexador falló para apunte %s", apunte.get("id")
         )
+    try:
+        await recuerdos.indexar_entidad(db, "nota", apunte)
+    except Exception:  # noqa: BLE001
+        logger.exception("recuerdos falló para apunte %s", apunte.get("id"))
 
 
 @router.post("", response_model=ApunteRead, status_code=status.HTTP_201_CREATED)
@@ -120,6 +129,8 @@ async def eliminar(apunte_id: UUID, db: Postgrest = Depends(get_db)) -> None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Apunte no encontrado"
         )
+    # En la papelera → fuera del recall (Matix no recuerda lo borrado).
+    recuerdos.olvidar_entidad_async(db, "nota", str(apunte_id))
 
 
 @router.post("/{apunte_id}/restaurar", response_model=ApunteRead)
@@ -131,6 +142,8 @@ async def restaurar(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Apunte no encontrado"
         )
+    # Vuelve del limbo → re-indexar a memoria.
+    recuerdos.indexar_entidad_async(db, "nota", row)
     return row
 
 
@@ -173,3 +186,4 @@ async def eliminar_permanente(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Apunte no encontrado"
         )
+    recuerdos.olvidar_entidad_async(db, "nota", str(apunte_id))

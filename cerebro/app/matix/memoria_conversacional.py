@@ -137,17 +137,24 @@ async def buscar_en_historial(
     top_k: int = 5,
     excluir_conversacion: str | None = None,
     ahora: datetime | None = None,
+    embedding: list[float] | None = None,
 ) -> list[dict[str, Any]]:
     """Busca en el historial por similitud semántica. Excluye la conversación
     actual (ya está en contexto). Devuelve `{contenido, fecha_texto, distancia}`
-    con la fecha en lenguaje natural (Lima)."""
-    embs = await llm.embebir_seguro([consulta])
-    if not embs:
-        return []  # sin crédito de embeddings → sin recall, el chat sigue
+    con la fecha en lenguaje natural (Lima).
+
+    `embedding` opcional: si el caller YA embebió la consulta (p.ej. el recall
+    automático del chat, que embebe el mensaje una sola vez para varias tiendas),
+    se reutiliza y NO se vuelve a embeber."""
+    if embedding is None:
+        embs = await llm.embebir_seguro([consulta])
+        if not embs:
+            return []  # sin crédito de embeddings → sin recall, el chat sigue
+        embedding = embs[0]
     filas = await db.rpc(
         "buscar_memoria_conversacional",
         {
-            "query_embedding": embs[0],
+            "query_embedding": embedding,
             "excluir_conversacion": excluir_conversacion,
             "match_count": top_k,
         },
