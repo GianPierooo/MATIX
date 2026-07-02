@@ -298,6 +298,7 @@ jobs:
           fi
           APK_URL="$SUPABASE_URL/storage/v1/object/public/apks/$OBJ"
           echo "apk_url=$APK_URL" >> "$GITHUB_OUTPUT"
+          echo "obj=$OBJ" >> "$GITHUB_OUTPUT"
           echo "✓ APK público: $APK_URL"
 
       # Insertamos la fila en `app_versions`. PostgREST cast-ea el
@@ -339,3 +340,48 @@ jobs:
             exit 1
           fi
           echo "✓ Versión $VERSION build $BUILD_NUMBER registrada"
+
+      # Deja el bucket `apks` con UN SOLO objeto: el APK recién subido. Sin
+      # esto, cada release acumula un APK (~27 MB) y el free tier de Supabase
+      # Storage (1 GB) se llena y RESTRINGE todo el proyecto (data plane).
+      #
+      # upload-then-prune (no upsert de nombre fijo): los nombres son únicos
+      # `matix-<build>-<sha7>.apk`, así el CDN nunca sirve un APK viejo bajo la
+      # misma URL. Corre DESPUÉS de registrar en `app_versions`: el release ya
+      # está publicado, así que un fallo del prune no invalida el build (pero
+      # se ve en rojo). Usa la Storage API (borra fila + bytes, sin huérfanos).
+      - name: Prune APKs viejos (dejar solo el nuevo)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          KEEP: ${{ steps.upload.outputs.obj }}
+        run: |
+          LIST=$(curl -s -X POST "$SUPABASE_URL/storage/v1/object/list/apks" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"prefix":"","limit":1000,"sortBy":{"column":"name","order":"asc"}}')
+          echo "$LIST" | KEEP="$KEEP" SUPABASE_URL="$SUPABASE_URL" \
+            KEY="$SUPABASE_SERVICE_ROLE_KEY" python3 -c "
+          import json, os, sys, urllib.request, urllib.error
+          keep = os.environ['KEEP']
+          objs = json.load(sys.stdin)
+          if not isinstance(objs, list):
+              print('Respuesta inesperada del list:', objs); sys.exit(1)
+          borrar = [o['name'] for o in objs if o.get('name') and o['name'] != keep]
+          print(f'Objetos: {len(objs)} · conservo: {keep} · a borrar: {len(borrar)}')
+          if borrar:
+              url = os.environ['SUPABASE_URL'].rstrip('/') + '/storage/v1/object/apks'
+              key = os.environ['KEY']
+              for i in range(0, len(borrar), 100):
+                  chunk = borrar[i:i+100]
+                  req = urllib.request.Request(url, data=json.dumps({'prefixes': chunk}).encode(),
+                      method='DELETE', headers={'apikey': key,
+                      'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
+                  try:
+                      with urllib.request.urlopen(req) as r:
+                          print(f'  borrados {len(chunk)}: HTTP {r.status}')
+                  except urllib.error.HTTPError as e:
+                      print(f'  fallo chunk: HTTP {e.code} :: {e.read().decode()[:200]}'); sys.exit(1)
+          print('Bucket queda con 1 APK.')
+          "
