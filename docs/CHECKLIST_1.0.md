@@ -22,7 +22,7 @@ Marcas: ✅ Hecho · ⚠️ Parcial (sirve pero le falta algo concreto) · ❌ F
 ## ✅ Hecho (capacidades cerradas)
 
 ### Hub diario y CRUD
-- ✅ Esquema de datos completo (`supabase/migrations/0001 → 0038`).
+- ✅ Esquema de datos completo (`supabase/migrations/0001 → 0048`).
 - ✅ Navegación principal (`home_shell` · 5 pestañas + secciones fuera de barra).
 - ✅ CRUD completo en device: tareas, eventos, apuntes, proyectos, finanzas,
   cursos/clases, evaluaciones, cuadernos, categorías.
@@ -44,7 +44,7 @@ Marcas: ✅ Hecho · ⚠️ Parcial (sirve pero le falta algo concreto) · ❌ F
   nativo de timing/entrega es de dispositivo (no corre en CI).
 
 ### Chat con Matix (Capa 2)
-- ✅ Chat de texto con tool-calling (83 tools del hub).
+- ✅ Chat de texto con tool-calling (124 tools del hub).
 - ✅ Voz de entrada (Whisper `whisper-1`, filtro de alucinaciones).
 - ✅ Modo manos libres con TTS (OpenAI `tts-1` voz `onyx`).
 - ✅ Selección de modelo OpenAI/Anthropic (auto-router por mensaje).
@@ -130,6 +130,13 @@ Marcas: ✅ Hecho · ⚠️ Parcial (sirve pero le falta algo concreto) · ❌ F
 - ✅ Toolchain local completo (Flutter 3.44.1 + uv + Android SDK 36.1 con
   licencias aceptadas + `flutter build apk --debug` end-to-end verde).
 
+### Auto-conciencia del propio estado
+- ✅ Tool `obtener_cambios_recientes` (`tools.py`) — el chat responde "qué se
+  actualizó" leyendo commits reales del repo, no inventando.
+- ✅ `docs/ESTADO.md` y `docs/CHECKLIST_1.0.md` inyectados como contexto fresco
+  del chat cada turno (`system_prompt.py`).
+- ✅ Regla de auto-update en `CLAUDE.md` §0.9 (vive en §0, la enforza el flujo).
+
 ---
 
 ## ❌ Falta para 1.0
@@ -137,17 +144,6 @@ Marcas: ✅ Hecho · ⚠️ Parcial (sirve pero le falta algo concreto) · ❌ F
 Las cosas que cierran el chat-como-puerta-principal y el "Matix sabe su propio
 estado" — para que el dueño NO dependa de un advisor externo para saber qué
 hay y qué falta.
-
-### Auto-conciencia del propio estado
-- ❌ Tool `obtener_cambios_recientes(n=10)` — el chat de Matix puede responder
-  "qué se actualizó hoy / esta semana" leyendo commits reales del repo, no
-  inventando. Necesario para los tres intents del chat de auto-conciencia.
-- ❌ Exposición de `docs/ESTADO.md` y `docs/CHECKLIST_1.0.md` como contexto
-  fresco del chat (cada turno los lee). Sin esto, "qué falta para 1.0" no
-  puede responderse con datos reales.
-- ❌ Regla en `CLAUDE.md` (auto-update al cerrar prompts que cambian
-  capacidades o cierran ítems): debe vivir en §0 para que el flujo estándar
-  la enforze (no como sugerencia suelta).
 
 ### Validación en device estable
 - ⚠️ Vista «Hoy» (timeline): falta validación en device (lo apuntó el

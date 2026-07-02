@@ -4,6 +4,22 @@
 > Tag de versión: `v1.0.0`. La rama `main` queda en modo mantenimiento de la
 > 1.0 hasta arrancar formalmente la 2.0.
 
+## Estado real por capa (gana el código)
+
+| Capa | Estado | Evidencia |
+|---|---|---|
+| 1 — Armazón del hub | HECHA | migr. 0001+, `home_shell`, CRUD completo, notis locales |
+| 2 — Chat/voz | HECHA | `matix/chat.py`, 124 tools, Whisper, manos libres, wake word |
+| 3 — Memoria/RAG | HECHA | migr. 0048 `recuerdos` (RAG unificado auto-recuperado), tutor |
+| 4 — Google | PARCIAL | OAuth (0007), `routers/google.py`, Calendar con sync manual |
+| 5 — Casa (Home Assistant) | Fuera del repo | stack Docker local (homeassistant/whisper/piper) |
+| 6 — PC/archivos | HECHA hasta 6.3 | `agente_pc/` funcional + tools `pc_*` + control de pantalla |
+| 7 — Visión | HECHA | cámara en vivo + `/matix/digitalizar-captura` |
+| 8 — Proactividad | Base HECHA | `matix/proactividad.py` con detectores de riesgo |
+
+Última migración aplicada en prod: `0048_recuerdos.sql` (próxima: `0049_*`).
+Migraciones 0038-0048 confirmadas aplicadas en prod.
+
 Bitácora viva del proyecto. Si la sesión se reinicia, lee primero
 `CLAUDE.md`, después `docs/Mapa_del_Hub.md`, después
 `docs/Plan_Capa1.md` y por último este archivo para saber dónde
@@ -398,10 +414,11 @@ Pendientes de DECISIÓN del dueño (no tocados): ver cierre del prompt.
   - **Apartado de huecos libres:** el plan del día expone `huecos` (ventana libre
     real + duración legible) con UNA sugerencia dosificada que de verdad cabe por
     hueco (pool = lo que no entró, en orden de prioridad). Instantáneo, sin
-    tokens. (Hoy se surface por el chat/`plan_de_hoy`; la vista nativa "Tu día"
-    en Flutter aún no lo dibuja — el REST ya lleva `huecos`/`sugerencias`.)
+    tokens. Se surface por el chat/`plan_de_hoy` y la vista nativa "Tu día" en
+    Flutter YA lo dibuja (`plan_dia_section.dart`: filtra huecos ≥20min, apartado
+    de huecos con botones "Hacer"/"Ahora no"); el REST lleva `huecos`/`sugerencias`.
 
-### Cerebro — tools del chat (93)
+### Cerebro — tools del chat (124)
 
 Hub básico: crear_tarea, crear_tareas (lote), editar_tarea, completar_tarea,
 reabrir_tarea, eliminar_tarea(conf), marcar_accion_siguiente_hecha, crear_evento,

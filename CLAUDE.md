@@ -272,7 +272,26 @@ Visión por cámara; incluye convertir una foto en un apunte.
 CAPA 8 — Proactividad
 Matix avisa y actúa por iniciativa propia.
 
-Capa en construcción: CAPA 1.
+Estado real por capa (Matix 1.0 TERMINADA · tag `v1.0.0` · `main` en
+mantenimiento de la 1.0):
+
+- CAPA 1 (armazón del hub): HECHA.
+- CAPA 2 (chat y voz): HECHA — chat con 124 tools, Whisper, manos libres,
+  wake word.
+- CAPA 3 (memoria/RAG): HECHA — RAG unificado auto-recuperado (migración
+  `0048_recuerdos.sql`).
+- CAPA 4 (sincronización Google): PARCIAL — OAuth + Calendar con sync manual;
+  el bidireccional completo es post-1.0.
+- CAPA 5 (casa inteligente): fuera del repo; corre como stack Docker local
+  (Home Assistant).
+- CAPA 6 (PC y archivos): HECHA hasta 6.3 (agente local con control de
+  pantalla); borrado/escritura de contenido es post-1.0.
+- CAPA 7 (visión): HECHA — cámara en vivo + digitalización general sobre la
+  capa de comandos.
+- CAPA 8 (proactividad): base HECHA (detectores de riesgo); la proactividad
+  plena es post-1.0.
+
+En curso para la 2.0: la capa de comandos como fuente única (Fases 1-5 hechas).
 
 ---
 
@@ -382,5 +401,5 @@ construido de forma profesional y sostenible en el tiempo.
 - **Numeración correlativa**: el nombre es `00NN_xxx.sql` con `NN`
   consecutivo. NO hardcodees el número aquí (envejece): mira el último
   archivo de `supabase/migrations/` y usa el siguiente. Al momento de
-  consolidar esto, el último en el repo era `0039_proyectos_modalidad.sql`
-  (así que la próxima sería `0040_*`).
+  consolidar esto, el último en el repo era `0048_recuerdos.sql`
+  (así que la próxima sería `0049_*`).
