@@ -207,6 +207,17 @@ def test_verbos_blandos_en_consulta_del_hub_van_al_barato():
         assert d.motivo == "consulta_hub", m
 
 
+def test_consulta_hub_con_razonamiento_no_se_degrada():
+    # Auditoría: una consulta del hub con razonamiento encima ("dime cuál
+    # priorizar y por qué") NO debe degradarse al barato — supera el umbral de
+    # consulta corta y va al fuerte.
+    for m in [
+        "revisa mis tareas y dime cuál priorizar y por qué",
+        "revisa mis pendientes y ayúdame a decidir qué dejar",
+    ]:
+        assert _elegir(m).modelo == FUERTE, m
+
+
 def test_verbos_blandos_sobre_contenido_real_siguen_al_fuerte():
     # Los mismos verbos sobre CONTENIDO real (no el hub) NO se degradan: siguen
     # al fuerte. No sacrificamos los casos que sí necesitan razonar/escribir.

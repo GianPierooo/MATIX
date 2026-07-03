@@ -154,8 +154,10 @@ _CONSULTA_HUB = re.compile(
     r"mi semana|mis tareas|mis pendientes|mis eventos|mis clases|"
     r"pendientes|agenda|hoy|manana|esta semana)\b"
 )
-# Una consulta del hub es corta; un pedido de escritura/razonamiento no lo es.
-_CONSULTA_CORTA = 70
+# Una consulta del hub es CORTA ("revisa mis tareas de hoy" ~24). Un pedido con
+# razonamiento encima ("revisa mis tareas y dime cuál priorizar y por qué" ~49)
+# ya no lo es → 40 lo manda al fuerte en vez de degradarlo por error.
+_CONSULTA_CORTA = 40
 
 # Señales de comando corto / CRUD / pregunta rápida → modelo barato. Solo
 # se consulta cuando NO disparó `_PESADO` (las reglas pesadas tienen
