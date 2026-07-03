@@ -134,6 +134,9 @@ async def test_resumir_documento_flujo(monkeypatch):
     async def fake_responder(messages, **kw):
         # B2: el resumen usa el modelo BARATO (un resumen no necesita el fuerte).
         assert kw.get("model") == "gpt-4o-mini"
+        # Telemetría: la operación en curso queda etiquetada "resumen" (no "chat").
+        from app.matix.uso import operacion_ctx
+        assert operacion_ctx.get() == "resumen"
         assert any("documento de prueba" in m["content"] for m in messages if m["role"] == "user")
         return "Resumen: trata de presupuestos del proyecto."
 

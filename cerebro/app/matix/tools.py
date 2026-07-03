@@ -89,7 +89,7 @@ from . import (
 from .biblioteca import buscar_material as _buscar_material_rag
 from .indexador import buscar_apuntes as _buscar_apuntes_rag
 from .indexador import indexar_apunte
-from .uso import medidor
+from .uso import medidor, operacion as _op_uso
 
 logger = logging.getLogger("matix.tools")
 
@@ -6627,24 +6627,26 @@ async def _pc_resumir_documento(db: Postgrest, args: dict) -> dict[str, Any]:
 
     if len(trozos) <= 1:
         # Cabe en una pasada: resumen directo con el modelo barato.
-        resumen = await llm.responder(
-            [
-                {"role": "system", "content": _PROMPT_RESUMEN_DOC},
-                {"role": "user", "content": f"Documento «{nombre}»:\n\n{trozos[0] if trozos else texto}"},
-            ],
-            model=barato,
-        )
+        with _op_uso("resumen"):
+            resumen = await llm.responder(
+                [
+                    {"role": "system", "content": _PROMPT_RESUMEN_DOC},
+                    {"role": "user", "content": f"Documento «{nombre}»:\n\n{trozos[0] if trozos else texto}"},
+                ],
+                model=barato,
+            )
     else:
         # MAP en LOTES (concurrencia acotada). REDUCE: une los resúmenes.
         async def _resumir_trozo(idx_trozo: tuple[int, str]) -> str:
             idx, trozo = idx_trozo
-            return await llm.responder(
-                [
-                    {"role": "system", "content": _PROMPT_RESUMEN_PARCIAL},
-                    {"role": "user", "content": f"Parte {idx + 1}/{len(trozos)} de «{nombre}»:\n\n{trozo}"},
-                ],
-                model=barato,
-            )
+            with _op_uso("resumen"):
+                return await llm.responder(
+                    [
+                        {"role": "system", "content": _PROMPT_RESUMEN_PARCIAL},
+                        {"role": "user", "content": f"Parte {idx + 1}/{len(trozos)} de «{nombre}»:\n\n{trozo}"},
+                    ],
+                    model=barato,
+                )
 
         indexados = list(enumerate(trozos))
         parciales: list[str] = []
@@ -6652,13 +6654,14 @@ async def _pc_resumir_documento(db: Postgrest, args: dict) -> dict[str, Any]:
             lote = indexados[i:i + _RESUMEN_LOTE]
             parciales.extend(await asyncio.gather(*[_resumir_trozo(x) for x in lote]))
         unido = "\n\n".join(f"Parte {i + 1}:\n{p}" for i, p in enumerate(parciales))
-        resumen = await llm.responder(
-            [
-                {"role": "system", "content": _PROMPT_RESUMEN_FINAL},
-                {"role": "user", "content": f"Resúmenes parciales de «{nombre}»:\n\n{unido}"},
-            ],
-            model=barato,
-        )
+        with _op_uso("resumen"):
+            resumen = await llm.responder(
+                [
+                    {"role": "system", "content": _PROMPT_RESUMEN_FINAL},
+                    {"role": "user", "content": f"Resúmenes parciales de «{nombre}»:\n\n{unido}"},
+                ],
+                model=barato,
+            )
 
     salida: dict[str, Any] = {
         "_fuente": "sistema_de_archivos_pc",

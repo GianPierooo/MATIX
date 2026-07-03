@@ -674,7 +674,7 @@ async def _elegir(db: Postgrest, candidatos: list[dict], *, local: datetime) -> 
     if puntuar(candidatos[0]) >= puntuar(candidatos[1]) * 1.4:
         return candidatos[0]
     try:
-        from . import llm, modelos_llm
+        from . import llm, modelos_llm, uso
 
         barato, _fuerte = await modelos_llm.par_barato_fuerte(db)
         opciones = "\n".join(
@@ -688,7 +688,8 @@ async def _elegir(db: Postgrest, candidatos: list[dict], *, local: datetime) -> 
                 "Responde solo el número."
             )},
         ]
-        r = await llm.responder(msg, model=barato, temperature=0)
+        with uso.operacion("proactividad"):
+            r = await llm.responder(msg, model=barato, temperature=0)
         m = re.search(r"\d+", r or "")
         if m:
             idx = int(m.group())
