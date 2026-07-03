@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../theme/matix_colors.dart';
+import '../../../theme/matix_button_styles.dart';
 import '../../../theme/matix_spacing.dart';
 import '../../finanzas/domain/movimiento.dart';
 import '../../finanzas/providers/movimientos_providers.dart';
@@ -193,11 +194,7 @@ class _RevisionReciboScreenState extends ConsumerState<RevisionReciboScreen> {
                     )
                   : const Icon(Icons.savings_outlined, size: 18),
               label: Text(guardando ? 'Guardando…' : 'Guardar gasto'),
-              style: FilledButton.styleFrom(
-                backgroundColor: MatixColors.accent,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
+              style: MatixButtonStyles.primarioMedio,
             ),
           ],
         ),

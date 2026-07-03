@@ -6,6 +6,7 @@ import '../../../api/matix_client.dart';
 import '../../../core/undo_snackbar.dart';
 import '../../../core/urgencia.dart';
 import '../../../theme/matix_colors.dart';
+import '../../../theme/matix_button_styles.dart';
 import '../../desglose/presentation/desglosar_screen.dart';
 import '../domain/selectores.dart';
 import '../domain/tarea.dart';
@@ -397,11 +398,7 @@ class _NuevaTareaScreenState extends ConsumerState<NuevaTareaScreen> {
                   const SizedBox(height: 24),
                   FilledButton(
                     onPressed: _guardando ? null : _guardar,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: MatixColors.accent,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
+                    style: MatixButtonStyles.primarioAlto,
                     child: _guardando
                         ? const SizedBox(
                             width: 18,

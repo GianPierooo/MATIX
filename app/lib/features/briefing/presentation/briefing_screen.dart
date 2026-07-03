@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../config.dart';
 import '../../../theme/matix_colors.dart';
+import '../../../theme/matix_button_styles.dart';
 import '../../matix/data/tts_service.dart';
 import '../data/briefing_repository.dart';
 import '../providers/briefing_providers.dart';
@@ -125,10 +126,7 @@ class _ErrorBody extends StatelessWidget {
             onPressed: onReintentar,
             icon: const Icon(Icons.refresh, size: 18),
             label: const Text('Reintentar'),
-            style: FilledButton.styleFrom(
-              backgroundColor: MatixColors.accent,
-              foregroundColor: Colors.white,
-            ),
+            style: MatixButtonStyles.primario,
           ),
         ],
       ),
