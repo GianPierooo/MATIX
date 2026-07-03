@@ -44,7 +44,7 @@ Marcas: ✅ Hecho · ⚠️ Parcial (sirve pero le falta algo concreto) · ❌ F
   nativo de timing/entrega es de dispositivo (no corre en CI).
 
 ### Chat con Matix (Capa 2)
-- ✅ Chat de texto con tool-calling (124 tools del hub).
+- ✅ Chat de texto con tool-calling (128 tools del hub).
 - ✅ Voz de entrada (Whisper `whisper-1`, filtro de alucinaciones).
 - ✅ Modo manos libres con TTS (OpenAI `tts-1` voz `onyx`).
 - ✅ Selección de modelo OpenAI/Anthropic (auto-router por mensaje).

@@ -9,7 +9,7 @@
 | Capa | Estado | Evidencia |
 |---|---|---|
 | 1 — Armazón del hub | HECHA | migr. 0001+, `home_shell`, CRUD completo, notis locales |
-| 2 — Chat/voz | HECHA | `matix/chat.py`, 124 tools, Whisper, manos libres, wake word |
+| 2 — Chat/voz | HECHA | `matix/chat.py`, 128 tools, Whisper, manos libres, wake word |
 | 3 — Memoria/RAG | HECHA | migr. 0048 `recuerdos` (RAG unificado auto-recuperado), tutor |
 | 4 — Google | PARCIAL | OAuth (0007), `routers/google.py`, Calendar con sync manual |
 | 5 — Casa (Home Assistant) | Fuera del repo | stack Docker local (homeassistant/whisper/piper) |
@@ -418,7 +418,7 @@ Pendientes de DECISIÓN del dueño (no tocados): ver cierre del prompt.
     Flutter YA lo dibuja (`plan_dia_section.dart`: filtra huecos ≥20min, apartado
     de huecos con botones "Hacer"/"Ahora no"); el REST lleva `huecos`/`sugerencias`.
 
-### Cerebro — tools del chat (124)
+### Cerebro — tools del chat (128)
 
 Hub básico: crear_tarea, crear_tareas (lote), editar_tarea, completar_tarea,
 reabrir_tarea, eliminar_tarea(conf), marcar_accion_siguiente_hecha, crear_evento,

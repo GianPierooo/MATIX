@@ -1,4 +1,4 @@
-"""Filtrado de tools por turno: no mandar las 124 definiciones al modelo en
+"""Filtrado de tools por turno: no mandar las 128 definiciones al modelo en
 cada mensaje, solo las que el turno puede necesitar.
 
 DISEÑO CONSERVADOR (no perder potencia):

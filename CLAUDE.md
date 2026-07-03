@@ -276,7 +276,7 @@ Estado real por capa (Matix 1.0 TERMINADA · tag `v1.0.0` · `main` en
 mantenimiento de la 1.0):
 
 - CAPA 1 (armazón del hub): HECHA.
-- CAPA 2 (chat y voz): HECHA — chat con 124 tools, Whisper, manos libres,
+- CAPA 2 (chat y voz): HECHA — chat con 128 tools, Whisper, manos libres,
   wake word.
 - CAPA 3 (memoria/RAG): HECHA — RAG unificado auto-recuperado (migración
   `0048_recuerdos.sql`).

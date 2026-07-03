@@ -65,9 +65,9 @@ extracción/…). Hoy `uso.py` acumula tokens y costo pero mezcla chat+visión y
 distingue operación. Barato, sin filtrar contenido sensible. El número base real
 se captura en vivo; ahora se deja la instrumentación lista.
 
-### T3 — No volcar las 124 tools en mensajes medianos · #3
+### T3 — No volcar las 128 tools en mensajes medianos · #3
 `seleccion_tools.py:133` `_UMBRAL_LARGO = 240` → subir a ~600. Un mensaje
-conversacional de 2-3 frases hoy cruza a "todas las 124 tools" en cada vuelta del
+conversacional de 2-3 frases hoy cruza a "todas las 128 tools" en cada vuelta del
 loop (hasta `_MAX_VUELTAS=6`). CORE = 44 tools. Ajustar/añadir tests de selección.
 
 ### T4 — Acotar el ruteo al modelo fuerte · #2
