@@ -28,6 +28,19 @@ La base ya es buena: enrutador y clasificador por keywords sin LLM
   (OTA caído), el cerebro no puede leer prod y NADA se declara "verificado en
   vivo".
 
+## Estado (al día)
+
+- ✅ T2 telemetría por operación (commit `e357ae2`).
+- ✅ T3 umbral de tools 240→600 (`ea2783b`).
+- ✅ T4 acotar ruteo al fuerte (`ff1763e`).
+- ✅ T5 parser de fechas-es determinista (`7a55b86`).
+- ✅ T6 subtareas (G6) + restaurar papelera (G13) por IA (`29be5f3`).
+
+Todo probado por unit tests + gates. Pendiente de VERIFICACIÓN EN VIVO: el data
+plane de Supabase sigue restringido (OTA caído), así que ningún cambio se declara
+verificado contra prod. Números de ahorro reales = capturar con la telemetría de
+T2 cuando el servicio vuelva.
+
 ## Tareas
 
 ### T2 — Telemetría de tokens por operación (fundamento) · DISEÑO
