@@ -106,6 +106,27 @@ def test_restaurar_papelera_se_dispara_por_keyword():
         assert "restaurar_tarea" in out, msg
 
 
+def test_umbral_600_frontera():
+    # Justo por debajo de 600 y sin keyword de grupo → NO manda las 128.
+    corto = "necesito que " + ("x" * 580)  # ~593 chars, sin keywords
+    assert len(st._norm(corto)) < st._UMBRAL_LARGO
+    assert len(st.filtrar_tools(TOOL_DEFINITIONS, corto)) < len(TOOL_DEFINITIONS)
+    # Justo por encima de 600 → todas (no recortar potencia en lo complejo).
+    largo = "y" * 610
+    assert len(st._norm(largo)) > st._UMBRAL_LARGO
+    assert len(st.filtrar_tools(TOOL_DEFINITIONS, largo)) == len(TOOL_DEFINITIONS)
+
+
+def test_dos_grupos_disparados_ambos_presentes_y_core_primero():
+    msg = "cuánto gasté y abre el pdf de mi compu"  # finanzas + pc
+    out = _nombres(st.filtrar_tools(TOOL_DEFINITIONS, msg))
+    assert "crear_movimiento" in out and "pc_resumir_documento" in out
+    nombres = [t["function"]["name"] for t in st.filtrar_tools(TOOL_DEFINITIONS, msg)]
+    catalogo = [t["function"]["name"] for t in TOOL_DEFINITIONS]
+    core_cat = [n for n in catalogo if n in st.CORE]
+    assert nombres[:len(core_cat)] == core_cat  # prefijo CORE estable
+
+
 def test_orden_core_primero_estabiliza_prefijo():
     # B3: el CORE va PRIMERO (orden de catálogo) y los grupos disparados después
     # (orden de catálogo). Así el prefijo CORE es idéntico entre turnos → cache.
