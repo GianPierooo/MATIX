@@ -215,6 +215,39 @@ def test_consulta_sin_ahora_delega():
     assert cl.detectar("qué tareas tengo hoy") is None  # sin reloj → LLM
 
 
+def test_b1_intercepta_consultas_puras():
+    from datetime import datetime
+
+    ahora = datetime(2026, 7, 2, 10, 0)
+    for m in [
+        "que tareas tengo", "tareas pendientes", "que pendientes tengo",
+        "mis tareas de manana", "que tareas hay hoy", "que tengo que hacer manana",
+    ]:
+        i = cl.detectar(m, ahora=ahora)
+        assert i is not None and i.nombre == "consultar_tareas", m
+
+
+def test_b1_delega_frases_trampa():
+    # Frases cercanas al límite que NO son una consulta de tareas pura: llevan
+    # calificador, otra intención o piden completadas → deben ir al LLM.
+    from datetime import datetime
+
+    ahora = datetime(2026, 7, 2, 10, 0)
+    for m in [
+        "que tareas tengo pendientes con juan",   # calificador (persona)
+        "que tareas importantes tengo hoy",        # adjetivo/prioridad
+        "cuales son mis tareas de hoy",            # otra construcción
+        "dame mis tareas de hoy",                  # verbo distinto
+        "que tareas tengo hoy y manana",           # dos periodos
+        "que tareas tengo del proyecto onexotic",  # filtro de proyecto
+        "tengo tareas hoy",                        # afirmación, no consulta
+        "que tareas complete hoy",                 # completadas, no pendientes
+        "cuantas tareas tengo hoy",                # conteo, no listado
+        "que tareas me faltan hoy",                # otra construcción
+    ]:
+        assert cl.detectar(m, ahora=ahora) is None, m
+
+
 def test_frase_consulta_tareas_formato():
     from app.matix import chat
 
