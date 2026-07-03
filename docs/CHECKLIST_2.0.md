@@ -46,16 +46,27 @@ Segunda racha (determinismo profundo + infra + funcional + design system):
 - ✅ D1 split de recurrencia empuja la fila nueva a Google (`387f609`).
 - ⚠️ D2 marcar-hecho desde el widget: base Dart (deep-link `completar:`) hecha y
   testeada (`9642838`); **falta el botón nativo en los RemoteViews** (device-only).
-- ⚠️ E1 `MatixButtonStyles` + 6 primarios convertidos (`f50a81c`, `4d639ee`);
-  **~15 primarios restantes** = mecánico (patrón probado, look idéntico).
-- ✅ E3 colores de sombra hardcodeados → tokens `MatixColors.shadow*` (`15473a4`).
-  Pendiente: los ~8 `BoxShadow` inline (necesitan tokens de sombra con valor exacto).
-- ⚠️ E2 tokens `MatixSpacing` faltantes (18/22/26/28/36/40/42) creados + primeros
-  usos (`ff5d7cf`). **~640 números mágicos restantes** = por tandas por-archivo
-  (analyze+test tras cada una; look idéntico; alto churn / bajo valor).
+- ✅ E1 CERRADO: `MatixButtonStyles` (primario/Alto/Medio/Compacto/Ancho +
+  destructivo/exito) + los 19 primarios canónicos (accent+white) convertidos
+  (tandas A-E, `bb22d8c`→`c1729de`). Queda 1 NO-canónico a propósito
+  (`entrenar_voz_screen.dart:495`, accent SIN foreground → convertirlo cambiaría
+  el color de texto). 0 primarios canónicos sin convertir, 0 imports muertos.
+- ⚠️ E2 tokens `MatixSpacing` (18/22/26/28/36/40/42) creados + primeros usos
+  (`ff5d7cf`). **~640 números mágicos restantes** = por tandas por-archivo.
+- ⚠️ E3 colores de sombra → tokens `MatixColors.shadow*` (`15473a4`). Los ~8
+  `BoxShadow` inline DIFERIDOS: no matchean tokens existentes (el glow del FAB es
+  "casi" fab, no exacto) → serían tokens single-use sin reuso y con riesgo de look.
 
-Salud del repo (Fase 1): 🟢 VERDE. `main == origin/main`, nada colgado, sin
-stashes, sin secretos trackeados, prune del CI bien formado, gates verdes de cero.
+Endurecimiento de tests (Fase 2, esta racha): ampliada la red de las 4 fronteras
+deterministas, TODAS confirmadas sólidas (sin bugs nuevos): parser de fechas
+(disyunciones, cross-type, bordes mes/año, meridiano 1-12, `c03d9b1`); frontera
+B1 (consultas puras vs 10 frases trampa, `57fee96`); ruteo al fuerte (sub/sobre-
+escalación, `953ea28`); selección de tools (umbral 600, dos grupos, prefijo CORE,
+`d04b59f`).
+
+Salud del repo: 🟢 VERDE (verificado 2 veces). `main == origin/main`, nada colgado,
+sin stashes, sin secretos trackeados, prune del CI bien formado, gates verdes de
+cero (pytest 798 passed/200 skipped; flutter 597 passed; analyze 1 info no-fatal).
 Rojos ESPERABLES en Actions: `build-and-publish` en commits que tocan `app/**`
 falla en "Subir APK a Storage" por 402 (storage restringido); los gates verdes.
 
