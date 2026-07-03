@@ -207,6 +207,28 @@ def test_verbos_blandos_en_consulta_del_hub_van_al_barato():
         assert d.motivo == "consulta_hub", m
 
 
+def test_frontera_no_degrada_razonamiento():
+    # Endurecimiento: pedidos que SÍ necesitan razonar/escribir → fuerte.
+    for m in [
+        "explícame la fotosíntesis en detalle",
+        "revisa el código de este archivo",
+        "mejora mi rutina de ejercicio",
+        "corrígeme este párrafo",
+    ]:
+        assert _elegir(m).modelo == FUERTE, m
+
+
+def test_frontera_no_sobre_escala_triviales():
+    # Endurecimiento: comandos triviales → barato (no gastar Sonnet de más).
+    for m in [
+        "marca la de hoy como hecha",
+        "borra ese apunte",
+        "qué hay mañana",
+        "lista mis pendientes",
+    ]:
+        assert _elegir(m).modelo == BARATO, m
+
+
 def test_consulta_hub_con_razonamiento_no_se_degrada():
     # Auditoría: una consulta del hub con razonamiento encima ("dime cuál
     # priorizar y por qué") NO debe degradarse al barato — supera el umbral de
