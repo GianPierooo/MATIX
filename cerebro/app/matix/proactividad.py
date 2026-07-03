@@ -667,8 +667,8 @@ async def _candidatos(
 async def _elegir(db: Postgrest, candidatos: list[dict], *, local: datetime) -> dict:
     """De los candidatos (ya ordenados por puntaje desc) elige UNO. Si hay un
     líder claro, gana el puntaje (no gastamos el modelo). Si dos van parejos,
-    rutea el JUICIO al modelo fuerte. Best-effort: ante cualquier fallo, gana el
-    puntaje."""
+    rutea el JUICIO al modelo BARATO (elegir entre 2-4 opciones cortas no necesita
+    el fuerte). Best-effort: ante cualquier fallo, gana el puntaje."""
     if len(candidatos) < 2:
         return candidatos[0]
     if puntuar(candidatos[0]) >= puntuar(candidatos[1]) * 1.4:
@@ -676,7 +676,7 @@ async def _elegir(db: Postgrest, candidatos: list[dict], *, local: datetime) -> 
     try:
         from . import llm, modelos_llm
 
-        _, fuerte = await modelos_llm.par_barato_fuerte(db)
+        barato, _fuerte = await modelos_llm.par_barato_fuerte(db)
         opciones = "\n".join(
             f"{i}. [{c['tipo']}] {c['titulo']} — {c['cuerpo']}"
             for i, c in enumerate(candidatos[:4])
@@ -688,7 +688,7 @@ async def _elegir(db: Postgrest, candidatos: list[dict], *, local: datetime) -> 
                 "Responde solo el número."
             )},
         ]
-        r = await llm.responder(msg, model=fuerte, temperature=0)
+        r = await llm.responder(msg, model=barato, temperature=0)
         m = re.search(r"\d+", r or "")
         if m:
             idx = int(m.group())
