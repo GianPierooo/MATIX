@@ -360,11 +360,7 @@ class _NoConectadoBody extends StatelessWidget {
               label: Text(
                 abriendoOAuth ? 'Abriendo navegador…' : 'Conectar Google',
               ),
-              style: FilledButton.styleFrom(
-                backgroundColor: MatixColors.accent,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 10),
-              ),
+              style: MatixButtonStyles.primarioCompacto,
             ),
           ),
       ],

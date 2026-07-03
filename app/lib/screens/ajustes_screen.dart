@@ -41,6 +41,7 @@ import '../features/wakeword/data/wakeword_modelo.dart';
 import '../features/wakeword/presentation/entrenar_voz_screen.dart';
 import '../features/wakeword/providers/wakeword_providers.dart';
 import '../theme/matix_colors.dart';
+import '../theme/matix_button_styles.dart';
 import '../theme/matix_spacing.dart';
 
 /// Pantalla de Ajustes — informativa en Capa 1.
@@ -1626,11 +1627,7 @@ class _DiagnosticoFila extends StatelessWidget {
               onPressed: onCta,
               icon: Icon(ctaIcon ?? Icons.download_rounded, size: 18),
               label: Text(ctaLabel!),
-              style: FilledButton.styleFrom(
-                backgroundColor: MatixColors.accent,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 10),
-              ),
+              style: MatixButtonStyles.primarioCompacto,
             ),
           ),
         ],
