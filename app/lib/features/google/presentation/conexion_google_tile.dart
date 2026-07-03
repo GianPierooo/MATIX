@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../api/matix_client.dart';
 import '../../../theme/matix_colors.dart';
+import '../../../theme/matix_button_styles.dart';
 import '../../eventos/providers/eventos_providers.dart';
 import '../data/google_repository.dart';
 import '../providers/google_providers.dart';
@@ -449,10 +450,7 @@ class _ConectadoBody extends StatelessWidget {
                       )
                     : const Icon(Icons.sync, size: 18),
                 label: Text(sincronizando ? 'Sincronizando…' : 'Sincronizar'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: MatixColors.accent,
-                  foregroundColor: Colors.white,
-                ),
+                style: MatixButtonStyles.primario,
               ),
             ),
             const SizedBox(width: 8),

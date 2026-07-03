@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../theme/matix_colors.dart';
+import '../../../theme/matix_button_styles.dart';
 import '../../../theme/matix_spacing.dart';
 import '../../../theme/matix_typography.dart';
 import '../../matix/presentation/matix_chat_screen.dart';
@@ -463,10 +464,7 @@ class _BotonAccion extends StatelessWidget {
   Widget build(BuildContext context) {
     return FilledButton(
       onPressed: onPressed,
-      style: FilledButton.styleFrom(
-        backgroundColor: MatixColors.accent,
-        foregroundColor: Colors.white,
-      ),
+      style: MatixButtonStyles.primario,
       child: Text(texto),
     );
   }
