@@ -59,9 +59,28 @@ def test_proyecto_avanzado_se_dispara():
 
 
 def test_mensaje_largo_manda_todas():
-    largo = "necesito que " + ("analices y reorganices todo " * 20)
+    # >600 chars: multi-tema/complejo → todas, para no recortar potencia.
+    largo = "necesito que " + ("analices y reorganices todo " * 25)
+    assert len(st._norm(largo)) > st._UMBRAL_LARGO
     out = st.filtrar_tools(TOOL_DEFINITIONS, largo)
     assert len(out) == len(TOOL_DEFINITIONS)  # no recorta potencia en lo complejo
+
+
+def test_mensaje_mediano_no_manda_todas():
+    # El caso que arregla #3: un turno conversacional de 2-3 frases (entre el
+    # viejo umbral 240 y el nuevo 600) YA NO vuelca las 124 tools; se queda con
+    # el CORE (+ los grupos que dispare). Sin keywords de grupo → solo CORE.
+    mediano = (
+        "quiero contarte que estuve pensando en como me fue esta semana y me di "
+        "cuenta de que tengo varias cosas dando vueltas en la cabeza; no es nada "
+        "urgente ni grave, pero me gustaria sentirme un poco mas ordenado y "
+        "tranquilo para no llegar al fin de semana con la sensacion de que todo "
+        "se me junto y termine corriendo a ultimo momento como siempre me pasa"
+    )
+    n = len(st._norm(mediano))
+    assert 240 < n < st._UMBRAL_LARGO, n  # es "mediano": el viejo 240 lo volcaba
+    out = st.filtrar_tools(TOOL_DEFINITIONS, mediano)
+    assert len(out) < len(TOOL_DEFINITIONS)  # ya no manda el catálogo entero
 
 
 def test_modo_pesado_manda_todas():

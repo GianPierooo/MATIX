@@ -1,4 +1,4 @@
-"""Filtrado de tools por turno: no mandar las 93 definiciones al modelo en
+"""Filtrado de tools por turno: no mandar las 124 definiciones al modelo en
 cada mensaje, solo las que el turno puede necesitar.
 
 DISEÑO CONSERVADOR (no perder potencia):
@@ -130,7 +130,14 @@ _GRUPOS: list[tuple[frozenset[str], re.Pattern[str]]] = [
 ]
 
 # Si el mensaje es largo o "complejo", no arriesgamos potencia: van TODAS.
-_UMBRAL_LARGO = 240
+# 600 caracteres ≈ un párrafo largo. Por debajo, un turno conversacional normal
+# (2-3 frases) se queda con el CORE + los grupos que dispare por keyword, sin
+# volcar las 124 defs en CADA vuelta del loop (hasta _MAX_VUELTAS=6). Por encima
+# de 600 asumimos multi-tema/complejo → todas, para no recortar potencia donde
+# el juicio importa. Antes era 240, tan bajo que un mensaje de 2-3 frases ya
+# volcaba el catálogo entero. (Umbral distinto del de enrutador._UMBRAL_LARGO=320,
+# que elige el MODELO, no el set de tools — son decisiones independientes.)
+_UMBRAL_LARGO = 600
 # Modos pesados (tesis/estudio): trabajo a fondo → todas las tools.
 _MODOS_PESADOS: frozenset[str] = frozenset({"tesis", "estudio"})
 
