@@ -251,6 +251,45 @@ async def test_editar_manual_ya_pusheado_envia_patch_a_google(
         await client.delete(f"/api/v1/eventos/{creado['id']}/permanente")
 
 
+async def test_editar_split_solo_esta_empuja_nuevo_a_google(
+    client: AsyncClient,
+    google_conectado: str,  # noqa: ARG001
+    fake_google: dict[str, Any],
+) -> None:
+    """D1: PATCH alcance=solo_esta sobre una serie manual ya pusheada crea un
+    evento ÚNICO nuevo y lo empuja a Google como CREACIÓN (2do insert). Antes el
+    split se quedaba local esperando el próximo pull."""
+    body = {
+        "titulo": "_test_split_v1",
+        "inicia_en": "2026-06-01T08:00:00-05:00",
+        "termina_en": "2026-06-01T09:00:00-05:00",
+        "recurrencia_freq": "semanal",
+        "recurrencia_dias_semana": [1, 3],
+        "recurrencia_fin_tipo": "nunca",
+    }
+    r = await client.post("/api/v1/eventos", json=body)
+    assert r.status_code == 201, r.text
+    creado = r.json()
+    assert creado["external_id"] == "google-id-1"  # la serie se pusheó
+    nuevo_id = None
+    try:
+        r2 = await client.patch(
+            f"/api/v1/eventos/{creado['id']}?alcance=solo_esta&ocurrencia_fecha=2026-06-03",
+            json={"titulo": "_test_split_esta"},
+        )
+        assert r2.status_code == 200, r2.text
+        nuevo = r2.json()
+        nuevo_id = nuevo["id"]
+        assert nuevo_id != creado["id"]                 # es un evento NUEVO (único)
+        assert len(fake_google["insert_calls"]) == 2    # el split se empujó a Google
+        assert nuevo["external_id"] == "google-id-2"
+        assert fake_google["insert_calls"][1]["body"]["summary"] == "_test_split_esta"
+    finally:
+        await client.delete(f"/api/v1/eventos/{creado['id']}/permanente")
+        if nuevo_id:
+            await client.delete(f"/api/v1/eventos/{nuevo_id}/permanente")
+
+
 async def test_borrar_manual_ya_pusheado_envia_delete_a_google(
     client: AsyncClient,
     google_conectado: str,  # noqa: ARG001

@@ -177,9 +177,26 @@ async def actualizar(
     # Resto (manual, o sin external, o alcance que parte la serie): hub por el
     # comando primero.
     row = _datos_o_http(await registro.ejecutar(db, "editar_evento", params, origen="ui"))
-    # Sin push inmediato a Google si se partió la serie: las filas nuevas
-    # sincronizan en el próximo ciclo (igual que cualquier evento manual nuevo).
-    if email is None or not es_serie_entera:
+    if email is None:
+        return row
+    if not es_serie_entera:
+        # SPLIT (solo_esta / esta_y_futuras): el comando creó una FILA NUEVA (un
+        # evento único o una serie nueva). La empujamos a Google como CREACIÓN
+        # best-effort (D1) — así deja de "esperar el próximo pull". Quitar la
+        # fecha de la serie madre en Google / truncar su regla requiere subir
+        # RRULE, que hoy el hub no hace: queda pendiente (ver docs). Los de
+        # origen='google' ya los vetó el comando (no_soportado) antes de aquí.
+        if row.get("_alcance") in ("solo_esta", "esta_y_futuras") and not row.get("external_id"):
+            try:
+                patch_google = await gcal.push_evento(db, email=email, fila=row, accion="crear")
+            except (HttpError, RuntimeError) as e:
+                logger.warning(
+                    "Push del split a Google falló para evento %s — queda local: %s",
+                    row.get("id"), e,
+                )
+                return row
+            if patch_google:
+                row = await db.update(TABLE, str(row["id"]), patch_google)
         return row
     accion_google = "editar" if tiene_external else "crear"
     try:
