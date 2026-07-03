@@ -1,0 +1,21 @@
+# Keep-alive de Supabase (C1). El free tier PAUSA el proyecto tras ~7 días sin
+# ninguna request. Este cron hace una query mínima cada ~3 días para mantenerlo
+# activo. Reusa los secrets SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY del release
+# (no requiere secrets nuevos). No construye ni publica nada; solo pinga la BD.
+name: Keep-alive Supabase
+
+on:
+  schedule:
+    - cron: '0 12 */3 * *'   # cada ~3 días, 12:00 UTC (07:00 Lima)
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ping a la BD (mantener el proyecto activo)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: bash tools/keepalive.sh

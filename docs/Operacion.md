@@ -78,3 +78,19 @@ Validación / release
 - Migraciones: las aplica el asistente con `tools/aplicar-migracion.sh`
   (Management API). Las normales sin preguntar; las destructivas, solo con
   confirmación explícita.
+
+## Keep-alive de Supabase (anti-pausa del free tier)
+
+El plan free de Supabase PAUSA el proyecto tras ~7 días sin ninguna request. El
+GitHub Action `.github/workflows/keepalive.yml` corre cada ~3 días y hace una
+query mínima a la BD (`tools/keepalive.sh` → `GET /rest/v1/app_versions?limit=1`)
+para mantenerlo activo. Reusa los secrets `SUPABASE_URL` +
+`SUPABASE_SERVICE_ROLE_KEY` del release (no requiere secrets nuevos). Se puede
+disparar a mano desde Actions → «Keep-alive Supabase» → Run workflow.
+
+Nota: este keep-alive cubre la PAUSA POR INACTIVIDAD, no la restricción por
+cuota de storage (esa se resuelve borrando objetos; ver el incidente del bucket
+`apks`). Si se quisiera un keep-alive que además funcione con el proyecto
+restringido por cuota, habría que añadir el secret `SUPABASE_ACCESS_TOKEN` (hoy
+NO está en GitHub Secrets) y pegar por la Management API — queda ANOTADO, no se
+crea aquí.
