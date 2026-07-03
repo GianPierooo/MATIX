@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../theme/matix_colors.dart';
+import '../../../theme/matix_button_styles.dart';
 import '../../../theme/matix_spacing.dart';
 import '../../../theme/matix_typography.dart';
 import '../data/update_service.dart';
@@ -280,10 +281,7 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
             onPressed: _abrir,
             icon: const Icon(Icons.download_rounded, size: 18),
             label: const Text('Descargar e instalar'),
-            style: FilledButton.styleFrom(
-              backgroundColor: MatixColors.accent,
-              foregroundColor: Colors.white,
-            ),
+            style: MatixButtonStyles.primario,
           ),
         ];
 

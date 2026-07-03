@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../theme/matix_colors.dart';
+import '../../../theme/matix_button_styles.dart';
 import '../../../theme/matix_spacing.dart';
 import '../../tareas/presentation/nueva_tarea_screen.dart';
 import '../data/repaso_repository.dart';
@@ -43,10 +44,7 @@ class RepasoSemanalScreen extends ConsumerWidget {
                   onPressed: () => ref.invalidate(repasoSemanalProvider),
                   icon: const Icon(Icons.refresh, size: 18),
                   label: const Text('Reintentar'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: MatixColors.accent,
-                    foregroundColor: Colors.white,
-                  ),
+                  style: MatixButtonStyles.primario,
                 ),
               ],
             ),
