@@ -83,7 +83,7 @@ class _Burbuja extends StatelessWidget {
             border: Border.all(color: MatixColors.accent.withValues(alpha: 0.35)),
             boxShadow: const [
               BoxShadow(
-                color: Color(0x55000000),
+                color: MatixColors.shadowSoft,
                 blurRadius: 22,
                 offset: Offset(0, 8),
               ),

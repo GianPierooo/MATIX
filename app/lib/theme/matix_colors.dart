@@ -20,6 +20,12 @@ class MatixColors {
   // Hairline (divisores muy sutiles, rgba(255,255,255,0.06))
   static const Color hairline = Color(0x0FFFFFFF);
 
+  // Sombras negras translúcidas (overlays / burbujas flotantes). Valores EXACTOS
+  // de los usos inline que reemplazan (E3): el look no cambia.
+  static const Color shadowSoft = Color(0x55000000);   // ~33% negro
+  static const Color shadowMedium = Color(0x66000000); // ~40% negro
+  static const Color shadowStrong = Color(0x73000000); // ~45% negro
+
   // Acentos semánticos
   static const Color accent = Color(0xFF2D7FF9);
   static const Color green = Color(0xFF21D07A);

@@ -627,7 +627,7 @@ class _TarjetaPresencia extends StatelessWidget {
           border: Border.all(color: MatixColors.accent.withValues(alpha: 0.35)),
           boxShadow: const [
             BoxShadow(
-              color: Color(0x66000000),
+              color: MatixColors.shadowMedium,
               blurRadius: 24,
               offset: Offset(0, 10),
             ),

@@ -53,7 +53,7 @@ class _MenuAdjuntarSheet extends StatelessWidget {
           border: Border(top: BorderSide(color: MatixColors.hairline)),
           boxShadow: [
             BoxShadow(
-              color: Color(0x73000000),
+              color: MatixColors.shadowStrong,
               blurRadius: 50,
               offset: Offset(0, -20),
             ),
