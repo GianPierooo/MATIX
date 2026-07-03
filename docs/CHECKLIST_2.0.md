@@ -30,16 +30,31 @@ La base ya es buena: enrutador y clasificador por keywords sin LLM
 
 ## Estado (al día)
 
-- ✅ T2 telemetría por operación (commit `e357ae2`).
+Primera racha (telemetría + determinismo + handlers):
+- ✅ T2 telemetría por operación (`e357ae2`).
 - ✅ T3 umbral de tools 240→600 (`ea2783b`).
 - ✅ T4 acotar ruteo al fuerte (`ff1763e`).
 - ✅ T5 parser de fechas-es determinista (`7a55b86`).
 - ✅ T6 subtareas (G6) + restaurar papelera (G13) por IA (`29be5f3`).
 
-Todo probado por unit tests + gates. Pendiente de VERIFICACIÓN EN VIVO: el data
-plane de Supabase sigue restringido (OTA caído), así que ningún cambio se declara
-verificado contra prod. Números de ahorro reales = capturar con la telemetría de
-T2 cuando el servicio vuelva.
+Segunda racha (determinismo profundo + infra + funcional + design system):
+- ✅ B1 consultas de tareas deterministas en la ruta rápida (`53d0149`).
+- ✅ B2 resumen de documento PC al barato + cap + MAP en lotes (`62a4117`).
+- ✅ B4 desempate de proactividad al barato (`ad13c14`).
+- ✅ B3 prefijo de tools CORE-primero + 2º cache breakpoint (`3df83e8`).
+- ✅ C1 keep-alive de Supabase (GitHub Action cada ~3 días) (`3930851`).
+- ✅ D1 split de recurrencia empuja la fila nueva a Google (`387f609`).
+- ⚠️ D2 marcar-hecho desde el widget: base Dart (deep-link `completar:`) hecha y
+  testeada (`9642838`); **falta el botón nativo en los RemoteViews** (device-only).
+- ⚠️ E1 `MatixButtonStyles` creado + 3 usos representativos (`f50a81c`); **rollout
+  de los ~19 primarios restantes** = mecánico (patrón probado, look idéntico).
+- ⏳ E2 (~650 números mágicos de spacing) y E3 (sombras/hex a tokens) NO empezados:
+  volumen alto, se recomienda por tandas por-archivo (analyze+test tras cada una).
+
+VERIFICACIÓN EN VIVO PENDIENTE: el data plane de Supabase sigue restringido (OTA
+caído). Nada se declara verificado contra prod. Ahorros reales = leer la telemetría
+de T2 (`GET /matix/uso` → `por_operacion`) cuando el servicio vuelva. D1 (Google)
+se verifica contra Google real; D2 (widget) se valida en device.
 
 ## Tareas
 
