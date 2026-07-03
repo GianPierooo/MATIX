@@ -48,13 +48,31 @@ Segunda racha (determinismo profundo + infra + funcional + design system):
   testeada (`9642838`); **falta el botón nativo en los RemoteViews** (device-only).
 - ⚠️ E1 `MatixButtonStyles` creado + 3 usos representativos (`f50a81c`); **rollout
   de los ~19 primarios restantes** = mecánico (patrón probado, look idéntico).
-- ⏳ E2 (~650 números mágicos de spacing) y E3 (sombras/hex a tokens) NO empezados:
-  volumen alto, se recomienda por tandas por-archivo (analyze+test tras cada una).
+- ✅ E3 colores de sombra hardcodeados → tokens `MatixColors.shadow*` (`15473a4`).
+- ⏳ E2 (~650 números mágicos de spacing) NO empezado: volumen alto, por tandas
+  por-archivo (faltan tokens MatixSpacing 18/22/26/28/36/40/42). E3 de sombras
+  inline (BoxShadow) también pendiente.
+
+Auditoría adversarial (esta racha):
+- 🐞→✅ P0: el parser de fechas ADIVINABA con dos fechas/horas ("el lunes o el
+  martes" → lunes) y aceptaba meridiano inválido ("a las 99pm" → 15:00). Arreglado:
+  delega ante múltiples/inválidas (`ecfbfaa`).
+- 🐞→✅ Sub-escalación: una consulta del hub con razonamiento ("revisa mis tareas y
+  dime cuál priorizar y por qué") se degradaba al barato. Umbral 70→40 (`de6110c`).
+- ✅ Drift de conteo de tools 124→128 corregido (`4837f57`).
+- ✅ Telemetría: resumen-doc y proactividad ahora etiquetan su operación (`499a9a0`).
+- Verificado sólido: paridad tool-defs↔handlers (128=128, 0 huérfanos); frontera de
+  B1 (intercepta 4, delega 6, sin falsos); T2 cubre CADA call-site de llm.py;
+  G6/G13 wired en `_HANDLERS` + TOOL_DEFINITIONS; sin TODO/FIXME.
 
 VERIFICACIÓN EN VIVO PENDIENTE: el data plane de Supabase sigue restringido (OTA
 caído). Nada se declara verificado contra prod. Ahorros reales = leer la telemetría
 de T2 (`GET /matix/uso` → `por_operacion`) cuando el servicio vuelva. D1 (Google)
 se verifica contra Google real; D2 (widget) se valida en device.
+
+Deferidos con criterio (bajo valor / alto churn): LRU de embedding de consulta
+(repeticiones idénticas raras, embeddings ~$0.02/1M → ahorro despreciable); rollout
+E1/E2 masivo (mecánico, ~650 sitios). Anotados, no bloqueantes.
 
 ## Tareas
 
