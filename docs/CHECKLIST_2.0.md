@@ -46,14 +46,20 @@ Segunda racha (determinismo profundo + infra + funcional + design system):
 - ✅ D1 split de recurrencia empuja la fila nueva a Google (`387f609`).
 - ⚠️ D2 marcar-hecho desde el widget: base Dart (deep-link `completar:`) hecha y
   testeada (`9642838`); **falta el botón nativo en los RemoteViews** (device-only).
-- ⚠️ E1 `MatixButtonStyles` creado + 3 usos representativos (`f50a81c`); **rollout
-  de los ~19 primarios restantes** = mecánico (patrón probado, look idéntico).
+- ⚠️ E1 `MatixButtonStyles` + 6 primarios convertidos (`f50a81c`, `4d639ee`);
+  **~15 primarios restantes** = mecánico (patrón probado, look idéntico).
 - ✅ E3 colores de sombra hardcodeados → tokens `MatixColors.shadow*` (`15473a4`).
-- ⏳ E2 (~650 números mágicos de spacing) NO empezado: volumen alto, por tandas
-  por-archivo (faltan tokens MatixSpacing 18/22/26/28/36/40/42). E3 de sombras
-  inline (BoxShadow) también pendiente.
+  Pendiente: los ~8 `BoxShadow` inline (necesitan tokens de sombra con valor exacto).
+- ⚠️ E2 tokens `MatixSpacing` faltantes (18/22/26/28/36/40/42) creados + primeros
+  usos (`ff5d7cf`). **~640 números mágicos restantes** = por tandas por-archivo
+  (analyze+test tras cada una; look idéntico; alto churn / bajo valor).
 
-Auditoría adversarial (esta racha):
+Salud del repo (Fase 1): 🟢 VERDE. `main == origin/main`, nada colgado, sin
+stashes, sin secretos trackeados, prune del CI bien formado, gates verdes de cero.
+Rojos ESPERABLES en Actions: `build-and-publish` en commits que tocan `app/**`
+falla en "Subir APK a Storage" por 402 (storage restringido); los gates verdes.
+
+Auditoría adversarial (racha previa):
 - 🐞→✅ P0: el parser de fechas ADIVINABA con dos fechas/horas ("el lunes o el
   martes" → lunes) y aceptaba meridiano inválido ("a las 99pm" → 15:00). Arreglado:
   delega ante múltiples/inválidas (`ecfbfaa`).
