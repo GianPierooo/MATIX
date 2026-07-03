@@ -33,6 +33,9 @@ import 'features/wakeword/domain/voz_overlay.dart';
 import 'features/wakeword/providers/wakeword_providers.dart';
 import 'features/tareas/presentation/nueva_tarea_screen.dart';
 import 'features/widgets_inicio/data/widget_service.dart';
+import 'features/widgets_inicio/domain/widget_datos.dart' show tareaIdDeCompletar;
+import 'features/push/application/rendicion_cuentas_background.dart';
+import 'core/hub_refresh.dart';
 import 'screens/home_shell.dart';
 import 'theme/matix_theme.dart';
 import 'package:home_widget/home_widget.dart';
@@ -489,6 +492,17 @@ class _MatixAppState extends ConsumerState<MatixApp>
     _enrutarPayload(payload == null || payload.isEmpty ? 'hoy' : payload);
   }
 
+  /// Marca una tarea como hecha desde el botón "hecho" del widget de Inicio
+  /// (payload `completar:<id>`). Reusa la cadena probada de rendición de cuentas
+  /// (`POST /push/rendicion-cuentas/accion`, accion='hecho'), refresca el hub y
+  /// aterriza en Inicio para que el día y el widget reflejen el cambio.
+  Future<void> _completarDesdeWidget(String tareaId) async {
+    await manejarTapRendicionCuentas(tareaId: tareaId, accion: 'hecho');
+    if (!mounted) return;
+    invalidarHub(ref);
+    ref.read(objetivoNavegacionProvider.notifier).state = SeccionMatix.inicio;
+  }
+
   /// Enruta un payload de notificación/push a su pantalla. Lo comparten el
   /// tap de una notificación local y el de un push de FCM.
   void _enrutarPayload(String? payload) {
@@ -518,6 +532,11 @@ class _MatixAppState extends ConsumerState<MatixApp>
           ),
         ),
       );
+    } else if (payload != null && payload.startsWith('completar:')) {
+      // Botón "hecho" del widget de Inicio: completa la tarea sin abrir su
+      // pantalla, reusando la cadena probada de rendición de cuentas.
+      final idc = tareaIdDeCompletar(payload);
+      if (idc != null) unawaited(_completarDesdeWidget(idc));
     } else if (payload != null && payload.startsWith('proyecto:')) {
       // Proactividad (reposición): abre el proyecto, con su próxima acción y la
       // descomposición lista para arrancar.

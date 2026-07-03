@@ -49,6 +49,27 @@ String fechaCorta(DateTime d) {
   return '${dias[d.weekday - 1]} ${d.day} ${meses[d.month - 1]}';
 }
 
+/// Deep link de "marcar hecho" desde el widget. Convierte el payload de un ítem
+/// (`tarea:<id>`) en el payload de completar (`completar:<id>`) que el botón
+/// "hecho" del widget dispara; `null` si el ítem no es una tarea completable
+/// (p. ej. un evento fijo o el estado vacío). PURO y testeable. El nativo hace la
+/// misma conversión para armar el PendingIntent del botón.
+String? payloadCompletar(String itemPayload) {
+  const pref = 'tarea:';
+  if (!itemPayload.startsWith(pref)) return null;
+  final id = itemPayload.substring(pref.length);
+  return id.isEmpty ? null : 'completar:$id';
+}
+
+/// Extrae el id de tarea de un payload `completar:<id>` (lo que recibe la app al
+/// tocar el botón "hecho" del widget); `null` si no es un payload de completar.
+String? tareaIdDeCompletar(String payload) {
+  const pref = 'completar:';
+  if (!payload.startsWith(pref)) return null;
+  final id = payload.substring(pref.length);
+  return id.isEmpty ? null : id;
+}
+
 /// Un ítem del widget (próximo o fila de hoy). Todo precalculado en Dart.
 class WidgetItem {
   const WidgetItem({

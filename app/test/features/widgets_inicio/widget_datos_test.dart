@@ -135,4 +135,23 @@ void main() {
       expect(fechaCorta(DateTime(2026, 12, 25)), 'vie 25 dic'); // viernes
     });
   });
+
+  group('D2: marcar hecho desde el widget', () {
+    test('payloadCompletar convierte tarea:<id> en completar:<id>', () {
+      expect(payloadCompletar('tarea:abc-123'), 'completar:abc-123');
+      expect(payloadCompletar('hoy'), isNull); // no es tarea → sin botón hecho
+      expect(payloadCompletar('tarea:'), isNull); // id vacío
+      expect(payloadCompletar('evento:x'), isNull);
+    });
+    test('tareaIdDeCompletar extrae el id de completar:<id>', () {
+      expect(tareaIdDeCompletar('completar:abc-123'), 'abc-123');
+      expect(tareaIdDeCompletar('tarea:abc'), isNull);
+      expect(tareaIdDeCompletar('completar:'), isNull);
+    });
+    test('ida y vuelta: item -> completar -> id', () {
+      final p = payloadCompletar('tarea:t1');
+      expect(p, isNotNull);
+      expect(tareaIdDeCompletar(p!), 't1');
+    });
+  });
 }
