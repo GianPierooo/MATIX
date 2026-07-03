@@ -495,12 +495,7 @@ class _PantallaCreado extends StatelessWidget {
                 const SizedBox(height: MatixSpacing.xl2),
                 FilledButton(
                   onPressed: onVolver,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: MatixColors.accent,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 32, vertical: 14),
-                  ),
+                  style: MatixButtonStyles.primarioAncho,
                   child: const Text('Volver a Tareas'),
                 ),
               ],

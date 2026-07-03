@@ -38,6 +38,13 @@ class MatixButtonStyles {
         padding: const EdgeInsets.symmetric(vertical: 10),
       );
 
+  /// Primario ancho (CTA final centrado): padding horizontal 32, vertical 14.
+  static ButtonStyle get primarioAncho => FilledButton.styleFrom(
+        backgroundColor: MatixColors.accent,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+      );
+
   /// Destructivo (borrar / desconectar / vaciar): fondo rojo, texto blanco.
   static ButtonStyle get destructivo => FilledButton.styleFrom(
         backgroundColor: MatixColors.red,
