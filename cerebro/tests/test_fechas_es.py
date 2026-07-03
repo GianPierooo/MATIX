@@ -162,6 +162,46 @@ def test_multiples_o_invalidas_delegan(texto):
 
 
 @pytest.mark.parametrize(
+    "texto",
+    [
+        # Disyunciones y cross-type con fechas completas.
+        "el 3 de enero o el 5 de enero",
+        "a las 10 o a las 11 de la manana",
+        "manana temprano o el jueves",
+        "el lunes 3pm o manana",
+        "hoy a las 3pm y manana a las 4pm",
+        "el 15 a las 3pm o a las 5pm",   # una fecha, DOS horas
+        "manana o",                       # disyunción colgante
+        # Horas/fechas inválidas → nunca inventar.
+        "a las 0am",                      # 0 no es 1-12
+        "el 00",                          # día 0
+        "el 31 de febrero",               # fecha imposible
+        "a la medianoche",                # no reconocida → delega
+    ],
+)
+def test_adversarios_extra_delegan(texto):
+    assert fechas_es.parsear(texto, AHORA) is None, texto
+
+
+def test_bordes_de_mes_y_anio():
+    # "el 31 de diciembre" el 15-dic → este año; "el 1 de enero" → el que viene.
+    r = fechas_es.parsear("el 31 de diciembre", datetime(2026, 12, 15, 10, 0))
+    assert r is not None and r.dt == datetime(2026, 12, 31, 9, 0)
+    r = fechas_es.parsear("el 1 de enero", datetime(2026, 12, 15, 10, 0))
+    assert r is not None and r.dt == datetime(2027, 1, 1, 9, 0)
+    # 2026 NO es bisiesto → 29 de febrero es imposible → delega (no inventa).
+    assert fechas_es.parsear("el 29 de febrero", datetime(2026, 1, 10, 10, 0)) is None
+
+
+def test_docena_meridiano():
+    # 12pm = mediodía (12:00); 12am = medianoche (00:00, rueda a mañana si pasó).
+    r = fechas_es.parsear("a las 12pm", AHORA)
+    assert r is not None and r.dt.hour == 12 and r.dt.minute == 0
+    r = fechas_es.parsear("a las 12am", AHORA)
+    assert r is not None and r.dt.hour == 0
+
+
+@pytest.mark.parametrize(
     "texto, esperado",
     [
         ("a las 3", True),        # cue ambiguo (hora sin am/pm)
