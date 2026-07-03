@@ -88,6 +88,36 @@ def hay_senal_de_fecha(texto: str) -> bool:
     )
 
 
+_DIAS_SEMANA_RE = r"\b(lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b"
+_RELATIVOS_RE = r"\b(hoy|ayer|manana)\b"
+_MERIDIANO_RE = r"\b\d{1,2}(?::\d{2})?\s*[ap]\.?\s?m\.?\b"
+_EL_N_RE = r"\bel\s+\d{1,2}\b"
+_DISYUNCION_RE = re.compile(r"\b[ou]\b|/")
+
+
+def _es_multiple(norm: str) -> bool:
+    """True si el texto tiene DOS o más fechas/horas (disyunción o lista): "el
+    lunes o el martes", "a las 3pm y a las 5pm", "hoy o mañana". Ahí NO se puede
+    elegir sin adivinar → se delega al LLM. Es el guard anti-adivinanza."""
+    # Quita las FRANJAS ("en la mañana", "por la tarde", "esta noche") para que su
+    # palabra ("mañana") no cuente como una SEGUNDA fecha: "mañana en la mañana"
+    # es UNA sola fecha (mañana 09:00), no dos.
+    limpio = re.sub(
+        r"\b(?:en|por|esta|este)\s+(?:la\s+)?(?:manana|tarde|noche)\b", " ", norm
+    )
+    # 2+ del MISMO tipo → dos fechas/horas listadas.
+    for pat in (_RELATIVOS_RE, _DIAS_SEMANA_RE, _MERIDIANO_RE, _EL_N_RE):
+        if len(re.findall(pat, limpio)) > 1:
+            return True
+    # Disyunción explícita ("A o B", "A / B") junto a cualquier cue temporal.
+    if _DISYUNCION_RE.search(limpio) and (_CUE_FECHA.search(limpio) or _AMBIGUO.search(limpio)):
+        return True
+    # Cross-type: un relativo Y un día de semana = dos anclas de fecha distintas.
+    if re.search(_RELATIVOS_RE, limpio) and re.search(_DIAS_SEMANA_RE, limpio):
+        return True
+    return False
+
+
 def parsear(texto: str, ahora: datetime) -> ResultadoFecha | None:
     """Devuelve una `ResultadoFecha` si el texto tiene una fecha/hora de ALTA
     confianza; `None` si no hay fecha o es ambigua (→ el LLM decide)."""
@@ -97,6 +127,11 @@ def parsear(texto: str, ahora: datetime) -> ResultadoFecha | None:
 
     # 1) Recurrencia o ambigüedad → siempre al LLM (no es una fecha puntual).
     if _RECURRENTE.search(norm) or _AMBIGUO.search(norm):
+        return None
+
+    # 1b) DOS o más fechas/horas → ambiguo, al LLM. NUNCA tomamos la primera en
+    #     silencio (era un bug: "el lunes o el martes" resolvía a lunes).
+    if _es_multiple(norm):
         return None
 
     spans: list[tuple[int, int]] = []
@@ -218,9 +253,10 @@ def _parse_hora(norm: str):
     """Devuelve (hora | None, span | None, ambigua: bool). `hora` = (h, m) en
     24h. `ambigua=True` cuando el usuario claramente pidió una hora pero no se
     puede desambiguar (am/pm) → el caller delega en el LLM."""
-    # 1) Con meridiano: "3pm", "10 am", "10:30pm".
+    # 1) Con meridiano: "3pm", "10 am", "10:30pm". La hora con meridiano DEBE ser
+    #    1-12 (un "13pm"/"99pm" es basura → no lo tratamos como hora válida).
     m = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s?m\.?\b", norm)
-    if m:
+    if m and 1 <= int(m.group(1)) <= 12:
         h = int(m.group(1)) % 12
         if m.group(3) == "p":
             h += 12

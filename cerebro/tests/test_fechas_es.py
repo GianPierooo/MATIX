@@ -140,6 +140,28 @@ def test_texto_vacio_delega():
 
 
 @pytest.mark.parametrize(
+    "texto",
+    [
+        # DOS o más fechas/horas → NUNCA elegir la primera en silencio (P0).
+        "el lunes o el martes",
+        "el lunes o el martes 3pm",
+        "a las 3pm o a las 5pm",
+        "manana o pasado manana",
+        "el 15 o el 20",
+        "el lunes y el martes",
+        "hoy o manana",
+        "reunion a las 3pm y a las 6pm",
+        "manana y el viernes",
+        # Hora con meridiano fuera de 1-12 = basura → delega (P0).
+        "a las 99pm",
+        "a las 13pm",
+    ],
+)
+def test_multiples_o_invalidas_delegan(texto):
+    assert fechas_es.parsear(texto, AHORA) is None, texto
+
+
+@pytest.mark.parametrize(
     "texto, esperado",
     [
         ("a las 3", True),        # cue ambiguo (hora sin am/pm)
