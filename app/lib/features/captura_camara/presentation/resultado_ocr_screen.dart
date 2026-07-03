@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../theme/matix_colors.dart';
+import '../../../theme/matix_button_styles.dart';
 import '../../../theme/matix_spacing.dart';
 import '../../../theme/matix_typography.dart';
 import '../../apuntes/application/guardar_apunte_controller.dart';
@@ -208,11 +209,7 @@ class _ResultadoOcrScreenState extends ConsumerState<ResultadoOcrScreen> {
                       )
                     : Icon(_iconoBoton(), size: 18),
                 label: Text(_etiquetaBoton(ocupado)),
-                style: FilledButton.styleFrom(
-                  backgroundColor: MatixColors.accent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
+                style: MatixButtonStyles.primarioMedio,
               ),
               const SizedBox(height: MatixSpacing.m),
               OutlinedButton.icon(

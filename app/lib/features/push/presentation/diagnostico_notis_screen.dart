@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../../../core/notificaciones_service.dart';
 import '../../../theme/matix_colors.dart';
+import '../../../theme/matix_button_styles.dart';
 import '../../wakeword/providers/wakeword_providers.dart' show wakeWordBgServiceProvider;
 import '../application/confirmacion_service.dart';
 import '../application/entrega_background_service.dart';
@@ -265,11 +266,7 @@ class _DiagnosticoNotisScreenState extends ConsumerState<DiagnosticoNotisScreen>
               onPressed: _trabajando ? null : _enviarPruebaConBotones,
               icon: const Icon(Icons.send_rounded),
               label: const Text('Enviar prueba con botones AHORA'),
-              style: FilledButton.styleFrom(
-                backgroundColor: MatixColors.accent,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
+              style: MatixButtonStyles.primarioMedio,
             ),
           ),
           const SizedBox(height: 16),

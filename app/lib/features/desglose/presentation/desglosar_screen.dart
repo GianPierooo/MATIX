@@ -266,11 +266,7 @@ class _Revision extends StatelessWidget {
                   : const Icon(Icons.add_task, size: 18),
               label: Text('Crear ${pasos.length} '
                   '${pasos.length == 1 ? "paso" : "pasos"}'),
-              style: FilledButton.styleFrom(
-                backgroundColor: MatixColors.accent,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
+              style: MatixButtonStyles.primarioMedio,
             ),
           ),
         ),

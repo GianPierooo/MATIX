@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../../api/matix_client.dart';
 import '../../../theme/matix_colors.dart';
+import '../../../theme/matix_button_styles.dart';
 import '../../../theme/matix_spacing.dart';
 import '../domain/movimiento.dart';
 import '../providers/movimientos_providers.dart';
@@ -289,11 +290,7 @@ class _EditorMovimientoScreenState
                   const SizedBox(height: MatixSpacing.xl2),
                   FilledButton(
                     onPressed: _guardando ? null : _guardar,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: MatixColors.accent,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                    style: MatixButtonStyles.primarioMedio,
                     child: _guardando
                         ? const SizedBox(
                             width: 18,
