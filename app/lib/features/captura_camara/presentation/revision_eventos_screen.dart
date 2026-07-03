@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../theme/matix_colors.dart';
+import '../../../theme/matix_button_styles.dart';
 import '../../../theme/matix_spacing.dart';
 import '../../../theme/matix_typography.dart';
 import '../../tareas/domain/selectores.dart';
@@ -389,11 +390,7 @@ class _BarraConfirmar extends StatelessWidget {
       ),
       child: FilledButton(
         onPressed: creando ? null : onConfirmar,
-        style: FilledButton.styleFrom(
-          backgroundColor: MatixColors.accent,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 16),
-        ),
+        style: MatixButtonStyles.primarioAlto,
         child: creando
             ? const SizedBox(
                 width: 20,

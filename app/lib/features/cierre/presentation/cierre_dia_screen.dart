@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../../api/matix_client.dart';
 import '../../../theme/matix_colors.dart';
+import '../../../theme/matix_button_styles.dart';
 import '../../push/presentation/confirmar_pendientes_card.dart';
 import '../domain/cierre_dia.dart';
 import '../providers/cierres_providers.dart';
@@ -267,11 +268,7 @@ class _CierreDiaScreenState extends ConsumerState<CierreDiaScreen> {
                   const SizedBox(height: 24),
                   FilledButton(
                     onPressed: _guardando ? null : _guardar,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: MatixColors.accent,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
+                    style: MatixButtonStyles.primarioAlto,
                     child: _guardando
                         ? const SizedBox(
                             width: 18,

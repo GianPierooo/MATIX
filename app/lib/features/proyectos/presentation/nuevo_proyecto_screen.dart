@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../api/matix_client.dart';
 import '../../../theme/matix_colors.dart';
+import '../../../theme/matix_button_styles.dart';
 import '../../matix/providers/matix_chat_providers.dart';
 import '../../matix/providers/navegacion_matix_provider.dart';
 import '../domain/proyecto.dart';
@@ -278,11 +279,7 @@ class _NuevoProyectoScreenState extends ConsumerState<NuevoProyectoScreen> {
                   const SizedBox(height: 24),
                   FilledButton(
                     onPressed: _guardando ? null : _guardar,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: MatixColors.accent,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
+                    style: MatixButtonStyles.primarioAlto,
                     child: _guardando
                         ? const SizedBox(
                             width: 18,
