@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from . import fechas_es
@@ -302,6 +302,68 @@ def _detectar_crear_tarea(
     )
 
 
+# ── Consulta de tareas (B1): "qué tareas tengo hoy" → consultar_tareas ────────
+#
+# SOLO frases ANCLADAS y task-focused (mencionan tarea/pendiente/qué hacer). El
+# "qué tengo hoy" genérico se deja al LLM (puede querer la agenda/eventos, no
+# solo tareas). El ancla al final ($) hace que CUALQUIER calificador extra
+# ("...del curso de cálculo", "...de prioridad alta") NO matchee → va al LLM,
+# que sí resuelve el filtro. Es read-only: interceptar es siempre seguro.
+
+_RE_CONSULTA_TAREAS = re.compile(
+    r"^(?:"
+    r"(?:que|q)\s+(?:tareas?|pendientes?)\s+(?:tengo|hay|me\s+quedan?)"
+    r"|mis\s+(?:tareas|pendientes)"
+    r"|(?:que|q)\s+tengo\s+(?:que\s+hacer|pendiente)"
+    r"|tareas?(?:\s+pendientes?)?"
+    r")"
+    r"(?:\s+(?:de|para|d[eé]))?"
+    r"\s*"
+    r"(?P<periodo>hoy|manana|esta\s+semana|pendientes?)?"
+    r"\s*$"
+)
+
+
+def _rango_periodo(periodo: str | None, ahora: datetime):
+    """(vence_desde, vence_hasta, etiqueta_legible) para el periodo, o
+    (None, None, '') si no hay periodo con fecha (todas las pendientes)."""
+    hoy = ahora.date()
+    if periodo == "hoy":
+        return hoy.isoformat(), hoy.isoformat(), "para hoy"
+    if periodo == "manana":
+        d = hoy + timedelta(days=1)
+        return d.isoformat(), d.isoformat(), "para mañana"
+    if periodo and periodo.startswith("esta"):
+        fin = hoy + timedelta(days=(6 - hoy.weekday()))  # hasta el domingo
+        return hoy.isoformat(), fin.isoformat(), "para esta semana"
+    return None, None, ""
+
+
+def _detectar_consulta_tareas(
+    texto_norm: str, ahora: datetime | None
+) -> IntencionRapida | None:
+    """«qué tareas tengo hoy / esta semana», «mis pendientes» → consultar_tareas
+    (read-only) resuelto sin LLM. Necesita `ahora` para los rangos de fecha."""
+    if ahora is None:
+        return None
+    nucleo = texto_norm.strip(" .!?¡¿\n\t")
+    m = _RE_CONSULTA_TAREAS.match(nucleo)
+    if not m:
+        return None
+    desde, hasta, etiqueta = _rango_periodo(m.group("periodo"), ahora)
+    args: dict[str, Any] = {"estado": "pendiente"}
+    if desde:
+        args["vence_desde"] = desde
+        args["vence_hasta"] = hasta
+    return IntencionRapida(
+        tipo="tool",
+        nombre="consultar_tareas",
+        args=args,
+        mensaje=etiqueta,  # el ejecutor lo usa para la frase (no es un saludo)
+        etiqueta_motivo="consulta_tareas",
+    )
+
+
 # ── API pública ──────────────────────────────────────────────────────────────
 
 
@@ -347,5 +409,10 @@ def detectar(
     crear = _detectar_crear_tarea(texto_original, texto_norm, ahora=ahora)
     if crear:
         return crear
+
+    # 4) "Qué tareas tengo hoy / esta semana" → consultar_tareas (read-only).
+    consulta = _detectar_consulta_tareas(texto_norm, ahora)
+    if consulta:
+        return consulta
 
     return None

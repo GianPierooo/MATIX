@@ -164,6 +164,70 @@ def test_crea_tarea_sin_fecha_con_ahora_sigue_simple():
     assert "vence_en" not in (i.args or {})
 
 
+# ── Consulta de tareas (B1): "qué tareas tengo hoy" sin LLM ───────────────────
+
+
+def test_consulta_tareas_hoy_resuelve():
+    from datetime import datetime
+
+    ahora = datetime(2026, 7, 2, 10, 0)
+    i = cl.detectar("qué tareas tengo hoy", ahora=ahora)
+    assert i is not None and i.nombre == "consultar_tareas"
+    assert i.etiqueta_motivo == "consulta_tareas"
+    assert i.args["estado"] == "pendiente"
+    assert i.args["vence_desde"] == "2026-07-02"
+    assert i.args["vence_hasta"] == "2026-07-02"
+    assert i.mensaje == "para hoy"
+
+
+def test_consulta_mis_pendientes_sin_fecha():
+    from datetime import datetime
+
+    i = cl.detectar("mis pendientes", ahora=datetime(2026, 7, 2, 10, 0))
+    assert i is not None and i.nombre == "consultar_tareas"
+    assert "vence_desde" not in i.args  # todas las pendientes
+
+
+def test_consulta_tareas_esta_semana_rango():
+    from datetime import datetime, timedelta
+
+    ahora = datetime(2026, 7, 2, 10, 0)
+    i = cl.detectar("qué tareas tengo esta semana", ahora=ahora)
+    assert i is not None and i.args["vence_desde"] == "2026-07-02"
+    fin = (ahora.date() + timedelta(days=(6 - ahora.weekday()))).isoformat()
+    assert i.args["vence_hasta"] == fin
+
+
+def test_consulta_ambigua_o_con_filtro_va_al_llm():
+    from datetime import datetime
+
+    ahora = datetime(2026, 7, 2, 10, 0)
+    for msg in [
+        "qué tengo hoy",                          # genérico: puede ser agenda → LLM
+        "qué tareas tengo del curso de cálculo",  # calificador extra → LLM
+        "qué tareas tengo hoy de prioridad alta",  # calificador extra → LLM
+        "qué eventos tengo hoy",                   # eventos, no tareas → LLM
+    ]:
+        assert cl.detectar(msg, ahora=ahora) is None, msg
+
+
+def test_consulta_sin_ahora_delega():
+    assert cl.detectar("qué tareas tengo hoy") is None  # sin reloj → LLM
+
+
+def test_frase_consulta_tareas_formato():
+    from app.matix import chat
+
+    assert chat._frase_consulta_tareas({"total": 0, "tareas": []}, "para hoy") == (
+        "No tienes tareas pendientes para hoy."
+    )
+    d = {"total": 3, "tareas": [
+        {"titulo": "comprar pan"}, {"titulo": "llamar al banco"}, {"titulo": "informe"}]}
+    assert chat._frase_consulta_tareas(d, "para hoy") == (
+        "Tienes 3 tareas para hoy: comprar pan, llamar al banco y informe."
+    )
+
+
 # ── Vetos transversales ─────────────────────────────────────────────────────
 
 

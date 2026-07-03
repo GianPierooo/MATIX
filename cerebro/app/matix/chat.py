@@ -672,6 +672,33 @@ def _frase_apunte_creado(titulo: str) -> str:
     return f"Anotado: «{titulo}»."
 
 
+def _unir_es(items: list[str]) -> str:
+    """Une con comas y una «y» antes del último (estilo natural en español)."""
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + " y " + items[-1]
+
+
+def _frase_consulta_tareas(datos: dict[str, Any], periodo: str) -> str:
+    """Resumen DETERMINISTA (sin LLM) de las tareas pendientes consultadas.
+    Peruano, sin markdown ni emojis. `periodo` = 'para hoy'/'para mañana'/…/''."""
+    tareas = datos.get("tareas") or []
+    total = int(datos.get("total") or len(tareas))
+    suf = f" {periodo}" if periodo else ""
+    if total == 0:
+        return f"No tienes tareas pendientes{suf}."
+    titulos = [str(t.get("titulo") or "").strip() for t in tareas if (t.get("titulo") or "").strip()]
+    mostrados = titulos[:8]
+    lista = _unir_es(mostrados)
+    resto = total - len(mostrados)
+    if resto > 0:
+        lista = f"{lista}, y {resto} más"
+    plural = "tarea" if total == 1 else "tareas"
+    return f"Tienes {total} {plural}{suf}: {lista}."
+
+
 async def _ejecutar_ruta_rapida(
     db: Postgrest,
     intencion: clasificador_rapido.IntencionRapida,
@@ -725,6 +752,8 @@ async def _ejecutar_ruta_rapida(
         respuesta = _frase_tarea_creada(titulo)
     elif nombre == "crear_apunte":
         respuesta = _frase_apunte_creado(titulo)
+    elif nombre == "consultar_tareas":
+        respuesta = _frase_consulta_tareas(datos, intencion.mensaje or "")
     else:
         # Defensivo: si algún día agregamos otra tool a la ruta rápida y se nos
         # olvida una plantilla, devolvemos genérico (no rompemos al usuario).
