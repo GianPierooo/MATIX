@@ -22,9 +22,32 @@ del código sigue igual.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import contextvars
+import logging
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any
+
+logger = logging.getLogger("matix.uso")
+
+# Operación en curso para la telemetría por-operación. La fija la capa pública
+# (chat por defecto; visión/extracción/repaso la marcan al llamar al modelo).
+# Los registradores la leen para etiquetar cada llamada. Es un ContextVar → cada
+# request/task tiene su copia, así que es seguro con concurrencia.
+operacion_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "matix_llm_operacion", default="chat"
+)
+
+
+@contextmanager
+def operacion(nombre: str):
+    """Marca la operación en curso para la telemetría; se restaura al salir."""
+    token = operacion_ctx.set(nombre)
+    try:
+        yield
+    finally:
+        operacion_ctx.reset(token)
 
 # ─── Tarifas — actualizar acá cuando OpenAI las mueva ───────────────
 # Fuente (2026-05-26): https://openai.com/api/pricing/
@@ -77,6 +100,9 @@ class _Snapshot:
     tokens_embedding: int = 0
     llamadas_embedding: int = 0
     llamadas_busqueda_web: int = 0
+    # Desglose por OPERACIÓN (chat / vision:* / extraccion:* / repaso / embedding
+    # / whisper / tts): {op: {llamadas, tokens_in, tokens_out, cached, costo_usd}}.
+    por_operacion: dict[str, dict[str, float]] = field(default_factory=dict)
 
 
 class MedidorUso:
@@ -95,11 +121,14 @@ class MedidorUso:
         precio_output_por_m: float | None = None,
         precio_cached_por_m: float | None = None,
         proveedor: str | None = None,
+        operacion: str | None = None,
+        modelo: str | None = None,
     ) -> None:
         """Acepta el `usage` de un chat (objeto OpenAI o dict; tolerante a
         campos faltantes). Acumula tokens (para mostrar) y el COSTO del
         request con el precio del MODELO usado. Si no se pasan precios, usa
-        los de gpt-4o-mini (compat)."""
+        los de gpt-4o-mini (compat). `operacion` etiqueta la telemetría (si es
+        None, se lee del ContextVar); `modelo` solo alimenta el log."""
         if usage is None:
             return
         prompt = int(_get(usage, "prompt_tokens", 0) or 0)
@@ -122,6 +151,7 @@ class MedidorUso:
             no_cache * p_in + cached * p_cached + completion * p_out
         ) / 1_000_000
 
+        op = operacion if operacion is not None else operacion_ctx.get()
         with self._lock:
             self._s.prompt_tokens += prompt
             self._s.completion_tokens += completion
@@ -134,27 +164,55 @@ class MedidorUso:
             elif proveedor == "openai":
                 self._s.costo_chat_openai_usd += inc
                 self._s.llamadas_chat_openai += 1
+            self._acc_op(op, tokens_in=prompt, tokens_out=completion, cached=cached, costo=inc)
+        logger.info(
+            "llm_uso op=%s proveedor=%s modelo=%s in=%d out=%d cached=%d costo_usd=%.6f",
+            op, proveedor or "?", modelo or "?", prompt, completion, cached, inc,
+        )
 
-    def registrar_whisper(self, segundos: float) -> None:
+    def _acc_op(
+        self, op: str, *, tokens_in: int, tokens_out: int, cached: int, costo: float
+    ) -> None:
+        """Acumula el desglose por operación. Se llama con el lock TOMADO."""
+        e = self._s.por_operacion.get(op)
+        if e is None:
+            e = {"llamadas": 0, "tokens_in": 0, "tokens_out": 0, "cached": 0, "costo_usd": 0.0}
+            self._s.por_operacion[op] = e
+        e["llamadas"] += 1
+        e["tokens_in"] += tokens_in
+        e["tokens_out"] += tokens_out
+        e["cached"] += cached
+        e["costo_usd"] += costo
+
+    def registrar_whisper(self, segundos: float, *, operacion: str = "whisper") -> None:
         if segundos <= 0:
             return
+        costo = (float(segundos) / 60.0) * _PRECIO_WHISPER_POR_MIN
         with self._lock:
             self._s.segundos_whisper += float(segundos)
             self._s.llamadas_whisper += 1
+            self._acc_op(operacion, tokens_in=0, tokens_out=0, cached=0, costo=costo)
+        logger.info("llm_uso op=%s segundos=%.1f costo_usd=%.6f", operacion, float(segundos), costo)
 
-    def registrar_tts(self, caracteres: int) -> None:
+    def registrar_tts(self, caracteres: int, *, operacion: str = "tts") -> None:
         if caracteres <= 0:
             return
+        costo = int(caracteres) * _PRECIO_TTS_POR_M_CHARS / 1_000_000
         with self._lock:
             self._s.caracteres_tts += int(caracteres)
             self._s.llamadas_tts += 1
+            self._acc_op(operacion, tokens_in=0, tokens_out=0, cached=0, costo=costo)
+        logger.info("llm_uso op=%s chars=%d costo_usd=%.6f", operacion, int(caracteres), costo)
 
-    def registrar_embedding(self, tokens: int) -> None:
+    def registrar_embedding(self, tokens: int, *, operacion: str = "embedding") -> None:
         if tokens <= 0:
             return
+        costo = int(tokens) * _PRECIO_EMBED_POR_M / 1_000_000
         with self._lock:
             self._s.tokens_embedding += int(tokens)
             self._s.llamadas_embedding += 1
+            self._acc_op(operacion, tokens_in=int(tokens), tokens_out=0, cached=0, costo=costo)
+        logger.info("llm_uso op=%s in=%d out=0 costo_usd=%.6f", operacion, int(tokens), costo)
 
     def registrar_busqueda_web(self, n: int = 1) -> None:
         if n <= 0:
@@ -166,6 +224,7 @@ class MedidorUso:
         """Devuelve el estado actual + costo estimado en USD."""
         with self._lock:
             s = _Snapshot(**self._s.__dict__)
+            por_op = {k: dict(v) for k, v in self._s.por_operacion.items()}
         # El costo del CHAT (incluye visión) ya viene acumulado por request con
         # el precio del modelo usado. Whisper/TTS/embeddings/Tavily a precio fijo.
         costo_whisper = (s.segundos_whisper / 60.0) * _PRECIO_WHISPER_POR_MIN
@@ -197,6 +256,11 @@ class MedidorUso:
             "llamadas_busqueda_web": s.llamadas_busqueda_web,
             "costo_usd": round(costo, 6),
             "costos": costos,
+            # Desglose por OPERACIÓN (chat/vision:*/extraccion:*/repaso/embedding/
+            # whisper/tts): tokens y costo acumulados por cada tipo de llamada.
+            "por_operacion": {
+                k: {**v, "costo_usd": round(v["costo_usd"], 6)} for k, v in por_op.items()
+            },
             # Desglose del chat/visión por proveedor (observabilidad del failover).
             "por_proveedor": {
                 "openai": {

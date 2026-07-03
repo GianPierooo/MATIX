@@ -31,7 +31,7 @@ from openai import AsyncOpenAI
 
 from ..config import settings
 from . import modelos_llm
-from .uso import medidor
+from .uso import medidor, operacion as marcar_operacion
 
 logger = logging.getLogger("matix.llm")
 
@@ -238,10 +238,10 @@ def _registrar_chat_openai(usage: Any, model: str) -> None:
     if precios:
         medidor.registrar_chat(
             usage, precio_input_por_m=precios[0], precio_output_por_m=precios[1],
-            proveedor="openai",
+            proveedor="openai", modelo=model,
         )
     else:
-        medidor.registrar_chat(usage, proveedor="openai")
+        medidor.registrar_chat(usage, proveedor="openai", modelo=model)
 
 
 def _registrar_uso_anthropic(usage: Any, model: str) -> None:
@@ -261,10 +261,10 @@ def _registrar_uso_anthropic(usage: Any, model: str) -> None:
     if precios:
         medidor.registrar_chat(
             normalizado, precio_input_por_m=precios[0], precio_output_por_m=precios[1],
-            proveedor="anthropic",
+            proveedor="anthropic", modelo=model,
         )
     else:
-        medidor.registrar_chat(normalizado, proveedor="anthropic")
+        medidor.registrar_chat(normalizado, proveedor="anthropic", modelo=model)
 
 
 def _imagen_a_anthropic(url: str) -> dict[str, Any]:
@@ -576,15 +576,20 @@ async def _json_en(model: str, messages: list[dict], *, temperature: float) -> s
 
 
 async def _chat_json(
-    messages: list[dict], *, model: str | None, temperature: float
+    messages: list[dict], *, model: str | None, temperature: float,
+    operacion: str = "extraccion",
 ) -> str:
     """Pide al modelo del chat una respuesta JSON y devuelve el string
     crudo. OpenAI usa su modo JSON; Anthropic, prefill con `{`. Respeta el
-    proveedor preferido y cae al otro ante error/crédito agotado."""
+    proveedor preferido y cae al otro ante error/crédito agotado.
+
+    `operacion` etiqueta la telemetría (por defecto "extraccion"; los
+    extractores concretos pueden pasar una etiqueta más fina)."""
     model = _modelo_efectivo(model)
-    texto, _, _ = await _con_failover(
-        model, lambda m: _json_en(m, messages, temperature=temperature)
-    )
+    with marcar_operacion(operacion):
+        texto, _, _ = await _con_failover(
+            model, lambda m: _json_en(m, messages, temperature=temperature)
+        )
     return texto
 
 
@@ -949,6 +954,7 @@ async def extraer_recibo_json(
         ],
         model=model,
         temperature=0,
+        operacion="extraccion:recibo",
     )
     try:
         datos = json.loads(contenido)
@@ -1455,6 +1461,7 @@ async def extraer_documento_json(
             [{"role": "system", "content": system}, {"role": "user", "content": texto.strip()}],
             model=model,
             temperature=0.1,
+            operacion="extraccion:documento",
         )
     else:
         return dict(_DOC_VACIO)
@@ -1517,6 +1524,7 @@ async def repaso_semanal_json(
         ],
         model=model,
         temperature=0.4,
+        operacion="repaso",
     )
     try:
         out = json.loads(contenido)
@@ -1783,13 +1791,16 @@ async def _anthropic_vision(
 
 
 async def _vision_en(
-    model: str, system: str, pedido: str, imagen_data_url: str, *, max_tokens: int
+    model: str, system: str, pedido: str, imagen_data_url: str, *, max_tokens: int,
+    operacion: str = "vision",
 ) -> str:
     """Un intento de visión contra UN modelo (rutea por proveedor). Tanto
-    gpt-4o-mini como Claude Haiku soportan imágenes."""
-    if _es_anthropic(model):
-        return await _anthropic_vision(model, system, pedido, imagen_data_url, max_tokens=max_tokens)
-    return await _openai_vision(model, system, pedido, imagen_data_url, max_tokens=max_tokens)
+    gpt-4o-mini como Claude Haiku soportan imágenes. `operacion` etiqueta la
+    telemetría (vision:camara / vision:pantalla)."""
+    with marcar_operacion(operacion):
+        if _es_anthropic(model):
+            return await _anthropic_vision(model, system, pedido, imagen_data_url, max_tokens=max_tokens)
+        return await _openai_vision(model, system, pedido, imagen_data_url, max_tokens=max_tokens)
 
 
 async def narrar_frame(
@@ -1816,7 +1827,8 @@ async def narrar_frame(
 
     async def _intento(m: str) -> str:
         return await asyncio.wait_for(
-            _vision_en(m, _NARRACION_SYSTEM, pedido, imagen_data_url, max_tokens=60),
+            _vision_en(m, _NARRACION_SYSTEM, pedido, imagen_data_url, max_tokens=60,
+                       operacion="vision:camara"),
             timeout=_NARRACION_TIMEOUT_S,
         )
 
@@ -1960,7 +1972,8 @@ async def interpretar_pantalla(
 
     async def _intento(m: str) -> str:
         return await asyncio.wait_for(
-            _vision_en(m, _CONTROL_SYSTEM, pedido, imagen_data_url, max_tokens=300),
+            _vision_en(m, _CONTROL_SYSTEM, pedido, imagen_data_url, max_tokens=300,
+                       operacion="vision:pantalla"),
             timeout=_CONTROL_TIMEOUT_S,
         )
 

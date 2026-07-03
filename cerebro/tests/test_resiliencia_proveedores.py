@@ -153,7 +153,7 @@ async def test_preferido_anthropic_intenta_claude_primero(monkeypatch):
 async def test_narrar_frame_failover_a_claude(monkeypatch):
     monkeypatch.setattr(modelos_llm, "proveedor_preferido", lambda: "auto")
 
-    async def fake_vision(model, system, pedido, imagen, *, max_tokens):
+    async def fake_vision(model, system, pedido, imagen, *, max_tokens, operacion="vision"):
         if modelos_llm.proveedor_de_id(model) == "openai":
             raise _ErrAuth()
         return "veo un escritorio con una laptop"
@@ -178,7 +178,7 @@ async def test_narrar_frame_timeout_primario_cae_al_otro(monkeypatch):
     monkeypatch.setattr(modelos_llm, "proveedor_preferido", lambda: "auto")
     monkeypatch.setattr(llm, "_NARRACION_TIMEOUT_S", 0.05)
 
-    async def fake_vision(model, system, pedido, imagen, *, max_tokens):
+    async def fake_vision(model, system, pedido, imagen, *, max_tokens, operacion="vision"):
         if modelos_llm.proveedor_de_id(model) == "openai":
             await asyncio.sleep(1)  # cuelga: supera el timeout agresivo
             return "no debería llegar"
@@ -195,7 +195,7 @@ async def test_narrar_frame_pinned_no_cruza_de_proveedor(monkeypatch):
     monkeypatch.setattr(modelos_llm, "proveedor_preferido", lambda: "anthropic")
     vistos: list[str] = []
 
-    async def fake_vision(model, system, pedido, imagen, *, max_tokens):
+    async def fake_vision(model, system, pedido, imagen, *, max_tokens, operacion="vision"):
         vistos.append(model)
         raise _ErrTransitorio()  # incluso un 5xx: NO cruzamos cuando está pinneado
 
@@ -212,7 +212,7 @@ async def test_narrar_frame_pinned_ok_no_toca_el_otro(monkeypatch):
     monkeypatch.setattr(modelos_llm, "proveedor_preferido", lambda: "anthropic")
     vistos: list[str] = []
 
-    async def fake_vision(model, system, pedido, imagen, *, max_tokens):
+    async def fake_vision(model, system, pedido, imagen, *, max_tokens, operacion="vision"):
         vistos.append(model)
         return "veo a Claude narrando la escena"
 

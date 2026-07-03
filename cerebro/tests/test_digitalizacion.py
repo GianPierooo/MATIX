@@ -44,7 +44,7 @@ class FakeDB:
 
 
 def _patch_chat_json(monkeypatch, salida, contador=None):
-    async def fake(messages, *, model=None, temperature=0.0):
+    async def fake(messages, *, model=None, temperature=0.0, operacion="extraccion"):
         if contador is not None:
             contador.append(1)
         return salida if isinstance(salida, str) else json.dumps(salida)
@@ -109,7 +109,7 @@ def test_extractor_imagen_usa_vision_barata(monkeypatch):
     chat_calls, vis_calls = [], []
     _patch_chat_json(monkeypatch, "{}", chat_calls)
 
-    async def fake_vision(model, system, pedido, imagen, *, max_tokens):
+    async def fake_vision(model, system, pedido, imagen, *, max_tokens, operacion="vision"):
         vis_calls.append(model)
         return json.dumps({"tipo": "apunte", "apunte": {"titulo": "Pizarra", "contenido": "x"}})
 
