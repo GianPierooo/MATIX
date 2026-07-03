@@ -127,6 +127,14 @@ _GRUPOS: list[tuple[frozenset[str], re.Pattern[str]]] = [
         r"reproduc|pausa|para la|siguiente|anterior|reanuda|sigue|pasala|salta|"
         r"captura|screenshot|pantallazo|web|url|pagina|sitio|"
         r"pantalla|control|mouse|raton|teclea|clic|click|haz por mi|hazlo tu)\w*")),
+    # Subtareas + restaurar de papelera (gestión fina de tareas por IA).
+    (frozenset({
+        "crear_subtarea", "completar_subtarea", "eliminar_subtarea",
+        "restaurar_tarea",
+    }), re.compile(
+        r"\b(subtarea|subtareas|sub-?tarea|checklist|restaura|restaurar|"
+        r"recupera|recuperar|papelera)\w*"
+        r"|de la papelera|borre por error|elimine por error|que borre|que elimine")),
 ]
 
 # Si el mensaje es largo o "complejo", no arriesgamos potencia: van TODAS.

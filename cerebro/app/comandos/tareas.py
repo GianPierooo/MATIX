@@ -282,6 +282,53 @@ async def cmd_restaurar(db: Postgrest, params: dict[str, Any]) -> dict[str, Any]
     return ok(fila)
 
 
+# ── Subtareas (G6) — la IA gestiona los sub-ítems de una tarea ────────────────
+
+TABLA_SUBTAREAS = "subtareas"
+
+
+async def cmd_crear_subtarea(db: Postgrest, params: dict[str, Any]) -> dict[str, Any]:
+    """Crea una subtarea colgada de una tarea existente."""
+    tarea_id = _uuid(params.get("tarea_id"))
+    if tarea_id is None:
+        return error("validacion", f"El id «{params.get('tarea_id')}» no es un UUID válido.")
+    titulo = str(params.get("titulo") or "").strip()
+    if not titulo:
+        return error("validacion", "La subtarea necesita un título.")
+    padre = await db.get(TABLA, tarea_id)
+    if padre is None or padre.get("eliminado_en"):
+        return error("no_existe", "Esa tarea no está en el hub; no le puedo agregar subtareas.")
+    payload: dict[str, Any] = {"tarea_id": tarea_id, "titulo": titulo, "completada": False}
+    if isinstance(params.get("orden"), int):
+        payload["orden"] = params["orden"]
+    fila = await db.insert(TABLA_SUBTAREAS, payload)
+    if fila is None:
+        return error("interno", "No se pudo crear la subtarea (la BD no la devolvió).")
+    return ok(fila)
+
+
+async def cmd_completar_subtarea(db: Postgrest, params: dict[str, Any]) -> dict[str, Any]:
+    """Marca (o desmarca) una subtarea como completada."""
+    sub_id = _uuid(params.get("subtarea_id"))
+    if sub_id is None:
+        return error("validacion", f"El id «{params.get('subtarea_id')}» no es un UUID válido.")
+    completada = bool(params.get("completada", True))
+    fila = await db.update(TABLA_SUBTAREAS, sub_id, {"completada": completada})
+    if fila is None:
+        return error("no_existe", "Esa subtarea ya no existe.")
+    return ok(fila)
+
+
+async def cmd_eliminar_subtarea(db: Postgrest, params: dict[str, Any]) -> dict[str, Any]:
+    """Borra una subtarea (las subtareas no tienen papelera: borrado directo)."""
+    sub_id = _uuid(params.get("subtarea_id"))
+    if sub_id is None:
+        return error("validacion", f"El id «{params.get('subtarea_id')}» no es un UUID válido.")
+    if not await db.delete(TABLA_SUBTAREAS, sub_id):
+        return error("no_existe", "Esa subtarea ya no existe.")
+    return ok({"eliminada": True, "id": sub_id})
+
+
 # ── Registro ──────────────────────────────────────────────────────────────────
 
 
@@ -306,3 +353,12 @@ def registrar(reg: RegistroComandos) -> None:
     reg.registrar(Comando(
         "restaurar_tarea", "Restaura una tarea de la papelera.",
         Riesgo.CONSECUENTE, cmd_restaurar, ("tareas",)))
+    reg.registrar(Comando(
+        "crear_subtarea", "Crea una subtarea en una tarea.",
+        Riesgo.CONSECUENTE, cmd_crear_subtarea, ("subtareas",)))
+    reg.registrar(Comando(
+        "completar_subtarea", "Marca o desmarca una subtarea como hecha.",
+        Riesgo.CONSECUENTE, cmd_completar_subtarea, ("subtareas",)))
+    reg.registrar(Comando(
+        "eliminar_subtarea", "Borra una subtarea.",
+        Riesgo.CONSECUENTE, cmd_eliminar_subtarea, ("subtareas",)))

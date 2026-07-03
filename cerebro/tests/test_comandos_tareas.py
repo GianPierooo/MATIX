@@ -7,10 +7,13 @@ cualquier camino deja el mismo estado). FakeDB en memoria, sin red.
 """
 from __future__ import annotations
 
+import asyncio
+
 from app.comandos import registro
 from app.matix import chat, horario, tools
 
 _TID = "11111111-1111-1111-1111-111111111111"
+_SID = "22222222-2222-2222-2222-222222222222"  # id de subtarea (UUID válido)
 
 
 class FakeDB:
@@ -218,3 +221,97 @@ def test_d1_captura_crea_tarea_nunca_evento(monkeypatch):
     assert res["ok"] is True
     assert len(db.tablas.get("tareas", [])) == 1  # se creó la tarea
     assert db.tablas.get("eventos", []) == []      # NUNCA un evento
+
+
+# ── Subtareas (G6) ────────────────────────────────────────────────────────────
+
+
+def _db_con_tarea() -> FakeDB:
+    return FakeDB({"tareas": [{"id": _TID, "titulo": "informe", "eliminado_en": None}]})
+
+
+def test_registro_tiene_comandos_de_subtarea():
+    for n in ("crear_subtarea", "completar_subtarea", "eliminar_subtarea"):
+        assert registro.existe(n), n
+        assert registro.get(n).riesgo.value == "consecuente"
+
+
+def test_crear_subtarea_ok():
+    db = _db_con_tarea()
+    r = asyncio.run(registro.ejecutar(
+        db, "crear_subtarea", {"tarea_id": _TID, "titulo": "reunir datos"}))
+    assert r["ok"] is True
+    subs = db.tablas.get("subtareas", [])
+    assert len(subs) == 1
+    assert subs[0]["titulo"] == "reunir datos"
+    assert subs[0]["completada"] is False
+    assert subs[0]["tarea_id"] == _TID
+
+
+def test_crear_subtarea_tarea_inexistente():
+    r = asyncio.run(registro.ejecutar(
+        FakeDB(), "crear_subtarea", {"tarea_id": _TID, "titulo": "x"}))
+    assert r["ok"] is False and r["tipo"] == "no_existe"
+
+
+def test_crear_subtarea_sin_titulo():
+    db = _db_con_tarea()
+    r = asyncio.run(registro.ejecutar(
+        db, "crear_subtarea", {"tarea_id": _TID, "titulo": "  "}))
+    assert r["ok"] is False and r["tipo"] == "validacion"
+
+
+def test_completar_subtarea_marca_y_desmarca():
+    db = FakeDB({"subtareas": [
+        {"id": _SID, "tarea_id": _TID, "titulo": "x", "completada": False}]})
+    r = asyncio.run(registro.ejecutar(db, "completar_subtarea", {"subtarea_id": _SID}))
+    assert r["ok"] is True and r["datos"]["completada"] is True
+    r2 = asyncio.run(registro.ejecutar(
+        db, "completar_subtarea", {"subtarea_id": _SID, "completada": False}))
+    assert r2["datos"]["completada"] is False
+
+
+def test_completar_subtarea_inexistente():
+    r = asyncio.run(registro.ejecutar(FakeDB(), "completar_subtarea", {"subtarea_id": _SID}))
+    assert r["ok"] is False and r["tipo"] == "no_existe"
+
+
+def test_eliminar_subtarea_ok_y_faltante():
+    db = FakeDB({"subtareas": [
+        {"id": _SID, "tarea_id": _TID, "titulo": "x", "completada": False}]})
+    r = asyncio.run(registro.ejecutar(db, "eliminar_subtarea", {"subtarea_id": _SID}))
+    assert r["ok"] is True
+    assert db.tablas.get("subtareas", []) == []
+    r2 = asyncio.run(registro.ejecutar(db, "eliminar_subtarea", {"subtarea_id": _SID}))
+    assert r2["ok"] is False and r2["tipo"] == "no_existe"
+
+
+# ── Restaurar de papelera (G13) ───────────────────────────────────────────────
+
+
+def test_restaurar_tarea_saca_de_la_papelera():
+    db = FakeDB({"tareas": [
+        {"id": _TID, "titulo": "informe", "eliminado_en": "2026-07-01T00:00:00+00:00"}]})
+    r = asyncio.run(registro.ejecutar(db, "restaurar_tarea", {"tarea_id": _TID}))
+    assert r["ok"] is True
+    assert _tareas(db)[0]["eliminado_en"] is None
+
+
+def test_restaurar_tarea_inexistente():
+    r = asyncio.run(registro.ejecutar(FakeDB(), "restaurar_tarea", {"tarea_id": _TID}))
+    assert r["ok"] is False and r["tipo"] == "no_existe"
+
+
+# ── Tools de la IA: envoltorios expuestos ─────────────────────────────────────
+
+
+def test_tools_exponen_subtarea_y_restaurar():
+    for n in ("crear_subtarea", "completar_subtarea", "eliminar_subtarea", "restaurar_tarea"):
+        assert n in tools._HANDLERS, n
+
+
+def test_tool_crear_subtarea_da_forma_compacta():
+    db = _db_con_tarea()
+    r = asyncio.run(tools._HANDLERS["crear_subtarea"](db, {"tarea_id": _TID, "titulo": "paso 1"}))
+    assert r["ok"] is True
+    assert r["datos"]["titulo"] == "paso 1"

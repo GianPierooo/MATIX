@@ -466,6 +466,88 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "restaurar_tarea",
+            "description": (
+                "Restaura una tarea que estaba en la PAPELERA (borrada) y la "
+                "devuelve al hub. Úsalo cuando el usuario diga «restaura», "
+                "«recupera la tarea que borré» o «devuélveme X de la papelera»."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tarea_id": {
+                        **_UUID,
+                        "description": "Id de la tarea a restaurar (está en la papelera).",
+                    },
+                },
+                "required": ["tarea_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "crear_subtarea",
+            "description": (
+                "Agrega una SUBTAREA (un sub-ítem o paso) a una tarea existente. "
+                "Úsalo cuando el usuario quiera desglosar una tarea en pasos o "
+                "diga «agrégale una subtarea» / «ponle como paso X»."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tarea_id": {**_UUID, "description": "Id de la tarea padre."},
+                    "titulo": {"type": "string", "description": "Texto de la subtarea."},
+                },
+                "required": ["tarea_id", "titulo"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "completar_subtarea",
+            "description": (
+                "Marca (o desmarca) una SUBTAREA como hecha. Por defecto la marca "
+                "como completada; pasa `completada=false` para desmarcarla."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subtarea_id": {**_UUID, "description": "Id de la subtarea."},
+                    "completada": {
+                        "type": "boolean",
+                        "description": "true = hecha (por defecto), false = pendiente.",
+                    },
+                },
+                "required": ["subtarea_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "eliminar_subtarea",
+            "description": (
+                "Borra una SUBTAREA de una tarea. Las subtareas no tienen "
+                "papelera: el borrado es directo."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subtarea_id": {**_UUID, "description": "Id de la subtarea a borrar."},
+                },
+                "required": ["subtarea_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "marcar_accion_siguiente_hecha",
             "description": (
                 "Cuando el usuario diga «ya hice la acción siguiente "
@@ -3898,6 +3980,41 @@ async def _reabrir_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
     return _ok({"id": d.get("id"), "titulo": d.get("titulo")})
 
 
+async def _restaurar_tarea(db: Postgrest, args: dict) -> dict[str, Any]:
+    """Envoltorio del comando `restaurar_tarea` (saca una tarea de la papelera)."""
+    res = await _registro.ejecutar(db, "restaurar_tarea", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    d = res["datos"]
+    return _ok({"id": d.get("id"), "titulo": d.get("titulo"), "restaurada": True})
+
+
+# ── Subtareas (G6): ENVOLTORIOS sobre comandos/tareas.py ──────────────────────
+
+
+async def _crear_subtarea(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "crear_subtarea", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    d = res["datos"]
+    return _ok({"id": d.get("id"), "tarea_id": d.get("tarea_id"), "titulo": d.get("titulo")})
+
+
+async def _completar_subtarea(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "completar_subtarea", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    d = res["datos"]
+    return _ok({"id": d.get("id"), "titulo": d.get("titulo"), "completada": bool(d.get("completada"))})
+
+
+async def _eliminar_subtarea(db: Postgrest, args: dict) -> dict[str, Any]:
+    res = await _registro.ejecutar(db, "eliminar_subtarea", args, origen="ia")
+    if not res.get("ok"):
+        return res
+    return _ok({"eliminada": True})
+
+
 # ── Proyectos: ENVOLTORIOS sobre los comandos (comandos/proyectos.py) ─────────
 # La lógica (tope de 3, prioridad, coherencia de la acción siguiente, estado,
 # avance) vive UNA sola vez en el comando; la app usa los endpoints, que llaman
@@ -7117,6 +7234,10 @@ _HANDLERS = {
     # Completar / reabrir tareas
     "completar_tarea": _completar_tarea,
     "reabrir_tarea": _reabrir_tarea,
+    "restaurar_tarea": _restaurar_tarea,
+    "crear_subtarea": _crear_subtarea,
+    "completar_subtarea": _completar_subtarea,
+    "eliminar_subtarea": _eliminar_subtarea,
     # Eliminar (papelera, soft delete)
     "eliminar_tarea": _eliminar_tarea,
     "eliminar_evento": _eliminar_evento,
@@ -7266,6 +7387,10 @@ TABLAS_AFECTADAS = {
     "editar_proyecto": ["proyectos"],
     "completar_tarea": ["tareas"],
     "reabrir_tarea": ["tareas"],
+    "restaurar_tarea": ["tareas"],
+    "crear_subtarea": ["subtareas"],
+    "completar_subtarea": ["subtareas"],
+    "eliminar_subtarea": ["subtareas"],
     "eliminar_tarea": ["tareas"],
     "eliminar_evento": ["eventos"],
     "eliminar_apunte": ["apuntes"],

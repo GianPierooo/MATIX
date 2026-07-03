@@ -94,6 +94,18 @@ def test_nunca_recorta_bajo_la_mitad_del_core():
     assert len(out) >= len(st.CORE) // 2
 
 
+def test_subtarea_se_dispara_por_keyword():
+    out = _nombres(st.filtrar_tools(TOOL_DEFINITIONS, "agrégale una subtarea a esa tarea"))
+    assert "crear_subtarea" in out
+    assert "completar_subtarea" in out
+
+
+def test_restaurar_papelera_se_dispara_por_keyword():
+    for msg in ["restaura la tarea que borré", "recupera eso de la papelera"]:
+        out = _nombres(st.filtrar_tools(TOOL_DEFINITIONS, msg))
+        assert "restaurar_tarea" in out, msg
+
+
 def test_orden_preservado():
     out = st.filtrar_tools(TOOL_DEFINITIONS, "crea tarea X")
     nombres_out = [t["function"]["name"] for t in out]
