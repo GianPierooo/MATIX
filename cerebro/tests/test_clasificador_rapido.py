@@ -122,9 +122,8 @@ def test_recuerdame_sin_fecha_es_tarea():
     assert "farmacia" in (i.args or {}).get("titulo", "")
 
 
-def test_crea_tarea_con_fecha_va_al_llm():
-    # Si hay fecha, el LLM la convierte a `vence_en` correctamente — el
-    # clasificador no se mete con parsing de fechas-en-español.
+def test_crea_tarea_con_fecha_SIN_ahora_va_al_llm():
+    # Compat: sin `ahora` inyectado, el clasificador NO resuelve fechas y delega.
     for msj in [
         "crea una tarea de comprar pan mañana",
         "recuérdame llamar al banco el viernes",
@@ -132,6 +131,37 @@ def test_crea_tarea_con_fecha_va_al_llm():
         "nueva tarea: cita el 15 de marzo",
     ]:
         assert cl.detectar(msj) is None, f"NO debió disparar: «{msj}»"
+
+
+def test_crea_tarea_con_fecha_resuelta_con_ahora():
+    # T5: con `ahora`, la fecha común se resuelve determinista → `vence_en`.
+    from datetime import datetime
+
+    ahora = datetime(2026, 7, 2, 10, 0)  # jueves 10:00 Lima
+    i = cl.detectar("recuérdame llamar al banco mañana a las 3pm", ahora=ahora)
+    assert i is not None and i.nombre == "crear_tarea"
+    assert i.etiqueta_motivo == "crea_tarea_fecha"
+    assert (i.args or {}).get("vence_en", "").startswith("2026-07-03T15:00")
+    assert "banco" in (i.args or {}).get("titulo", "").lower()
+    assert "manana" not in cl._norm((i.args or {}).get("titulo", ""))
+
+
+def test_crea_tarea_fecha_ambigua_con_ahora_delega():
+    # "a las 3" sin am/pm ni franja → ambigua → al LLM (nunca adivina).
+    from datetime import datetime
+
+    ahora = datetime(2026, 7, 2, 10, 0)
+    assert cl.detectar("recuérdame llamar al banco a las 3", ahora=ahora) is None
+
+
+def test_crea_tarea_sin_fecha_con_ahora_sigue_simple():
+    # Con `ahora` pero sin fecha en el texto: tarea simple, sin `vence_en`.
+    from datetime import datetime
+
+    ahora = datetime(2026, 7, 2, 10, 0)
+    i = cl.detectar("crea una tarea de comprar pan", ahora=ahora)
+    assert i is not None and i.etiqueta_motivo == "crea_tarea_simple"
+    assert "vence_en" not in (i.args or {})
 
 
 # ── Vetos transversales ─────────────────────────────────────────────────────

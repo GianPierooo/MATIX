@@ -29,7 +29,10 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Literal
+
+from . import fechas_es
 
 
 @dataclass(frozen=True)
@@ -247,12 +250,17 @@ _RE_RECUERDAME = re.compile(
 )
 
 
-def _detectar_crear_tarea(texto_original: str, texto_norm: str) -> IntencionRapida | None:
-    """Captura "crea tarea: X" / "agrega una tarea X" / "recuérdame X" SIN
-    fecha. La tarea queda sin vencimiento; el usuario la edita después si
-    quiere fecha (un toque en la app).
+def _detectar_crear_tarea(
+    texto_original: str, texto_norm: str, ahora: datetime | None = None
+) -> IntencionRapida | None:
+    """Captura "crea tarea: X" / "agrega una tarea X" / "recuérdame X".
 
-    Veta: fechas (al LLM, que las resuelve), contenido muy largo o vacío.
+    Con `ahora` (hora de Lima), resuelve las fechas comunes de forma
+    DETERMINISTA (`fechas_es`) y setea `vence_en` — así "recuérdame X mañana
+    3pm" no gasta un turno de LLM. Si el parser NO está seguro (fecha ambigua),
+    DELEGA al LLM (nunca adivina). Sin `ahora` (compat), veta si hay fecha.
+
+    Veta: contenido muy largo o vacío.
     """
     texto = texto_original.strip()
     m = _RE_CREA_TAREA.match(texto) or _RE_RECUERDAME.match(texto)
@@ -262,19 +270,35 @@ def _detectar_crear_tarea(texto_original: str, texto_norm: str) -> IntencionRapi
     if not contenido or len(contenido) > 160:
         return None
     contenido_norm = _norm(contenido)
-    if _MARCADORES_FECHA.search(contenido_norm):
-        # Hay "mañana"/"viernes"/"10am" → fecha implícita. Al LLM.
+
+    vence_en: str | None = None
+    titulo_fuente = contenido
+    if ahora is not None:
+        r = fechas_es.parsear(contenido, ahora)
+        if r is not None:
+            vence_en = r.dt.isoformat()
+            titulo_fuente = r.texto_limpio or contenido
+        elif fechas_es.hay_senal_de_fecha(contenido):
+            # Había intención de fecha pero el parser no está seguro → al LLM
+            # (p. ej. "a las 3" sin am/pm, "más tarde", "cada lunes").
+            return None
+    elif _MARCADORES_FECHA.search(contenido_norm):
+        # Sin reloj inyectado no resolvemos fechas: comportamiento clásico.
         return None
-    titulo = _primer_renglon(contenido, max_chars=80)
+
+    titulo = _primer_renglon(titulo_fuente, max_chars=80)
     # Quitamos artículos de inicio ("a comprar pan" → "comprar pan").
     titulo = re.sub(r"^(?:que\s+|de\s+|a\s+)", "", titulo, flags=re.IGNORECASE).strip()
     if not titulo:
         return None
+    args: dict[str, Any] = {"titulo": titulo}
+    if vence_en:
+        args["vence_en"] = vence_en
     return IntencionRapida(
         tipo="tool",
         nombre="crear_tarea",
-        args={"titulo": titulo},
-        etiqueta_motivo="crea_tarea_simple",
+        args=args,
+        etiqueta_motivo="crea_tarea_fecha" if vence_en else "crea_tarea_simple",
     )
 
 
@@ -287,6 +311,7 @@ def detectar(
     hay_imagen: bool = False,
     hay_documento: bool = False,
     modo_activo: str | None = None,
+    ahora: datetime | None = None,
 ) -> IntencionRapida | None:
     """Devuelve una intención rápida si el mensaje encaja LIMPIO en uno de los
     patrones, o `None` si debe ir al LLM.
@@ -317,8 +342,9 @@ def detectar(
     if anota:
         return anota
 
-    # 3) "Crea tarea X" sin fecha → crear_tarea.
-    crear = _detectar_crear_tarea(texto_original, texto_norm)
+    # 3) "Crea tarea X" → crear_tarea. Con `ahora`, resuelve fechas comunes de
+    #    forma determinista (sin LLM); si la fecha es ambigua, delega al LLM.
+    crear = _detectar_crear_tarea(texto_original, texto_norm, ahora=ahora)
     if crear:
         return crear
 

@@ -272,6 +272,7 @@ async def conversar(
         hay_imagen=imgs_para_clasificador,
         hay_documento=bool(documento and (documento.get("texto") or "").strip()),
         modo_activo=modo,
+        ahora=datetime.now(timezone.utc).astimezone(_LIMA),
     )
     if intencion is not None:
         resultado = await _ejecutar_ruta_rapida(
