@@ -434,12 +434,13 @@ def _tools_a_anthropic(tools: list[dict]) -> list[dict]:
     """Traduce las definiciones de tools de OpenAI (`function`/`parameters`)
     al formato de Anthropic (`input_schema`).
 
-    Marca `cache_control` en la ÚLTIMA tool: Anthropic cachea todo el prefijo
-    hasta el último breakpoint, así que esto cachea el bloque entero de tools
-    (grande) junto con el system (que ya se cachea). En turnos siguientes de la
-    misma conversación, las tools se leen del cache (~10% del costo) en vez de
-    re-procesarse. Si el set de tools del turno cambia (filtrado distinto), el
-    cache se rehace solo — sigue siendo correcto."""
+    DOS breakpoints de `cache_control` (B3): (1) al final del bloque CORE —que va
+    PRIMERO y es idéntico entre turnos (seleccion_tools)— para que ese prefijo se
+    lea del cache AUNQUE cambien los grupos disparados; (2) en la ÚLTIMA tool, que
+    cachea el resto del bloque. Anthropic cachea hasta cada breakpoint (~10% del
+    costo en lecturas). Si el set cambia, el suffix se rehace pero el CORE persiste."""
+    from .seleccion_tools import CORE as _CORE_TOOLS
+
     out: list[dict] = []
     for t in tools:
         f = t.get("function", t)
@@ -452,6 +453,13 @@ def _tools_a_anthropic(tools: list[dict]) -> list[dict]:
             }
         )
     if out:
+        ultimo_core = -1
+        for i, t in enumerate(tools):
+            if (t.get("function", t) or {}).get("name") in _CORE_TOOLS:
+                ultimo_core = i
+        # Breakpoint al final del CORE (solo si hay tools de grupo después).
+        if 0 <= ultimo_core < len(out) - 1:
+            out[ultimo_core] = {**out[ultimo_core], "cache_control": {"type": "ephemeral"}}
         out[-1] = {**out[-1], "cache_control": {"type": "ephemeral"}}
     return out
 

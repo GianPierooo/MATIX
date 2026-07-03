@@ -106,9 +106,26 @@ def test_restaurar_papelera_se_dispara_por_keyword():
         assert "restaurar_tarea" in out, msg
 
 
-def test_orden_preservado():
-    out = st.filtrar_tools(TOOL_DEFINITIONS, "crea tarea X")
-    nombres_out = [t["function"]["name"] for t in out]
-    nombres_full = [t["function"]["name"] for t in TOOL_DEFINITIONS]
-    # El subconjunto mantiene el orden relativo del catálogo.
-    assert nombres_out == [n for n in nombres_full if n in set(nombres_out)]
+def test_orden_core_primero_estabiliza_prefijo():
+    # B3: el CORE va PRIMERO (orden de catálogo) y los grupos disparados después
+    # (orden de catálogo). Así el prefijo CORE es idéntico entre turnos → cache.
+    out = st.filtrar_tools(TOOL_DEFINITIONS, "gasté 20 soles en el super")
+    nombres = [t["function"]["name"] for t in out]
+    catalogo = [t["function"]["name"] for t in TOOL_DEFINITIONS]
+    core_cat = [n for n in catalogo if n in st.CORE]
+    n_core = len(core_cat)
+    # Los primeros n_core nombres son EXACTAMENTE el CORE en orden de catálogo.
+    assert nombres[:n_core] == core_cat
+    # El resto (grupo finanzas) va después, sin CORE, en orden de catálogo.
+    resto = nombres[n_core:]
+    assert resto and all(n not in st.CORE for n in resto)
+    assert resto == [n for n in catalogo if n in set(resto)]
+
+
+def test_prefijo_core_identico_entre_turnos_distintos():
+    # El bloque CORE (prefijo) es el MISMO aunque cambien los grupos disparados:
+    # es lo que permite el cache-hit del prefijo.
+    a = [t["function"]["name"] for t in st.filtrar_tools(TOOL_DEFINITIONS, "gasté 20 soles")]
+    b = [t["function"]["name"] for t in st.filtrar_tools(TOOL_DEFINITIONS, "abre el pdf de mi pc")]
+    n = len([n for n in a if n in st.CORE])
+    assert a[:n] == b[:n]  # mismo prefijo CORE

@@ -174,12 +174,22 @@ def filtrar_tools(
     tools: list[dict], mensaje: str, *, modo: str | None = None
 ) -> list[dict]:
     """Devuelve el subconjunto de `tools` (formato OpenAI) relevante para el
-    turno. Conserva el orden. Si corresponde mandar todas, devuelve `tools`
-    tal cual. NUNCA devuelve menos que el CORE intersecado con el catálogo."""
+    turno. Si corresponde mandar todas, devuelve `tools` tal cual. NUNCA devuelve
+    menos que el CORE intersecado con el catálogo.
+
+    ORDEN (B3, para cache-hit): CORE PRIMERO (en orden de catálogo) y luego los
+    grupos disparados (en orden de catálogo). Así el bloque CORE es idéntico entre
+    turnos aunque cambien los grupos → el prefijo se cachea (auto-cache de OpenAI;
+    en Anthropic hay un breakpoint de cache al final del CORE, ver llm.py)."""
     permitidos = nombres_relevantes(mensaje, modo=modo)
     if permitidos is None:
         return tools
-    filtradas = [t for t in tools if t["function"]["name"] in permitidos]
+    core_first = [t for t in tools if t["function"]["name"] in CORE]
+    resto = [
+        t for t in tools
+        if t["function"]["name"] in permitidos and t["function"]["name"] not in CORE
+    ]
+    filtradas = core_first + resto
     # Salvaguarda: si por lo que sea el filtro dejó muy poco (catálogo cambió),
     # cae a todas — jamás recortamos potencia por un bug del filtro.
     return filtradas if len(filtradas) >= len(CORE) // 2 else tools
