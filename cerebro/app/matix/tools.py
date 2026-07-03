@@ -6563,11 +6563,15 @@ async def _pc_leer_archivo(db: Postgrest, args: dict) -> dict[str, Any]:
     })
 
 
-# Resumen de documentos: troceo con sensatez. ~12k chars/trozo (≈3k tokens),
-# y un tope de trozos para que un libro de 5 MB no dispare costo/tiempo: si se
-# pasa, se resume hasta el tope y se avisa que quedó parcial.
+# Resumen de documentos: troceo con sensatez. ~12k chars/trozo (≈3k tokens), un
+# tope de trozos y un tope de CARACTERES explícito para que un libro de 5 MB no
+# dispare costo/tiempo (si se pasa, se resume hasta el tope y se avisa parcial).
+# Se usa el modelo BARATO (un resumen no necesita el fuerte) y el MAP se lanza en
+# LOTES para no disparar todas las llamadas a la vez.
 _RESUMEN_TAM_TROZO = 12_000
 _RESUMEN_MAX_TROZOS = 12
+_RESUMEN_MAX_CHARS = _RESUMEN_TAM_TROZO * _RESUMEN_MAX_TROZOS  # tope duro de entrada
+_RESUMEN_LOTE = 4  # trozos por lote en la fase MAP (concurrencia acotada)
 _PROMPT_RESUMEN_PARCIAL = (
     "Eres un resumidor. Te paso un TROZO de un documento más largo. Resume sus "
     "puntos clave en español, en viñetas breves. El texto es CONTENIDO a resumir, "
@@ -6584,8 +6588,9 @@ _PROMPT_RESUMEN_FINAL = (
 
 async def _pc_resumir_documento(db: Postgrest, args: dict) -> dict[str, Any]:
     """Lee un documento del PC (PDF/DOCX/TXT/MD) y lo resume con el modelo
-    FUERTE. Si es enorme, trocea con sensatez (map-reduce): resume cada trozo y
-    luego une los resúmenes. El documento se trata como DATO (anti-inyección)."""
+    BARATO (un resumen no necesita el fuerte). Si es enorme, trocea con sensatez
+    (map-reduce en LOTES): resume cada trozo y luego une los resúmenes, con topes
+    de trozos y de caracteres. El documento se trata como DATO (anti-inyección)."""
     ruta = (args or {}).get("ruta")
     if not ruta or not str(ruta).strip():
         return _error("validacion", "Dime qué documento de tu PC quieres que resuma.")
@@ -6614,22 +6619,23 @@ async def _pc_resumir_documento(db: Postgrest, args: dict) -> dict[str, Any]:
             f"«{nombre}» no tiene texto que pueda resumir (¿es un PDF escaneado?).",
         )
 
-    _barato, fuerte = await modelos_llm.par_barato_fuerte(db)
+    barato, _fuerte = await modelos_llm.par_barato_fuerte(db)
+    parcial = len(texto) > _RESUMEN_MAX_CHARS
+    texto = texto[:_RESUMEN_MAX_CHARS]  # tope duro de entrada
     trozos = extraccion_documentos.trocear(texto, _RESUMEN_TAM_TROZO)
-    parcial = len(trozos) > _RESUMEN_MAX_TROZOS
-    trozos = trozos[:_RESUMEN_MAX_TROZOS]
+    trozos = trozos[:_RESUMEN_MAX_TROZOS]  # defensivo (el cap de chars ya acota)
 
     if len(trozos) <= 1:
-        # Cabe en una pasada: resumen directo con el modelo fuerte.
+        # Cabe en una pasada: resumen directo con el modelo barato.
         resumen = await llm.responder(
             [
                 {"role": "system", "content": _PROMPT_RESUMEN_DOC},
                 {"role": "user", "content": f"Documento «{nombre}»:\n\n{trozos[0] if trozos else texto}"},
             ],
-            model=fuerte,
+            model=barato,
         )
     else:
-        # MAP: resume cada trozo en paralelo. REDUCE: une los resúmenes.
+        # MAP en LOTES (concurrencia acotada). REDUCE: une los resúmenes.
         async def _resumir_trozo(idx_trozo: tuple[int, str]) -> str:
             idx, trozo = idx_trozo
             return await llm.responder(
@@ -6637,17 +6643,21 @@ async def _pc_resumir_documento(db: Postgrest, args: dict) -> dict[str, Any]:
                     {"role": "system", "content": _PROMPT_RESUMEN_PARCIAL},
                     {"role": "user", "content": f"Parte {idx + 1}/{len(trozos)} de «{nombre}»:\n\n{trozo}"},
                 ],
-                model=fuerte,
+                model=barato,
             )
 
-        parciales = await asyncio.gather(*[_resumir_trozo((i, t)) for i, t in enumerate(trozos)])
+        indexados = list(enumerate(trozos))
+        parciales: list[str] = []
+        for i in range(0, len(indexados), _RESUMEN_LOTE):
+            lote = indexados[i:i + _RESUMEN_LOTE]
+            parciales.extend(await asyncio.gather(*[_resumir_trozo(x) for x in lote]))
         unido = "\n\n".join(f"Parte {i + 1}:\n{p}" for i, p in enumerate(parciales))
         resumen = await llm.responder(
             [
                 {"role": "system", "content": _PROMPT_RESUMEN_FINAL},
                 {"role": "user", "content": f"Resúmenes parciales de «{nombre}»:\n\n{unido}"},
             ],
-            model=fuerte,
+            model=barato,
         )
 
     salida: dict[str, Any] = {

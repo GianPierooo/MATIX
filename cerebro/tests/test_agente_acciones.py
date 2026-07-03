@@ -132,8 +132,8 @@ async def test_resumir_documento_flujo(monkeypatch):
         return ("gpt-4o-mini", "claude-sonnet-4-6")
 
     async def fake_responder(messages, **kw):
-        # Documento corto → una sola pasada con el modelo FUERTE (no el mini).
-        assert kw.get("model") == "claude-sonnet-4-6"
+        # B2: el resumen usa el modelo BARATO (un resumen no necesita el fuerte).
+        assert kw.get("model") == "gpt-4o-mini"
         assert any("documento de prueba" in m["content"] for m in messages if m["role"] == "user")
         return "Resumen: trata de presupuestos del proyecto."
 
@@ -147,8 +147,8 @@ async def test_resumir_documento_flujo(monkeypatch):
 
 
 async def test_resumir_documento_largo_trocea(monkeypatch):
-    # Documento que excede un trozo → map-reduce: N resúmenes parciales + 1 final,
-    # todos con el modelo fuerte.
+    # Documento que excede un trozo → map-reduce en lotes: N resúmenes parciales
+    # + 1 final, todos con el modelo BARATO (B2).
     cuerpo = ("Párrafo con contenido relevante.\n" * 2000)  # ~64k chars
     llamadas = {"map": 0, "reduce": 0}
 
@@ -163,7 +163,7 @@ async def test_resumir_documento_largo_trocea(monkeypatch):
         return ("gpt-4o-mini", "claude-sonnet-4-6")
 
     async def fake_responder(messages, **kw):
-        assert kw.get("model") == "claude-sonnet-4-6"
+        assert kw.get("model") == "gpt-4o-mini"
         sysmsg = next(m["content"] for m in messages if m["role"] == "system")
         if "resúmenes parciales" in sysmsg.lower() or "combínalos" in sysmsg.lower():
             llamadas["reduce"] += 1
