@@ -23,6 +23,16 @@ class MatixSpacing {
   static const double xl2 = 20;
   static const double xl3 = 24;
   static const double xl4 = 32;
+
+  // Valores puntuales de pantallas concretas, tokenizados con su valor EXACTO
+  // (elimina números mágicos sin cambiar el look). Nombre = valor en px.
+  static const double s18 = 18;
+  static const double s22 = 22;
+  static const double s26 = 26;
+  static const double s28 = 28;
+  static const double s36 = 36;
+  static const double s40 = 40;
+  static const double s42 = 42;
 }
 
 /// Convención ÚNICA de scroll de Matix: el inset inferior que TODA pantalla

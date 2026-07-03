@@ -102,7 +102,7 @@ class _Contenido extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Icon(Icons.adjust, size: 16, color: MatixColors.accent),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: MatixSpacing.m),
                   Expanded(
                     child: Text(f,
                         style: const TextStyle(
@@ -151,7 +151,7 @@ class _Stat extends StatelessWidget {
                   fontSize: 20,
                   fontWeight: FontWeight.w700,
                   color: MatixColors.accent)),
-          const SizedBox(height: 2),
+          const SizedBox(height: MatixSpacing.xs),
           Text(label,
               style: const TextStyle(fontSize: 11.5, color: MatixColors.muted)),
         ],
@@ -212,7 +212,7 @@ class _VencidaTile extends StatelessWidget {
                   ),
                   if (vencida.contexto != null &&
                       vencida.contexto!.isNotEmpty) ...[
-                    const SizedBox(height: 2),
+                    const SizedBox(height: MatixSpacing.xs),
                     Text(
                       vencida.contexto!,
                       maxLines: 1,
