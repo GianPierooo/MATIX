@@ -156,8 +156,9 @@ async def test_varias_imagenes_en_un_mensaje(monkeypatch):
     imgs_blocks = [b for b in bloques if b.get("type") == "image_url"]
     assert len(imgs_blocks) == 5  # capadas a _MAX_IMAGENES
     assert bloques[0]["type"] == "text"
-    # Con imágenes, en auto va al modelo fuerte (mejor lectura).
-    assert r["modelo_usado"] == "claude-sonnet-4-6"
+    # #2: una imagen con pedido simple ("mira estas") ya NO fuerza el fuerte —
+    # la visión del mini lee capturas simples bien y es ~20x más barata.
+    assert r["modelo_usado"] == "gpt-4o-mini"
 
 
 async def test_imagen_singular_sigue_funcionando(monkeypatch):
@@ -186,9 +187,10 @@ async def test_imagen_singular_sigue_funcionando(monkeypatch):
     assert len(imgs_blocks) == 1
 
 
-async def test_documento_adjunto_se_inyecta_y_rutea_a_fuerte(monkeypatch):
-    """Un documento adjunto entra como contexto `system` del turno y, en
-    Automático, fuerza el modelo fuerte aunque el mensaje sea corto."""
+async def test_documento_corto_se_inyecta_y_rutea_a_barato(monkeypatch):
+    """#2: un documento CORTO con pedido simple entra como contexto `system`
+    del turno pero, en Automático, se queda en el BARATO (el mini lo resume
+    bien). El fuerte se reserva para documentos largos (test siguiente)."""
     capturas: list[dict] = []
 
     async def fake_resp(messages, tools, *, model=None, temperature=0.6, tool_choice="auto"):
@@ -216,9 +218,73 @@ async def test_documento_adjunto_se_inyecta_y_rutea_a_fuerte(monkeypatch):
         documento={"nombre": "silabo.pdf", "texto": "TEMARIO DEL CURSO XYZ"},
     )
     assert r["auto"] is True
-    assert r["modelo_usado"] == "claude-sonnet-4-6"
+    assert r["modelo_usado"] == "gpt-4o-mini"
     blob = "\n".join(
         m["content"] for m in capturas[-1]["messages"] if isinstance(m.get("content"), str)
     )
     assert "DOCUMENTO ADJUNTO" in blob and "silabo.pdf" in blob
     assert "TEMARIO DEL CURSO XYZ" in blob
+
+
+async def test_documento_largo_rutea_a_fuerte(monkeypatch):
+    """#2: un documento LARGO (texto extenso) sí escala al fuerte — resumir o
+    analizar texto extenso lo necesita."""
+    capturas: list[dict] = []
+
+    async def fake_resp(messages, tools, *, model=None, temperature=0.6, tool_choice="auto"):
+        capturas.append({"model": model})
+        return {"tipo": "texto", "contenido": "ok", "raw": {"role": "assistant", "content": "ok"}}
+
+    monkeypatch.setattr(chat_mod.llm, "responder_con_tools", fake_resp)
+    monkeypatch.setattr(chat_mod, "contexto_vivo", _sin_contexto)
+    monkeypatch.setattr(chat_mod.memoria, "bloque_memoria", _sin_memoria)
+    monkeypatch.setattr(chat_mod.modos, "modo_activo", _sin_modo)
+
+    async def sel_auto(db):
+        return chat_mod.modelos_llm.AUTO
+
+    async def par(db):
+        return ("gpt-4o-mini", "claude-sonnet-4-6")
+
+    monkeypatch.setattr(chat_mod.modelos_llm, "seleccion_guardada", sel_auto)
+    monkeypatch.setattr(chat_mod.modelos_llm, "par_barato_fuerte", par)
+
+    r = await chat_mod.conversar(
+        None,
+        historial=[],
+        mensaje="resúmelo",
+        documento={"nombre": "tesis.pdf", "texto": "palabra " * 400},  # >2000 chars
+    )
+    assert r["modelo_usado"] == "claude-sonnet-4-6"
+
+
+async def test_imagen_con_razonamiento_rutea_a_fuerte(monkeypatch):
+    """#2: una imagen con un pedido de RAZONAR ("explícame ... a fondo") sí va
+    al fuerte — no degradamos lo que necesita razonar."""
+    capturas: list[dict] = []
+
+    async def fake_resp(messages, tools, *, model=None, temperature=0.6, tool_choice="auto"):
+        capturas.append({"model": model})
+        return {"tipo": "texto", "contenido": "ok", "raw": {"role": "assistant", "content": "ok"}}
+
+    monkeypatch.setattr(chat_mod.llm, "responder_con_tools", fake_resp)
+    monkeypatch.setattr(chat_mod, "contexto_vivo", _sin_contexto)
+    monkeypatch.setattr(chat_mod.memoria, "bloque_memoria", _sin_memoria)
+    monkeypatch.setattr(chat_mod.modos, "modo_activo", _sin_modo)
+
+    async def sel_auto(db):
+        return chat_mod.modelos_llm.AUTO
+
+    async def par(db):
+        return ("gpt-4o-mini", "claude-sonnet-4-6")
+
+    monkeypatch.setattr(chat_mod.modelos_llm, "seleccion_guardada", sel_auto)
+    monkeypatch.setattr(chat_mod.modelos_llm, "par_barato_fuerte", par)
+
+    r = await chat_mod.conversar(
+        None,
+        historial=[],
+        mensaje="explícame este diagrama a fondo",
+        imagen="data:image/jpeg;base64,uno",
+    )
+    assert r["modelo_usado"] == "claude-sonnet-4-6"

@@ -188,3 +188,34 @@ def test_pc_control_va_al_fuerte():
 def test_pc_no_secuestra_frases_sin_pc():
     # "completa la tarea" no menciona PC: sigue barato.
     assert _elegir("completa la tarea de hoy").modelo == BARATO
+
+
+# ── #2: verbos blandos (explica/revisa/mejora/corrige) no escalan de más ─────
+
+
+def test_verbos_blandos_en_consulta_del_hub_van_al_barato():
+    # "revisa/explica" + consulta corta del hub → barato (no gastar Sonnet en
+    # leer la agenda). Es la fuga que cierra #2.
+    for m in [
+        "explícame qué tengo hoy",
+        "revisa mis tareas de hoy",
+        "revisa mis pendientes",
+        "revisa mi agenda de mañana",
+    ]:
+        d = _elegir(m)
+        assert d.modelo == BARATO, m
+        assert d.motivo == "consulta_hub", m
+
+
+def test_verbos_blandos_sobre_contenido_real_siguen_al_fuerte():
+    # Los mismos verbos sobre CONTENIDO real (no el hub) NO se degradan: siguen
+    # al fuerte. No sacrificamos los casos que sí necesitan razonar/escribir.
+    for m in [
+        "explícame cómo funciona la fotosíntesis",  # blando puro, sin hub
+        "revisa mi presentación del lunes",          # blando puro, sin hub
+        "mejora este párrafo",                       # razonamiento/escritura
+        "revisa mi ensayo de historia",              # escritura
+    ]:
+        d = _elegir(m)
+        assert d.modelo == FUERTE, m
+        assert d.motivo == "razonamiento", m

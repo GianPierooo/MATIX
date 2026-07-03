@@ -395,29 +395,33 @@ async def conversar(
     auto = seleccion == modelos_llm.AUTO
     if auto:
         barato, fuerte = await modelos_llm.par_barato_fuerte(db)
-        # Con un documento O una imagen adjunta vamos al modelo FUERTE: el
-        # enrutador solo ve el mensaje (corto: «resúmelo» / «anota los gastos»),
-        # pero leer/analizar un documento o una captura (Yape/banco) merece el
-        # modelo a fondo — mejor lectura, menos errores de clasificación. Sube
-        # algo el costo en mensajes con adjunto, pero la precisión lo vale.
-        if doc_texto or imgs:
-            modelo = fuerte
-        else:
-            decision = enrutador.elegir(
-                mensaje, modo_activo=modo, barato=barato, fuerte=fuerte
-            )
-            modelo = decision.modelo
-            # Si hay un intake analítico EN CURSO, todo el intake va al fuerte
-            # (no solo el turno que lo disparó): las respuestas del usuario son
-            # cortas pero el análisis sigue siendo duro.
-            if modelo == barato:
-                try:
-                    from . import intake_analitico
+        # Enrutador por reglas (sin llamada a modelo): elige por el mensaje.
+        decision = enrutador.elegir(
+            mensaje, modo_activo=modo, barato=barato, fuerte=fuerte
+        )
+        modelo = decision.modelo
+        # Adjuntos: antes CUALQUIER adjunto iba al fuerte. Ahora solo escala si
+        # de verdad lo amerita — un recibo/Yape o «¿qué dice esto?» lo lee bien
+        # la visión del mini (~20x más barata en input). Escala a fuerte solo si
+        # (a) el mensaje ya pide razonar (el enrutador eligió fuerte por su verbo
+        # o señal), o (b) es un DOCUMENTO largo: resumir/analizar texto extenso
+        # sí necesita el fuerte. Una imagen o un doc corto con pedido simple se
+        # queda en el barato.
+        if (doc_texto or imgs) and modelo == barato:
+            _DOC_LARGO = 2000  # chars de texto extraído del documento
+            if doc_texto and len(doc_texto) > _DOC_LARGO:
+                modelo = fuerte
+        # Si hay un intake analítico EN CURSO, todo el intake va al fuerte
+        # (no solo el turno que lo disparó): las respuestas del usuario son
+        # cortas pero el análisis sigue siendo duro.
+        if modelo == barato:
+            try:
+                from . import intake_analitico
 
-                    if await intake_analitico.intake_en_curso(db):
-                        modelo = fuerte
-                except Exception:  # noqa: BLE001
-                    pass
+                if await intake_analitico.intake_en_curso(db):
+                    modelo = fuerte
+            except Exception:  # noqa: BLE001
+                pass
     else:
         modelo = seleccion
 

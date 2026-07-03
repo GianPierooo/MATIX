@@ -123,7 +123,7 @@ _PESADO = re.compile(
     r"monografia|parrafo|"
     r"analiza|analisis|analizar|analicemos|compara|comparacion|comparar|"
     r"contrasta|evalua|evaluar|critica|criticame|"
-    r"explica|explicame|explicacion|explicar|profundiza|profundidad|"
+    r"profundiza|profundidad|"
     r"desarrolla|desarrollar|argumenta|argumentar|justifica|demuestra|"
     r"demostracion|razona|razonar|deduce|sintetiza|"
     r"ideacion|brainstorm|propon|proponme|propone|disena|disenar|"
@@ -131,10 +131,31 @@ _PESADO = re.compile(
     r"implementa|implementar|debuggear|debug|script|stacktrace|"
     r"ecuacion|integral|derivada|teorema|calcula|calcular|resuelve|resolver|"
     r"matematic|probabilidad|estadistic|optimiza|optimizar|demostrar|"
-    r"traduce|traduccion|traducir|corrige|corregir|revisa|mejora"
+    r"traduce|traduccion|traducir"
     r")\b"
     r"|a fondo|en profundidad|paso a paso|lluvia de ideas|en detalle"
 )
+
+# Verbos "blandos": explica / revisa / mejora / corrige son AMBIGUOS. "revisa mi
+# ensayo" o "explícame cómo funciona la fotosíntesis" son razonamiento/escritura
+# (→ fuerte); pero "revisa mis tareas de hoy" o "explícame qué tengo hoy" son
+# CONSULTAS triviales del hub (→ barato, no gastamos Sonnet en leer la agenda).
+# Se resuelven abajo: fuerte por defecto, SALVO consulta corta del hub.
+_PESADO_BLANDO = re.compile(
+    r"\b(explica|explicame|explicacion|explicar|"
+    r"revisa|revisame|revisar|mejora|mejorame|mejorar|"
+    r"corrige|corrigeme|corregir)\b"
+)
+
+# Consulta trivial del hub: «qué tengo hoy», «mi día», «mis tareas/pendientes».
+# Palabras del hub (sin acentos: el texto ya viene normalizado).
+_CONSULTA_HUB = re.compile(
+    r"\b(que tengo|que hay|que eventos|que tareas|mi dia|mi agenda|"
+    r"mi semana|mis tareas|mis pendientes|mis eventos|mis clases|"
+    r"pendientes|agenda|hoy|manana|esta semana)\b"
+)
+# Una consulta del hub es corta; un pedido de escritura/razonamiento no lo es.
+_CONSULTA_CORTA = 70
 
 # Señales de comando corto / CRUD / pregunta rápida → modelo barato. Solo
 # se consulta cuando NO disparó `_PESADO` (las reglas pesadas tienen
@@ -158,7 +179,7 @@ class Decision:
 
     modelo: str
     # "modo_pesado" | "intake_plan" | "accion_dispositivo" | "razonamiento" |
-    # "comando_corto" | "default"
+    # "consulta_hub" | "comando_corto" | "default"
     motivo: str
 
 
@@ -209,6 +230,14 @@ def elegir(
     # escritura/razonamiento. (No se gatea con `_CORTO` porque un texto
     # reflexivo largo contiene "no"/"si" de forma natural.)
     if _PESADO.search(texto) or len(texto) >= _UMBRAL_LARGO:
+        return Decision(fuerte, "razonamiento")
+
+    # Verbo blando (explica/revisa/mejora/corrige): fuerte por defecto (razonar/
+    # escribir), SALVO que sea una consulta corta del hub ("revisa mis tareas de
+    # hoy", "explícame qué tengo hoy") → ahí basta el barato.
+    if _PESADO_BLANDO.search(texto):
+        if len(texto) <= _CONSULTA_CORTA and _CONSULTA_HUB.search(texto):
+            return Decision(barato, "consulta_hub")
         return Decision(fuerte, "razonamiento")
 
     if _CORTO.search(texto):
